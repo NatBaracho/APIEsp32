@@ -1,0 +1,107 @@
+import db from "../database/connection";
+import { Device } from "../models/Device";
+
+export class DeviceRepository {
+
+  findAll(): Device[] {
+    return db
+      .prepare(`
+        SELECT *
+        FROM devices
+      `)
+      .all() as Device[];
+  }
+
+  findByDeviceId(
+    deviceId: string
+  ): Device | undefined {
+
+    return db
+      .prepare(`
+        SELECT *
+        FROM devices
+        WHERE device_id = ?
+      `)
+      .get(deviceId) as Device | undefined;
+  }
+
+  findById(id: number): Device | undefined {
+
+    return db
+      .prepare(`
+        SELECT *
+        FROM devices
+        WHERE id = ?
+      `)
+      .get(id) as Device | undefined;
+
+  }
+
+  update(
+    deviceId: string,
+    firmwareVersion: string
+  ): void {
+
+    db.prepare(`
+      UPDATE devices
+      SET firmware_version = ?
+      WHERE device_id = ?
+    `).run(
+      firmwareVersion,
+      deviceId
+    );
+
+  }
+
+  disable(deviceId: string): void {
+
+    db.prepare(`
+      UPDATE devices
+      SET active = 0
+      WHERE device_id = ?
+    `).run(deviceId);
+
+  }
+
+  create(device: Device): void {
+
+    db.prepare(`
+      INSERT INTO devices (
+        device_id,
+        api_key,
+        "firmware_versin ",
+        active
+      )
+      VALUES (
+        ?,
+        ?,
+        ?,
+        ?
+      )
+    `).run(
+      device.device_id,
+      device.api_key,
+      device.firmware_version,
+      device.active
+    );
+
+  }
+
+  ensureDeviceExists(deviceId: string): void {
+
+    const existing = this.findByDeviceId(deviceId);
+
+    if (existing) {
+      return;
+    }
+
+    this.create({
+      device_id: deviceId,
+      api_key: `auto-${deviceId}`,
+      firmware_version: "unknown",
+      active: 1
+    });
+
+  }
+
+}

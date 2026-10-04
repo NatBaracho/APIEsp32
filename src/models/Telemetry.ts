@@ -1,4 +1,4 @@
-export interface Telemetry {
+export interface TelemetryQueue {
   id?: number;
 
   message_id: string;
@@ -23,3 +23,5 @@ export interface Telemetry {
 
   last_error?: string;
 }
+
+export type Telemetry = TelemetryQueue;

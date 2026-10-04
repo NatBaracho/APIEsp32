@@ -1,7 +1,19 @@
 import express from "express";
 import db from "./database/connection";
+import telemetryRoutes from "./routes/telemetryRoutes";
+import eventRoutes from "./routes/eventRoute";
 
 const app = express();
+app.use(express.json());
+app.use("/api", telemetryRoutes);
+app.use("/api", eventRoutes);
+app.use("/api/v1/iot", telemetryRoutes);
+
+app.use(
+  "/api/v1/iot",
+  eventRoutes
+);
+
 
 try {
 
@@ -20,7 +32,7 @@ try {
 } catch (error) {
 
     console.error(
-      "❌ Erro ao conectar no SQLite",
+      "Erro ao conectar no SQLite",
       error
     );
 
