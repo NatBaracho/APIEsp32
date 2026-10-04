@@ -11,6 +11,19 @@ export class TelemetryController {
 
       const telemetry = req.body;
 
+      if (
+        !telemetry.message_id ||
+        !telemetry.device_id
+      ) {
+        res.status(400).json({
+          success: false,
+          message:
+            "message_id e device_id são obrigatórios"
+        });
+
+        return;
+      }
+
       console.log("Telemetria recebida:");
 
       console.log(telemetry);

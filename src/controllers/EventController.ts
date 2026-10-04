@@ -15,9 +15,18 @@ export class EventController {
 
       const event = req.body;
 
-      this.service.create(
+      const created = this.service.create(
         event
       );
+
+      if (!created) {
+        res.status(409).json({
+          success: false,
+          message: "Mensagem duplicada"
+        });
+
+        return;
+      }
 
       res.status(202).json({
         success: true,

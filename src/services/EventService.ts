@@ -12,7 +12,7 @@ export class EventService {
 
   create(
     event: Event
-  ): void {
+  ): boolean {
 
     const existing =
       this.repository.findByMessageId(
@@ -26,7 +26,7 @@ export class EventService {
         event.message_id
       );
 
-      return;
+      return false;
 
     }
 
@@ -42,6 +42,8 @@ export class EventService {
       "Evento salvo:",
       event.message_id
     );
+
+    return true;
 
   }
 

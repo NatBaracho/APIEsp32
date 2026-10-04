@@ -2,17 +2,17 @@ import express from "express";
 import db from "./database/connection";
 import telemetryRoutes from "./routes/telemetryRoutes";
 import eventRoutes from "./routes/eventRoute";
+import deviceRoutes from "./routes/deviceRoutes";
+
+
 
 const app = express();
-app.use(express.json());
-app.use("/api", telemetryRoutes);
-app.use("/api", eventRoutes);
-app.use("/api/v1/iot", telemetryRoutes);
+const API_PREFIX = "/api/v1";
 
-app.use(
-  "/api/v1/iot",
-  eventRoutes
-);
+app.use(express.json());
+app.use(`${API_PREFIX}/iot`, telemetryRoutes);
+app.use(`${API_PREFIX}/iot`, eventRoutes);
+app.use(`${API_PREFIX}/devices`, deviceRoutes);
 
 
 try {

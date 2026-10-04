@@ -69,7 +69,7 @@ export class DeviceRepository {
       INSERT INTO devices (
         device_id,
         api_key,
-        "firmware_versin ",
+        firmware_version,
         active
       )
       VALUES (

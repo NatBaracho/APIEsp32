@@ -15,8 +15,8 @@ export class EventRepository {
       INSERT INTO events (
         message_id,
         device_id,
-        messge_tyoe,
-        seel_status,
+        message_type,
+        seal_status,
         payload_json,
         status,
         attempt_count

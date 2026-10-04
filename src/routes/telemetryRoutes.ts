@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { TelemetryController } from "../controllers/TelemetryController";
+import { apiKeyMiddleware } from "../Middleware/apiKeyMiddleware";
 
 const router = Router();
 
@@ -8,7 +9,8 @@ const controller =
 
 router.post(
   "/telemetries",
-  controller.create
+  apiKeyMiddleware,
+  controller.create.bind(controller)
 );
 
 export default router;
