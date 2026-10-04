@@ -54,6 +54,64 @@ if (missingStatuses.length > 0) {
   seedMissingStatuses();
 }
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS commands (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    command_id TEXT NOT NULL UNIQUE,
+    device_id TEXT NOT NULL,
+    command_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDENTE',
+    created_at DATETIME NOT NULL,
+    executed_at DATETIME,
+    error_message TEXT,
+    FOREIGN KEY (device_id)
+      REFERENCES devices(device_id)
+      ON UPDATE CASCADE
+      ON DELETE RESTRICT
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    alert_id TEXT NOT NULL UNIQUE,
+    device_id TEXT NOT NULL,
+    alert_type TEXT NOT NULL,
+    status_id INTEGER NOT NULL,
+    severity_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    resolved_at DATETIME,
+    FOREIGN KEY (device_id)
+      REFERENCES devices(device_id),
+    FOREIGN KEY (status_id)
+      REFERENCES status(id),
+    FOREIGN KEY (severity_id)
+      REFERENCES status(id)
+  )
+`);
+
+function addColumnIfMissing(
+  tableName: string,
+  columnName: string,
+  columnType: string
+): void {
+  const columns = db
+    .prepare(`PRAGMA table_info(${tableName})`)
+    .all() as Array<{ name: string }>;
+
+  if (!columns.some(column => column.name === columnName)) {
+    db.exec(
+      `ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnType}`
+    );
+  }
+}
+
+addColumnIfMissing("devices", "device_status_id", "INTEGER");
+addColumnIfMissing("devices", "valve_status_id", "INTEGER");
+addColumnIfMissing("devices", "seal_status_id", "INTEGER");
+
 function normalizeColumnName(
   tableName: string,
   oldName: string,

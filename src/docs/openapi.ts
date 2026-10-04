@@ -27,7 +27,10 @@ const openApiSpec = {
           device_id: { type: "string", example: "DSP-000001" },
           api_key: { type: "string", example: "abc123" },
           firmware_version: { type: "string", example: "1.0.0" },
-          active: { type: "integer", enum: [0, 1], example: 1 }
+          active: { type: "integer", enum: [0, 1], example: 1 },
+          device_status_id: { type: "integer", nullable: true, example: 1 },
+          valve_status_id: { type: "integer", nullable: true, example: null },
+          seal_status_id: { type: "integer", nullable: true, example: 3 }
         }
       },
       Error: {
@@ -50,6 +53,37 @@ const openApiSpec = {
           gsm_signal: { type: "number", example: 31 },
           last_seen_at: { type: "string", format: "date-time", nullable: true },
           status: { type: "string", example: "PENDING" }
+        }
+      },
+      DeviceCommand: {
+        type: "object",
+        properties: {
+          id: { type: "integer", example: 1 },
+          command_id: { type: "string", example: "CMD-000001" },
+          device_id: { type: "string", example: "DSP-000001" },
+          command_type: { type: "string", example: "REBOOT" },
+          status: { type: "string", example: "PENDENTE" },
+          created_at: { type: "string", format: "date-time" },
+          executed_at: { type: "string", format: "date-time", nullable: true },
+          error_message: { type: "string", nullable: true }
+        }
+      },
+      Alert: {
+        type: "object",
+        properties: {
+          id: { type: "integer", example: 1 },
+          alert_id: { type: "string", example: "ALT-000001" },
+          device_id: { type: "string", example: "DSP-000001" },
+          alert_type: {
+            type: "string",
+            enum: ["SEAL_BROKEN", "GEOFENCE_EXIT", "LOW_BATTERY", "DEVICE_ERROR", "COMMAND_FAILURE", "COMMUNICATION_LOST"]
+          },
+          status_id: { type: "integer", example: 1 },
+          severity_id: { type: "integer", example: 2 },
+          title: { type: "string", example: "Lacre rompido" },
+          description: { type: "string", nullable: true },
+          created_at: { type: "string", format: "date-time" },
+          resolved_at: { type: "string", format: "date-time", nullable: true }
         }
       }
     }
@@ -85,7 +119,10 @@ const openApiSpec = {
                   device_id: { type: "string", example: "DSP-000002" },
                   api_key: { type: "string", example: "chave-secreta" },
                   firmware_version: { type: "string", example: "1.0.0" },
-                  active: { type: "integer", enum: [0, 1], example: 1 }
+                  active: { type: "integer", enum: [0, 1], example: 1 },
+                  device_status_id: { type: "integer", nullable: true, example: 1 },
+                  valve_status_id: { type: "integer", nullable: true, example: null },
+                  seal_status_id: { type: "integer", nullable: true, example: 3 }
                 }
               }
             }
@@ -267,6 +304,118 @@ const openApiSpec = {
           },
           "401": { description: "API Key ausente ou inválida" },
           "403": { description: "Dispositivo desativado" }
+        }
+      }
+    },
+    "/api/v1/iot/commands/{deviceId}": {
+      get: {
+        summary: "Listar comandos pendentes do dispositivo",
+        security: [{ ApiKeyAuth: [] }],
+        parameters: [
+          {
+            name: "deviceId",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+            example: "DSP-000001"
+          }
+        ],
+        responses: {
+          "200": {
+            description: "Comandos pendentes, em ordem de criação",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/DeviceCommand" }
+                }
+              }
+            }
+          },
+          "401": { description: "API Key ausente ou inválida" },
+          "403": { description: "API Key não pertence ao dispositivo" },
+          "404": { description: "Dispositivo não encontrado" }
+        }
+      }
+    },
+    "/api/v1/iot/commands/confirm": {
+      post: {
+        summary: "Confirmar execução de comando",
+        security: [{ ApiKeyAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["command_id", "device_id", "status"],
+                properties: {
+                  command_id: { type: "string", example: "CMD-000001" },
+                  device_id: { type: "string", example: "DSP-000001" },
+                  status: { type: "string", enum: ["EXECUTADO", "ERRO"], example: "EXECUTADO" },
+                  error_message: { type: "string", nullable: true, example: null }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          "200": { description: "Comando confirmado" },
+          "400": { description: "Campos obrigatórios ou status inválidos" },
+          "401": { description: "API Key ausente ou inválida" },
+          "403": { description: "API Key não pertence ao dispositivo" },
+          "404": { description: "Comando não encontrado para este dispositivo" },
+          "409": { description: "Comando já confirmado" }
+        }
+      }
+    },
+    "/api/v1/iot/alerts": {
+      post: {
+        summary: "Registrar alerta",
+        security: [{ ApiKeyAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["alert_id", "device_id", "alert_type", "status_id", "severity_id", "title"],
+                properties: {
+                  alert_id: { type: "string", example: "ALT-000001" },
+                  device_id: { type: "string", example: "DSP-000001" },
+                  alert_type: {
+                    type: "string",
+                    enum: ["SEAL_BROKEN", "GEOFENCE_EXIT", "LOW_BATTERY", "DEVICE_ERROR", "COMMAND_FAILURE", "COMMUNICATION_LOST"]
+                  },
+                  status_id: { type: "integer", example: 1 },
+                  severity_id: { type: "integer", example: 2 },
+                  title: { type: "string", example: "Lacre rompido" },
+                  description: { type: "string", nullable: true }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          "201": {
+            description: "Alerta criado",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    alert: { $ref: "#/components/schemas/Alert" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { description: "Campos, tipo ou IDs de status inválidos" },
+          "401": { description: "API Key ausente ou inválida" },
+          "403": { description: "API Key não pertence ao dispositivo" },
+          "404": { description: "Dispositivo não encontrado" },
+          "409": { description: "alert_id já cadastrado" }
         }
       }
     }

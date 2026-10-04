@@ -31,6 +31,9 @@ Use **Try it out** para executar as requisições. Para telemetrias e eventos, c
 | `GET` | `/api/v1/iot/telemetries` | Listar telemetrias recentes primeiro |
 | `POST` | `/api/v1/iot/telemetries` | Enfileirar telemetria |
 | `POST` | `/api/v1/iot/events` | Registrar evento |
+| `GET` | `/api/v1/iot/commands/:deviceId` | Buscar comandos pendentes do dispositivo |
+| `POST` | `/api/v1/iot/commands/confirm` | Confirmar execução ou erro de comando |
+| `POST` | `/api/v1/iot/alerts` | Registrar alerta do dispositivo |
 
 Os POSTs de telemetria e evento exigem `X-API-Key`. Os campos `device_id` e `message_id` identificam os registros; `message_id` deve ser único por mensagem. Dispositivo repetido retorna `409 Dispositivo duplicado`; mensagem repetida retorna `409 Mensagem duplicada` e não cria outro registro.
 
@@ -40,6 +43,12 @@ Quando latitude e longitude forem iguais à última posição registrada para o 
 `ACTIVE`/`INACTIVE` representam o estado do dispositivo (`devices.active` igual a `1`/`0`). Em eventos, `seal_status` aceita `LOCKED`, `UNLOCKED` ou `BROKEN`; `events.status` continua reservado ao processamento da fila.
 
 A tabela `status` cataloga esses códigos com nomes e descrições. Ela é separada porque `events.status` já significa estado de sincronização (`PENDING`, `PROCESSING`, `SYNCED` ou `ERROR`), não estado do dispositivo ou do lacre.
+
+Comandos são consultados por dispositivo e só podem ser acessados pela API Key daquele dispositivo. A confirmação aceita `EXECUTADO` ou `ERRO`; comandos confirmados deixam de aparecer na lista de pendentes.
+
+A tabela `devices` também possui `device_status_id`, `valve_status_id` e `seal_status_id`, colunas opcionais para guardar os IDs de estado associados. Dispositivos já cadastrados mantêm `NULL` nesses campos até serem atualizados.
+
+A tabela `alerts` armazena alertas associados a dispositivos. `POST /api/v1/iot/alerts` exige a API Key do dispositivo e aceita `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` ou `COMMUNICATION_LOST`. `severity_id` referencia `status.id`, mas os níveis de severidade ainda precisam ser definidos no catálogo.
 
 ## Documentos
 

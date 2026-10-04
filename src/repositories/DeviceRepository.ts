@@ -70,9 +70,15 @@ export class DeviceRepository {
         device_id,
         api_key,
         firmware_version,
-        active
+        active,
+        device_status_id,
+        valve_status_id,
+        seal_status_id
       )
       VALUES (
+        ?,
+        ?,
+        ?,
         ?,
         ?,
         ?,
@@ -82,7 +88,10 @@ export class DeviceRepository {
       device.device_id,
       device.api_key,
       device.firmware_version,
-      device.active
+      device.active,
+      device.device_status_id ?? null,
+      device.valve_status_id ?? null,
+      device.seal_status_id ?? null
     );
 
   }

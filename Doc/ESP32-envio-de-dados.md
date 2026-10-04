@@ -20,13 +20,18 @@ A API está versionada em `/api/v1` e possui os principais endpoints:
 - `POST /api/v1/iot/events` — envia eventos do sistema/dispositivo
 - `GET /api/v1/devices` — lista dispositivos
 - `GET /api/v1/devices/:deviceId` — consulta um dispositivo
+- `GET /api/v1/iot/commands/:deviceId` — busca comandos pendentes do dispositivo
+- `POST /api/v1/iot/commands/confirm` — confirma execução ou erro do comando
+- `POST /api/v1/iot/alerts` — registra alerta para o dispositivo
 
 A persistência acontece no banco SQLite via backend. O banco tem tabelas como:
 
 - `devices` — tabela de cadastro dos dispositivos conectados. Aqui ficam os identificadores, chaves de acesso e status do equipamento.
+- `devices.device_status_id`, `valve_status_id` e `seal_status_id` — IDs opcionais de estado do dispositivo, válvula e lacre; dispositivos antigos podem apresentar `NULL` até esses campos serem preenchidos.
 - `events` — tabela de eventos do sistema. Serve para registrar ocorrências e alterações do módulo, como startup, falhas, alarmes e mensagens de status.
 - `telemetry_queue` — tabela de telemetria. Aqui ficam os dados de medição, GPS, bateria, sinal e outros valores coletados em tempo real.
 - `status` — catálogo de códigos e descrições para os estados do dispositivo e do lacre.
+- `alerts` — alertas associados a um dispositivo; os tipos previstos são `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` e `COMMUNICATION_LOST`.
 
 > Observação importante: quando o código fala em `device_id`, ele se refere ao identificador do equipamento que está enviando os dados; `message_id` é o identificador único da mensagem daquele envio; `X-API-Key` é a chave de autenticação do dispositivo para acessar a API.
 
@@ -55,6 +60,8 @@ auto-DSP-000001
 
 O header `X-API-Key` é exigido nos POSTs de telemetria e eventos. As rotas GET de dispositivos não usam esse middleware atualmente.
 O GET de telemetrias também exige `X-API-Key`, pois retorna dados armazenados dos dispositivos.
+As rotas de comandos exigem a chave do próprio dispositivo consultado ou informado na confirmação.
+O registro de alertas também exige `X-API-Key` correspondente ao `device_id` enviado.
 
 Se a chave não for enviada, a API responde com:
 
@@ -261,7 +268,60 @@ Status HTTP: `409 Conflict`.
 
 ---
 
+### Registrar alerta
+
+```http
+POST http://<IP_DA_API>/api/v1/iot/alerts
+X-API-Key: auto-DSP-000001
+Content-Type: application/json
+```
+
+```json
+{
+  "alert_id": "ALT-000001",
+  "device_id": "DSP-000001",
+  "alert_type": "SEAL_BROKEN",
+  "status_id": 1,
+  "severity_id": 2,
+  "title": "Lacre rompido",
+  "description": "Alerta enviado pelo dispositivo"
+}
+```
+
+Os tipos aceitos são `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` e `COMMUNICATION_LOST`. `status_id` e `severity_id` precisam existir na tabela `status`; os códigos de severidade ainda precisam ser definidos.
+
 ## 4. Estrutura recomendada para o firmware do ESP32
+
+### Consultar comandos pendentes
+
+```http
+GET http://<IP_DA_API>/api/v1/iot/commands/DSP-000001
+X-API-Key: auto-DSP-000001
+```
+
+A resposta é uma lista em ordem de criação. Comandos confirmados deixam de ser retornados.
+
+### Confirmar comando executado
+
+```http
+POST http://<IP_DA_API>/api/v1/iot/commands/confirm
+X-API-Key: auto-DSP-000001
+Content-Type: application/json
+```
+
+```json
+{
+  "command_id": "CMD-000001",
+  "device_id": "DSP-000001",
+  "status": "EXECUTADO"
+}
+```
+
+Em caso de falha, envie `status: "ERRO"` e, opcionalmente, `error_message`.
+
+---
+
+## 5. Estrutura recomendada para o firmware do ESP32
 
 A pessoa que estiver programando o ESP32 deve enviar dados em JSON no seguinte padrão:
 
@@ -291,7 +351,7 @@ A pessoa que estiver programando o ESP32 deve enviar dados em JSON no seguinte p
 
 ---
 
-## 5. Exemplo em C++ para ESP32
+## 6. Exemplo em C++ para ESP32
 
 Abaixo está um exemplo de como o ESP32 pode montar o JSON e enviar para a API usando HTTP:
 
@@ -362,7 +422,7 @@ O exemplo incrementa a sequência durante a execução. Em firmware de produçã
 
 ---
 
-## 6. O que será salvo no banco
+## 7. O que será salvo no banco
 
 A API recebe os dados do ESP32 e salva a informação no SQLite, na tabela principal de telemetria e/ou eventos.
 
@@ -386,7 +446,7 @@ Esses dados são enviados pela API para o banco de dados e ficam armazenados par
 
 ---
 
-## 7. Recomendação final para o firmware
+## 8. Recomendação final para o firmware
 
 O firmware do ESP32 deve seguir este padrão:
 
@@ -399,7 +459,7 @@ O firmware do ESP32 deve seguir este padrão:
 
 ---
 
-## 8. Resumo prático
+## 9. Resumo prático
 
 Se o ESP32 for enviar dados de monitoramento, o payload ideal é:
 

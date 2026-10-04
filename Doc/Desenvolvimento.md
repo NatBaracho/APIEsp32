@@ -37,6 +37,9 @@ O projeto consiste em uma API REST em Node.js + TypeScript, desenvolvida para re
 - Conexão configurada em `src/database/connection.ts`.
 - Banco salvo localmente em `oxide.db`.
 - Verificação inicial das tabelas do banco.
+- Migração idempotente adiciona `device_status_id`, `valve_status_id` e `seal_status_id` à tabela `devices` sem recriá-la nem remover registros.
+- Cria a tabela `alerts` idempotentemente, com FKs para dispositivos e status; o endpoint POST usa repository e service para registrar alertas.
+- Cria a tabela `commands` idempotentemente para armazenar comandos destinados aos dispositivos; ainda não há endpoint ou repository usando essa tabela.
 - Uso de `better-sqlite3` para leitura e gravação.
 
 ### 3.3 Prefixo padronizado da API
@@ -46,6 +49,9 @@ O projeto consiste em uma API REST em Node.js + TypeScript, desenvolvida para re
   - `POST /api/v1/iot/telemetries`
    - `GET /api/v1/iot/telemetries`
   - `POST /api/v1/iot/events`
+   - `GET /api/v1/iot/commands/:deviceId`
+   - `POST /api/v1/iot/commands/confirm`
+   - `POST /api/v1/iot/alerts`
    - `GET /api/v1/devices`
   - `GET /api/v1/devices/:deviceId`
    - `POST /api/v1/devices`
@@ -77,6 +83,8 @@ O projeto consiste em uma API REST em Node.js + TypeScript, desenvolvida para re
 - `DeviceRepository`: busca, criação, atualização, desativação e verificação de existência do dispositivo.
 - `EventRepository`: grava eventos, consulta por message_id, lista pendentes e marca status.
 - `TelemetryQueueRepository`: métodos de criação, busca por `message_id`, busca da última telemetria por `device_id` (`findLastByDeviceId`), atualização de `last_seen_at` (`updateLastSeen`), processamento, sincronização e erro.
+- `CommandRepository`: lista comandos pendentes por dispositivo e confirma execução/erro.
+- `AlertRepository`: verifica `alert_id` e IDs do catálogo e persiste alertas.
 - `device_id` identifica unicamente dispositivos; `message_id` identifica unicamente eventos e telemetrias. As três tabelas possuem restrição `UNIQUE` no SQLite como proteção adicional.
 - Consultas `GET` são somente leitura e podem ser repetidas sem criar registros. O aviso `409` é aplicado aos `POST` que tentam cadastrar/enfileirar uma identidade já existente.
 
@@ -86,6 +94,12 @@ O projeto consiste em uma API REST em Node.js + TypeScript, desenvolvida para re
 - `ACTIVE` e `INACTIVE` descrevem o dispositivo e correspondem a `devices.active = 1` e `devices.active = 0`.
 - `LOCKED`, `UNLOCKED` e `BROKEN` descrevem o lacre e são enviados em `events.seal_status`.
 - A tabela `status` é criada e semeada de forma idempotente por `src/database/connection.ts`. O controller valida os códigos aceitos para `seal_status`; `events.status` continua sendo definido pelo backend.
+- `devices.device_status_id`, `devices.valve_status_id` e `devices.seal_status_id` armazenam IDs de estado opcionais; os registros anteriores à migração ficam com `NULL` até receberem valores.
+
+### 3.8 Comandos para dispositivos
+- `GET /api/v1/iot/commands/:deviceId` lista apenas comandos `PENDENTE`, por ordem de criação.
+- `POST /api/v1/iot/commands/confirm` recebe `command_id`, `device_id`, `status` (`EXECUTADO` ou `ERRO`) e `error_message` opcional; a API preenche `executed_at`.
+- As duas rotas exigem a API Key correspondente ao dispositivo e impedem confirmação repetida.
 
 ## 4. Observações técnicas importantes
 
@@ -233,6 +247,26 @@ O projeto consiste em uma API REST em Node.js + TypeScript, desenvolvida para re
    - Resultado esperado: `400 Bad Request`, sem inserir evento, pois `closed` não pertence ao catálogo.
    - Resultado obtido: `400` e nenhuma linha para o `message_id` de teste.
 
+25. Migração dos campos de status de `devices`
+   - Resultado esperado: acrescentar `device_status_id`, `valve_status_id` e `seal_status_id`, preservando os registros existentes.
+   - Resultado obtido: os campos foram adicionados sem recriar a tabela; valores permanecem `NULL` até serem definidos.
+
+26. Schema da tabela `commands`
+   - Resultado esperado: default `PENDENTE`, `command_id` único e FK de `device_id` para `devices.device_id` com `ON UPDATE CASCADE` e `ON DELETE RESTRICT`.
+   - Resultado obtido: os três comportamentos foram confirmados em transação de teste revertida; nenhum comando de teste permaneceu no banco.
+
+27. GET de comandos pendentes e confirmação
+   - Resultado esperado: GET retorna somente PENDENTE; confirmação marca EXECUTADO/ERRO, grava `executed_at` e remove o comando da lista pendente.
+   - Resultado obtido: GET retornou o comando PENDENTE; confirmações `EXECUTADO` e `ERRO` retornaram `200` e gravaram `executed_at`; `error_message` foi salvo no caso `ERRO`; a confirmação repetida retornou `409`; chave de outro dispositivo retornou `403`; status inválido retornou `400`. Os comandos temporários foram removidos após o teste.
+
+28. Schema da tabela `alerts`
+   - Resultado esperado: `alert_id` único, default `CURRENT_TIMESTAMP` e FKs para `devices.device_id` e `status.id`.
+   - Resultado obtido: a tabela e suas três FKs foram confirmadas por `PRAGMA`; nenhum alerta foi inserido.
+
+29. `POST /api/v1/iot/alerts`
+   - Resultado esperado: `201` para alerta válido; `409` para `alert_id` repetido; `400` para tipo/IDs inválidos; `403` se a API Key não pertencer ao dispositivo.
+   - Resultado obtido: os quatro status foram confirmados; o alerta temporário foi removido após o teste.
+
 Observação: um corpo JSON literal `null` é rejeitado pelo parser JSON do Express antes de chegar ao controller, também com status `400`.
 
 ### 6.4 Processo de validação
@@ -301,6 +335,17 @@ A API passou a aceitar eventos válidos corretamente e voltou a responder com `2
 - Como foi corrigido: `connection.ts` cria e semeia a tabela `status` idempotentemente; `ACTIVE`/`INACTIVE` mapeiam para `devices.active`, e os estados do lacre são aceitos em `events.seal_status`. O campo `events.status` continua controlando a sincronização.
 - Resultado: o teste gravou `LOCKED` em `events.seal_status`, mantendo `events.status = PENDING`.
 
+### 7.9 Tabela de comandos
+- Necessidade: persistir comandos destinados aos dispositivos, com identificação única, estado de execução, datas e mensagem de erro.
+- Como foi implementado: `connection.ts` cria `commands` se ainda não existir, com FK para `devices.device_id`; a migração não cria endpoint nem repository.
+- Resultado: default `PENDENTE`, unicidade de `command_id` e integridade referencial foram testados; as inserções de validação foram revertidas.
+
+### 7.10 Tabela de alertas
+- Necessidade: registrar alertas de lacre, geofence, bateria, erro do dispositivo, falha de comando e perda de comunicação.
+- Como foi implementado: `connection.ts` cria `alerts` se ainda não existir, com FK para dispositivo e duas FKs para `status`.
+- Resultado: schema e constraints confirmados. Os tipos previstos são `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` e `COMMUNICATION_LOST`.
+- Pendência: o catálogo `status` atual não contém severidades, embora `severity_id` aponte para ele; os códigos de severidade precisam ser definidos antes de inserir alertas com validação de domínio.
+
 ## 8. Status atual
 
 Status geral: em funcionamento e validado com testes reais de integração.
@@ -332,6 +377,8 @@ Status geral: em funcionamento e validado com testes reais de integração.
 - [ ] Worker de sincronização
 - [ ] `SyncLogRepository` em uso real
 - [ ] `SyncItemRepository` em uso real
+- [ ] API/repository de comandos em uso real
+- [x] Endpoint/repository básico de criação de alertas
 - [ ] DTOs com validação automática
 - [ ] Testes automatizados
 
@@ -339,6 +386,7 @@ Status geral: em funcionamento e validado com testes reais de integração.
 A API está organizada com o prefixo padrão `/api/v1`, e a estrutura atual é:
 - `/api/v1/iot/telemetries`
 - `/api/v1/iot/events`
+- `/api/v1/iot/alerts`
 - `/api/v1/devices`
 - `/api/v1/devices/:deviceId`
 

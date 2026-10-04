@@ -8,4 +8,10 @@ export interface Device {
   firmware_version?: string;
 
   active: number;
+
+  device_status_id?: number;
+
+  valve_status_id?: number;
+
+  seal_status_id?: number;
 }

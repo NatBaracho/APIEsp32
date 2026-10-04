@@ -53,3 +53,46 @@ export function apiKeyMiddleware(
 
   next();
 }
+
+export function apiKeyDeviceMiddleware(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  const routeDeviceId = req.params.deviceId;
+  const bodyDeviceId = req.body?.device_id;
+  const deviceId =
+    typeof routeDeviceId === "string"
+      ? routeDeviceId
+      : typeof bodyDeviceId === "string"
+        ? bodyDeviceId
+        : "";
+
+  if (!deviceId) {
+    res.status(400).json({
+      success: false,
+      message: "device_id é obrigatório"
+    });
+    return;
+  }
+
+  const device = deviceRepository.findByDeviceId(deviceId);
+
+  if (!device) {
+    res.status(404).json({
+      success: false,
+      message: "Dispositivo não encontrado"
+    });
+    return;
+  }
+
+  if (device.api_key !== req.header("X-API-Key")) {
+    res.status(403).json({
+      success: false,
+      message: "API Key não pertence ao dispositivo"
+    });
+    return;
+  }
+
+  next();
+}
