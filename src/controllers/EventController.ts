@@ -29,6 +29,20 @@ export class EventController {
         return;
       }
 
+      const sealStatuses = ["LOCKED", "UNLOCKED", "BROKEN"];
+
+      if (
+        event.seal_status != null &&
+        !sealStatuses.includes(event.seal_status)
+      ) {
+        res.status(400).json({
+          success: false,
+          message: "seal_status deve ser LOCKED, UNLOCKED ou BROKEN"
+        });
+
+        return;
+      }
+
       const created = this.service.create(
         event
       );

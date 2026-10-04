@@ -34,9 +34,9 @@ export class EventRepository {
       event.message_id,
       event.device_id,
       event.event_type ?? "EVENT",
-      event.seal_status ?? "UNKNOWN",
+      event.seal_status ?? null,
       payloadJson,
-      event.status ?? "PENDING",
+      "PENDING",
       event.attempt_count ?? 0
     );
 

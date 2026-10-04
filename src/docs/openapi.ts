@@ -235,9 +235,12 @@ const openApiSpec = {
                   message_id: { type: "string", example: "EVT-000001" },
                   device_id: { type: "string", example: "DSP-000001" },
                   event_type: { type: "string", example: "door_open" },
-                  seal_status: { type: "string", example: "closed" },
+                  seal_status: {
+                    type: "string",
+                    enum: ["LOCKED", "UNLOCKED", "BROKEN"],
+                    example: "LOCKED"
+                  },
                   payload_json: { type: "string", example: "{\"source\":\"sensor\"}" },
-                  status: { type: "string", example: "new" }
                 }
               }
             }

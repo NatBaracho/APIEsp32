@@ -26,6 +26,7 @@ A persistência acontece no banco SQLite via backend. O banco tem tabelas como:
 - `devices` — tabela de cadastro dos dispositivos conectados. Aqui ficam os identificadores, chaves de acesso e status do equipamento.
 - `events` — tabela de eventos do sistema. Serve para registrar ocorrências e alterações do módulo, como startup, falhas, alarmes e mensagens de status.
 - `telemetry_queue` — tabela de telemetria. Aqui ficam os dados de medição, GPS, bateria, sinal e outros valores coletados em tempo real.
+- `status` — catálogo de códigos e descrições para os estados do dispositivo e do lacre.
 
 > Observação importante: quando o código fala em `device_id`, ele se refere ao identificador do equipamento que está enviando os dados; `message_id` é o identificador único da mensagem daquele envio; `X-API-Key` é a chave de autenticação do dispositivo para acessar a API.
 
@@ -221,7 +222,7 @@ O evento deve incluir `message_id`, `device_id` e `event_type`:
   "message_id": "EVT-000002",
   "device_id": "DSP-000001",
   "event_type": "sensor_failure",
-  "seal_status": "closed"
+  "seal_status": "LOCKED"
 }
 ```
 
@@ -230,8 +231,13 @@ O evento deve incluir `message_id`, `device_id` e `event_type`:
 - `message_id` é obrigatório
 - `device_id` é obrigatório
 - `event_type` é obrigatório
+- quando informado, `seal_status` deve ser `LOCKED`, `UNLOCKED` ou `BROKEN`; o campo é gravado em `events.seal_status`
 - `message_id` duplicado é rejeitado pela API
 - um evento repetido retorna `409 Conflict` e não cria outra linha em `events`
+
+`ACTIVE` e `INACTIVE` descrevem o estado do dispositivo e correspondem a `devices.active = 1` e `devices.active = 0`. Não use esses dois códigos em `seal_status`. O campo `events.status` é definido pelo servidor e registra o processamento da fila (`PENDING`, `PROCESSING`, `SYNCED` ou `ERROR`); não o envie no payload do evento.
+
+O catálogo `status` existe para manter código, nome e descrição consistentes. Ele é separado do campo `events.status` porque esse campo já controla a fila de sincronização; o estado do lacre é enviado em `seal_status`.
 
 ### Resposta de evento duplicado
 

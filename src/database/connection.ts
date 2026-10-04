@@ -10,6 +10,50 @@ const db: Database.Database = new Database(databasePath);
 // Habilita Foreign Keys
 db.pragma("foreign_keys = ON");
 
+const statusTableExists = db
+  .prepare("SELECT 1 FROM sqlite_master WHERE type = ? AND name = ?")
+  .get("table", "status");
+
+if (!statusTableExists) {
+  db.exec(`
+    CREATE TABLE status (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      description TEXT
+    )
+  `);
+}
+
+const statusSeeds: Array<[string, string, string]> = [
+  ["ACTIVE", "Ativo", "Dispositivo ativo"],
+  ["INACTIVE", "Desativado", "Dispositivo inativo"],
+  ["LOCKED", "Travado", "Lacre travado"],
+  ["UNLOCKED", "Destravado", "Lacre destravado"],
+  ["BROKEN", "Rompido", "Lacre rompido"]
+];
+const existingStatusCodes = new Set(
+  (db.prepare("SELECT code FROM status").all() as Array<{ code: string }>)
+    .map(status => status.code)
+);
+const missingStatuses = statusSeeds.filter(
+  ([code]) => !existingStatusCodes.has(code)
+);
+
+if (missingStatuses.length > 0) {
+  const insertStatus = db.prepare(`
+    INSERT OR IGNORE INTO status (code, name, description)
+    VALUES (?, ?, ?)
+  `);
+  const seedMissingStatuses = db.transaction(() => {
+    for (const status of missingStatuses) {
+      insertStatus.run(...status);
+    }
+  });
+
+  seedMissingStatuses();
+}
+
 function normalizeColumnName(
   tableName: string,
   oldName: string,

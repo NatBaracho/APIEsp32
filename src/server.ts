@@ -5,6 +5,8 @@ import eventRoutes from "./routes/eventRoute";
 import deviceRoutes from "./routes/deviceRoutes";
 import swaggerUi from "swagger-ui-express";
 import openApiSpec from "./docs/openapi";
+import { errorHandler } from "./Middleware/Errohandler";
+
 
 
 
@@ -44,6 +46,8 @@ try {
 app.get("/", (req, res) => {
     res.send("API ESP32 Online");
 });
+
+app.use(errorHandler);
 
 app.listen(3000, () => {
     console.log("Servidor rodando na porta 3000");

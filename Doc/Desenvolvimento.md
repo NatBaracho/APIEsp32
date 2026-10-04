@@ -28,6 +28,7 @@ O projeto consiste em uma API REST em Node.js + TypeScript, desenvolvida para re
 ### 3.1 Servidor Express
 - API configurada com Express.
 - Middleware para leitura de JSON.
+- Middleware global para erros não tratados, registrado após as rotas e a rota raiz.
 - Rota raiz (`/`) retornando mensagem de status da API.
 - Servidor rodando na porta 3000.
 - Interface Swagger UI disponível em `http://localhost:3000/api-docs` para explorar e testar os endpoints.
@@ -65,6 +66,8 @@ O projeto consiste em uma API REST em Node.js + TypeScript, desenvolvida para re
 - Responsável por receber eventos do ESP32 ou da aplicação.
 - Validação dos campos obrigatórios `message_id`, `device_id` e `event_type`, retornando `400 Bad Request` quando ausentes.
 - A resposta de validação é `{"success":false,"message":"message_id, device_id e event_type são obrigatórios"}`; o evento incompleto não é encaminhado ao service.
+- Quando informado, `seal_status` aceita `LOCKED`, `UNLOCKED` ou `BROKEN` e é gravado em `events.seal_status`; os demais valores retornam `400`.
+- `events.status` permanece reservado ao processamento da fila (`PENDING`, `PROCESSING`, `SYNCED`, `ERROR`) e é definido pelo servidor. `ACTIVE`/`INACTIVE` correspondem ao estado numérico `devices.active` (`1`/`0`).
 - Validação de duplicidade por `message_id`.
 - Evento repetido retorna `409 Conflict` com `{"success":false,"message":"Mensagem duplicada"}` e não é persistido novamente.
 - Persistência do evento no banco.
@@ -76,6 +79,13 @@ O projeto consiste em uma API REST em Node.js + TypeScript, desenvolvida para re
 - `TelemetryQueueRepository`: métodos de criação, busca por `message_id`, busca da última telemetria por `device_id` (`findLastByDeviceId`), atualização de `last_seen_at` (`updateLastSeen`), processamento, sincronização e erro.
 - `device_id` identifica unicamente dispositivos; `message_id` identifica unicamente eventos e telemetrias. As três tabelas possuem restrição `UNIQUE` no SQLite como proteção adicional.
 - Consultas `GET` são somente leitura e podem ser repetidas sem criar registros. O aviso `409` é aplicado aos `POST` que tentam cadastrar/enfileirar uma identidade já existente.
+
+### 3.7 Catálogo de status e separação dos estados
+- A tabela `status` guarda uma linha por código, com nome legível e descrição. Ela permite apresentar os mesmos códigos de forma consistente sem repetir textos descritivos nos eventos.
+- A tabela é necessária porque `events.status` já tem outra responsabilidade: controlar o processamento da fila (`PENDING`, `PROCESSING`, `SYNCED`, `ERROR`). Reutilizá-la para estados do dispositivo ou do lacre confundiria o fluxo do Worker.
+- `ACTIVE` e `INACTIVE` descrevem o dispositivo e correspondem a `devices.active = 1` e `devices.active = 0`.
+- `LOCKED`, `UNLOCKED` e `BROKEN` descrevem o lacre e são enviados em `events.seal_status`.
+- A tabela `status` é criada e semeada de forma idempotente por `src/database/connection.ts`. O controller valida os códigos aceitos para `seal_status`; `events.status` continua sendo definido pelo backend.
 
 ## 4. Observações técnicas importantes
 
@@ -211,6 +221,18 @@ O projeto consiste em uma API REST em Node.js + TypeScript, desenvolvida para re
    - Resultado esperado: lista ordenada por `id` decrescente com chave válida; `401 Unauthorized` sem `X-API-Key`.
    - Resultado obtido: `200 OK` com 10 registros (`id` 10 antes do 9); sem chave, `401` e `API Key obrigatória`.
 
+22. `POST /api/v1/iot/telemetries` com JSON malformado
+   - Resultado esperado: `400 Bad Request` com mensagem genérica de requisição inválida.
+   - Resultado obtido: `400` e `{"success":false,"message":"Requisição inválida"}`.
+
+23. `POST /api/v1/iot/events` com `seal_status: LOCKED`
+   - Resultado esperado: `202 Accepted`, código em `events.seal_status` e `events.status` mantido como `PENDING`.
+   - Resultado obtido: `202`; o registro de teste confirmou `seal_status = LOCKED` e `status = PENDING`.
+
+24. `POST /api/v1/iot/events` com `seal_status: closed`
+   - Resultado esperado: `400 Bad Request`, sem inserir evento, pois `closed` não pertence ao catálogo.
+   - Resultado obtido: `400` e nenhuma linha para o `message_id` de teste.
+
 Observação: um corpo JSON literal `null` é rejeitado pelo parser JSON do Express antes de chegar ao controller, também com status `400`.
 
 ### 6.4 Processo de validação
@@ -267,6 +289,17 @@ A API passou a aceitar eventos válidos corretamente e voltou a responder com `2
 - Regra: coordenadas presentes e iguais à última telemetria do mesmo dispositivo não geram nova linha, mesmo com `message_id` novo.
 - Como foi implementado: `TelemetryService` busca a última linha por `device_id`; em caso de mesma latitude e longitude, chama `updateLastSeen` e retorna sucesso ao controller.
 - Resultado: a requisição repetida respondeu `202`, atualizou o horário e não duplicou a telemetria; coordenadas diferentes ou ausentes continuam sendo inseridas.
+
+### 7.7 Middleware global de erros
+- Problema: `server.ts` importava `./Middleware/errorHandler`, mas o arquivo existente se chama `Errohandler.ts`, impedindo a compilação. Além disso, o handler convertia erros do parser JSON em `500`.
+- Como foi corrigido: o import foi alinhado ao nome real, o middleware foi colocado após as rotas e passou a preservar status HTTP válidos, encaminhando erros quando os headers já foram enviados.
+- Resultado: `npx tsc --noEmit` passou; JSON malformado retorna `400`, enquanto `/` e o GET autenticado de telemetrias continuam respondendo `200`.
+
+### 7.8 Catálogo de status para dispositivos e eventos
+- Necessidade: manter descrições legíveis para os códigos `ACTIVE`, `INACTIVE`, `LOCKED`, `UNLOCKED` e `BROKEN`.
+- Por que uma tabela separada: `events.status` já representa o ciclo da fila. Um catálogo separado evita misturar esse fluxo com os estados de negócio e armazena código, nome e descrição em um único lugar.
+- Como foi corrigido: `connection.ts` cria e semeia a tabela `status` idempotentemente; `ACTIVE`/`INACTIVE` mapeiam para `devices.active`, e os estados do lacre são aceitos em `events.seal_status`. O campo `events.status` continua controlando a sincronização.
+- Resultado: o teste gravou `LOCKED` em `events.seal_status`, mantendo `events.status = PENDING`.
 
 ## 8. Status atual
 

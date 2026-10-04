@@ -37,6 +37,10 @@ Os POSTs de telemetria e evento exigem `X-API-Key`. Os campos `device_id` e `mes
 Telemetrias também podem informar `last_seen_at` em ISO 8601; o campo é opcional e fica `NULL` quando omitido.
 Quando latitude e longitude forem iguais à última posição registrada para o dispositivo, a API responde `202` e atualiza apenas `last_seen_at`, sem inserir outra linha.
 
+`ACTIVE`/`INACTIVE` representam o estado do dispositivo (`devices.active` igual a `1`/`0`). Em eventos, `seal_status` aceita `LOCKED`, `UNLOCKED` ou `BROKEN`; `events.status` continua reservado ao processamento da fila.
+
+A tabela `status` cataloga esses códigos com nomes e descrições. Ela é separada porque `events.status` já significa estado de sincronização (`PENDING`, `PROCESSING`, `SYNCED` ou `ERROR`), não estado do dispositivo ou do lacre.
+
 ## Documentos
 
 - [Desenvolvimento, testes e histórico de correções](Doc/Desenvolvimento.md)
