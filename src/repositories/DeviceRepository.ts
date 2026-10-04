@@ -87,8 +87,8 @@ export class DeviceRepository {
     `).run(
       device.device_id,
       device.api_key,
-      device.firmware_version,
-      device.active,
+      device.firmware_version ?? null,
+      device.active ?? 1,
       device.device_status_id ?? null,
       device.valve_status_id ?? null,
       device.seal_status_id ?? null

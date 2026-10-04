@@ -377,25 +377,42 @@ Status geral: em funcionamento e validado com testes reais de integração.
 - [ ] Worker de sincronização
 - [ ] `SyncLogRepository` em uso real
 - [ ] `SyncItemRepository` em uso real
-- [ ] API/repository de comandos em uso real
+- [x] API/repository de comandos em uso real
 - [x] Endpoint/repository básico de criação de alertas
 - [ ] DTOs com validação automática
-- [ ] Testes automatizados
+- [x] Testes automatizados
 
 ### Convenção de rota atual
 A API está organizada com o prefixo padrão `/api/v1`, e a estrutura atual é:
 - `/api/v1/iot/telemetries`
 - `/api/v1/iot/events`
+- `/api/v1/iot/commands/:deviceId`
+- `/api/v1/iot/commands/confirm`
 - `/api/v1/iot/alerts`
 - `/api/v1/devices`
 - `/api/v1/devices/:deviceId`
 
-## 9. Próximos passos sugeridos
+## 9. Suíte de testes automatizados (`npm test`)
+
+Foi criada uma suíte completa de testes automatizados de ponta a ponta em `tests/api.test.ts` (executável com `npm test`), cobrindo 40 casos de teste:
+1. **Geral & Documentação**: rota raiz `/`, interface `/api-docs/` e especificação `/api-docs/swagger-ui-init.js`.
+2. **Dispositivos (`/api/v1/devices`)**: listagem, busca por ID, tratamento de 404, validação 400, criação com sucesso 201 e conflito de duplicidade 409.
+3. **Autenticação (`X-API-Key`)**: 401 sem header, 401 com chave inválida, 403 para dispositivo inativo e 200 com chave válida.
+4. **Telemetria (`/api/v1/iot/telemetries`)**: validação de campos obrigatórios (400), payload válido (202), duplicidade de `message_id` (409), regra de mesma posição GPS atualizando apenas `last_seen_at` sem duplicar linha, posição nova criando linha e tratamento de JSON malformado (400).
+5. **Eventos (`/api/v1/iot/events`)**: autenticação (401), validação de campos obrigatórios (400), validação do catálogo `seal_status` (400), evento válido (202), auto-criação de dispositivo inexistente (202) e prevenção de duplicidade (409).
+6. **Comandos (`/api/v1/iot/commands`)**: listagem de comandos pendentes, restrição de acesso por dispositivo (403), confirmação como EXECUTADO (200), bloqueio de reconfirmação (409) e exclusão da lista de pendentes.
+7. **Alertas (`/api/v1/iot/alerts`)**: autenticação (401), checagem de chave por dispositivo (403), validação de `alert_type` (400), integridade de `status_id`/`severity_id` (400), criação de alerta (201) e duplicidade de `alert_id` (409).
+8. **Teardown e Integridade**: limpeza automática dos registros temporários gerados durante os testes, garantindo banco limpo após a execução.
+
+### Correção no cadastro de dispositivos
+- **Problema**: `DeviceRepository.create` vinculava `device.active` diretamente na query SQL. Quando omitido pelo payload do cliente, o valor chegava como `undefined` e o better-sqlite3 atribuía `NULL`, violando a constraint `NOT NULL` do SQLite e gerando erro 500.
+- **Correção**: Adicionados fallbacks seguros: `device.active ?? 1` e `device.firmware_version ?? null`.
+
+## 10. Próximos passos sugeridos
 - implementar o Worker de sincronização da fila;
 - integrar `SyncLogRepository` ao fluxo real de sincronização;
 - integrar `SyncItemRepository` ao fluxo real de sincronização;
-- adicionar validação automática aos DTOs;
-- criar testes automatizados para os controllers e services.
+- adicionar validação automática aos DTOs (ex.: class-validator ou Zod).
 
-## 10. Conclusão
-A API está estruturada em camadas, conectada ao SQLite, com o schema corrigido e validada em testes reais. Os fluxos principais de telemetria, eventos, autenticação e prevenção de duplicidade estão funcionando de forma consistente, e o projeto está pronto para seguir para a próxima etapa de evolução.
+## 11. Conclusão
+A API está estruturada em camadas, conectada ao SQLite, com o schema corrigido e validada em 40 testes automatizados de integração cobrindo fluxos felizes e exceções. O projeto está estável e pronto para a evolução dos workers de sincronização.
