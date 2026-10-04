@@ -1,5 +1,4 @@
 export interface CreateTelemetryDto {
-
   message_id: string;
 
   device_id: string;
@@ -16,4 +15,5 @@ export interface CreateTelemetryDto {
 
   payload_json?: string;
 
+  last_seen_at?: string;
 }

@@ -22,7 +22,7 @@ export class DeviceService {
 
   create(
     device: Device
-  ): void {
+  ): boolean {
 
     const existing =
       this.repository.findByDeviceId(
@@ -36,7 +36,7 @@ export class DeviceService {
         device.device_id
       );
 
-      return;
+      return false;
 
     }
 
@@ -48,6 +48,8 @@ export class DeviceService {
       "✅ Dispositivo criado:",
       device.device_id
     );
+
+    return true;
 
   }
 

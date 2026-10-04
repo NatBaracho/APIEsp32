@@ -7,6 +7,12 @@ const router = Router();
 const controller =
   new TelemetryController();
 
+router.get(
+  "/telemetries",
+  apiKeyMiddleware,
+  controller.findAll.bind(controller)
+);
+
 router.post(
   "/telemetries",
   apiKeyMiddleware,

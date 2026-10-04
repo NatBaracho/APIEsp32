@@ -20,7 +20,7 @@ export class DeviceController {
 
       res.status(500).json({
         success: false,
-        message: "Erro ao buscar dispositivos"
+        message: "Erro ao listar dispositivos"
       });
     }
 
@@ -40,7 +40,7 @@ export class DeviceController {
       if (!deviceId) {
         res.status(400).json({
           success: false,
-          message: "Identificador do dispositivo inválido"
+          message: "deviceId é obrigatório"
         });
 
         return;
@@ -76,7 +76,27 @@ export class DeviceController {
   ): Promise<void> {
 
     try {
-      this.service.create(req.body);
+      const device = req.body;
+
+      if (!device?.device_id || !device?.api_key) {
+        res.status(400).json({
+          success: false,
+          message: "device_id e api_key são obrigatórios"
+        });
+
+        return;
+      }
+
+      const created = this.service.create(device);
+
+      if (!created) {
+        res.status(409).json({
+          success: false,
+          message: "Dispositivo duplicado"
+        });
+
+        return;
+      }
 
       res.status(201).json({
         success: true,

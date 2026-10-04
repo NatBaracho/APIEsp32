@@ -5,6 +5,10 @@ export interface TelemetryQueue {
 
   device_id: string;
 
+  lacre_id?: string;
+
+  cilindro_id?: string;
+
   latitude?: number;
 
   longitude?: number;
@@ -16,6 +20,8 @@ export interface TelemetryQueue {
   gsm_signal?: number;
 
   payload_json?: string;
+
+  last_seen_at?: string;
 
   status?: string;
 

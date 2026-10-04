@@ -13,7 +13,21 @@ export class EventController {
 
     try {
 
-      const event = req.body;
+      const event = req.body ?? {};
+
+      if (
+        !event.message_id ||
+        !event.device_id ||
+        !event.event_type
+      ) {
+        res.status(400).json({
+          success: false,
+          message:
+            "message_id, device_id e event_type são obrigatórios"
+        });
+
+        return;
+      }
 
       const created = this.service.create(
         event

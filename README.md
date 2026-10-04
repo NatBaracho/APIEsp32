@@ -1,1 +1,43 @@
-# APIEsp32
+# API ESP32
+
+API REST em Node.js, TypeScript, Express e SQLite para receber dados de dispositivos ESP32.
+
+## Executar localmente
+
+```bash
+npm install
+npm start
+```
+
+O servidor inicia na porta `3000`.
+
+## Documentação interativa
+
+Com o servidor ativo, acesse o Swagger UI em:
+
+```text
+http://localhost:3000/api-docs
+```
+
+Use **Try it out** para executar as requisições. Para telemetrias e eventos, clique em **Authorize** e informe uma chave cadastrada no header `X-API-Key`.
+
+## Endpoints principais
+
+| Método | Endpoint | Uso |
+| --- | --- | --- |
+| `GET` | `/api/v1/devices` | Listar dispositivos |
+| `GET` | `/api/v1/devices/:deviceId` | Buscar dispositivo |
+| `POST` | `/api/v1/devices` | Cadastrar dispositivo |
+| `GET` | `/api/v1/iot/telemetries` | Listar telemetrias recentes primeiro |
+| `POST` | `/api/v1/iot/telemetries` | Enfileirar telemetria |
+| `POST` | `/api/v1/iot/events` | Registrar evento |
+
+Os POSTs de telemetria e evento exigem `X-API-Key`. Os campos `device_id` e `message_id` identificam os registros; `message_id` deve ser único por mensagem. Dispositivo repetido retorna `409 Dispositivo duplicado`; mensagem repetida retorna `409 Mensagem duplicada` e não cria outro registro.
+
+Telemetrias também podem informar `last_seen_at` em ISO 8601; o campo é opcional e fica `NULL` quando omitido.
+Quando latitude e longitude forem iguais à última posição registrada para o dispositivo, a API responde `202` e atualiza apenas `last_seen_at`, sem inserir outra linha.
+
+## Documentos
+
+- [Desenvolvimento, testes e histórico de correções](Doc/Desenvolvimento.md)
+- [Integração e payloads do ESP32](Doc/ESP32-envio-de-dados.md)

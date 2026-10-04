@@ -3,6 +3,8 @@ import db from "./database/connection";
 import telemetryRoutes from "./routes/telemetryRoutes";
 import eventRoutes from "./routes/eventRoute";
 import deviceRoutes from "./routes/deviceRoutes";
+import swaggerUi from "swagger-ui-express";
+import openApiSpec from "./docs/openapi";
 
 
 
@@ -10,6 +12,7 @@ const app = express();
 const API_PREFIX = "/api/v1";
 
 app.use(express.json());
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(openApiSpec));
 app.use(`${API_PREFIX}/iot`, telemetryRoutes);
 app.use(`${API_PREFIX}/iot`, eventRoutes);
 app.use(`${API_PREFIX}/devices`, deviceRoutes);

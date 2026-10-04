@@ -1,5 +1,4 @@
 export interface CreateEventDto {
-
   message_id: string;
 
   device_id: string;
@@ -9,5 +8,4 @@ export interface CreateEventDto {
   seal_status?: string;
 
   payload_json?: string;
-
 }
