@@ -267,6 +267,10 @@ O projeto consiste em uma API REST em Node.js + TypeScript, desenvolvida para re
    - Resultado esperado: `201` para alerta válido; `409` para `alert_id` repetido; `400` para tipo/IDs inválidos; `403` se a API Key não pertencer ao dispositivo.
    - Resultado obtido: os quatro status foram confirmados; o alerta temporário foi removido após o teste.
 
+30. `POST /api/v1/iot/alerts` com `alert_type: SEAL_BROKEN`
+   - Resultado esperado: `201 Created` e persistência do alerta de lacre rompido.
+   - Resultado obtido: `201`; a resposta confirmou `alert_type = SEAL_BROKEN` e o registro foi consultado no SQLite. O teste usou uma cópia temporária do banco; a base original não foi alterada.
+
 Observação: um corpo JSON literal `null` é rejeitado pelo parser JSON do Express antes de chegar ao controller, também com status `400`.
 
 ### 6.4 Processo de validação
@@ -357,6 +361,7 @@ Status geral: em funcionamento e validado com testes reais de integração.
 - `POST /api/v1/devices` -> funcionando
 - `POST /api/v1/iot/telemetries` -> funcionando
 - `POST /api/v1/iot/events` -> funcionando
+- `POST /api/v1/iot/alerts` com `SEAL_BROKEN` -> validado (`201 Created`)
 - `POST /api/v1/devices` com duplicidade -> `409 Dispositivo duplicado`
 - `POST /api/v1/iot/telemetries` com duplicidade -> `409 Mensagem duplicada`
 - `POST /api/v1/iot/events` com duplicidade -> `409 Mensagem duplicada`

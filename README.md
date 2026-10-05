@@ -35,7 +35,7 @@ Use **Try it out** para executar as requisições. Para telemetrias e eventos, c
 | `POST` | `/api/v1/iot/commands/confirm` | Confirmar execução ou erro de comando |
 | `POST` | `/api/v1/iot/alerts` | Registrar alerta do dispositivo |
 
-Os POSTs de telemetria e evento exigem `X-API-Key`. Os campos `device_id` e `message_id` identificam os registros; `message_id` deve ser único por mensagem. Dispositivo repetido retorna `409 Dispositivo duplicado`; mensagem repetida retorna `409 Mensagem duplicada` e não cria outro registro.
+Os POSTs de telemetria, eventos e alertas exigem `X-API-Key`; no alerta, a chave deve pertencer ao `device_id` enviado. Os campos `device_id` e `message_id` identificam os registros; `message_id` deve ser único por mensagem. Dispositivo repetido retorna `409 Dispositivo duplicado`; mensagem repetida retorna `409 Mensagem duplicada` e não cria outro registro.
 
 Telemetrias também podem informar `last_seen_at` em ISO 8601; o campo é opcional e fica `NULL` quando omitido.
 Quando latitude e longitude forem iguais à última posição registrada para o dispositivo, a API responde `202` e atualiza apenas `last_seen_at`, sem inserir outra linha.

@@ -290,6 +290,28 @@ Content-Type: application/json
 
 Os tipos aceitos são `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` e `COMMUNICATION_LOST`. `status_id` e `severity_id` precisam existir na tabela `status`; os códigos de severidade ainda precisam ser definidos.
 
+Em caso de sucesso, a API retorna `201 Created` com o alerta criado:
+
+```json
+{
+  "success": true,
+  "alert": {
+    "id": 1,
+    "alert_id": "ALT-000001",
+    "device_id": "DSP-000001",
+    "alert_type": "SEAL_BROKEN",
+    "status_id": 1,
+    "severity_id": 2,
+    "title": "Lacre rompido",
+    "description": "Alerta enviado pelo dispositivo",
+    "created_at": "2026-10-05 00:00:00",
+    "resolved_at": null
+  }
+}
+```
+
+O envio de `SEAL_BROKEN` foi validado por requisição HTTP: a API respondeu `201` e o alerta foi confirmado no SQLite.
+
 ## 4. Estrutura recomendada para o firmware do ESP32
 
 ### Consultar comandos pendentes
