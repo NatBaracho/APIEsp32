@@ -1,13 +1,13 @@
-# Regras de Negócio da API e Banco SQLite Oxide
+# Regras de Negócio da API e Bancos FluxID e Oxide
 
-Este documento descreve o comportamento implementado atualmente na API e no banco local `oxide.db`. Ele diferencia regras existentes de funcionalidades planejadas; não representa um contrato para recursos ainda não implementados.
+Este documento descreve as regras implementadas na API, o schema do SQLite Oxide usado como buffer local e o modelo PostgreSQL principal FluxID identificado no dump `FluxID.sql`. Ele separa o comportamento atual das decisões e integrações ainda pendentes; não representa um contrato para recursos futuros.
 
 ## 1. Escopo e execução
 
 - API REST em Node.js, TypeScript e Express.
 - Prefixo das rotas versionadas: `/api/v1`.
-- Banco local SQLite: `oxide.db` no diretório de trabalho do processo (`process.cwd()`).
-- Banco principal do projeto: PostgreSQL FluxID; a Oxide é o buffer local persistente da API.
+- Banco principal do projeto: PostgreSQL FluxID.
+- Banco local SQLite: `oxide.db` no diretório de trabalho do processo (`process.cwd()`); a Oxide funciona como buffer persistente da API.
 - A conexão habilita `PRAGMA foreign_keys = ON`.
 - A API atual ainda grava somente no SQLite e não sincroniza dados com PostgreSQL. Um serviço chamado `SyncService` está vazio e não há Worker operacional.
 - O arquivo `FluxID.sql` é um dump PostgreSQL em formato custom, identificado pela assinatura `PGDMP`; apesar da extensão, não é um script SQL texto e deve ser tratado com `pg_restore`.
@@ -217,9 +217,45 @@ A inicialização insere, se estiverem ausentes, os códigos `ACTIVE`, `INACTIVE
 
 ## 8. Banco principal PostgreSQL FluxID
 
-- `FluxID.sql` é o artefato do banco principal PostgreSQL do projeto.
-- O cabeçalho do arquivo identifica um dump em formato custom do PostgreSQL. Não execute esse arquivo com `sqlite3` nem como script SQL simples via `psql -f`; inspecione ou restaure o dump com `pg_restore` em um ambiente PostgreSQL apropriado.
-- A API Oxide ainda não grava diretamente no FluxID. A integração e o Worker SQLite → PostgreSQL continuam pendentes; até sua implementação, `oxide.db` é a persistência usada pelos endpoints.
-- O catálogo interno do dump não foi listado neste ambiente porque `pg_restore` não está instalado. Use `pg_restore --list FluxID.sql` antes de planejar restauração ou mapeamento de tabelas.
+- FluxID é o banco PostgreSQL principal; `oxide.db` é o armazenamento local/buffer usado atualmente pela API.
+- `FluxID.sql` é um dump PostgreSQL em formato custom (`PGDMP`), não um script SQL texto. Ele deve ser inspecionado/restaurado com `pg_restore`, não com `sqlite3` nem `psql -f`.
+- O catálogo do dump identifica o banco `FluxID_db`, PostgreSQL/`pg_dump` 18.6, 214 entradas e as extensões `pgcrypto` e `postgis`.
+- A API ainda grava somente no SQLite. A integração e o Worker SQLite → PostgreSQL continuam pendentes.
+
+### 8.1 Tabelas FluxID relevantes
+
+| Tabela PostgreSQL | Campos/regras relevantes para integração |
+| --- | --- |
+| `organizacoes` | Identificador UUID e dados da organização/tenant. |
+| `dispositivos` | `id` UUID, `organizacao_id` obrigatório, `codigo` único, `identificador_hardware` único, `versao_firmware` e `ativo`. Não há coluna `api_key` no DDL do dump. |
+| `telemetrias` | `id` UUID, `dispositivo_id` UUID, `message_id` único, `data_coleta` obrigatória e latitude/longitude obrigatórias; inclui velocidade, bateria, GSM e `payload_raw JSONB`. |
+| `eventos_lacre` | Evento ligado a `lacre_id` obrigatório; `telemetria_id` opcional; tipo limitado a um catálogo de eventos de lacre. |
+| `alertas` | `organizacao_id`, código, tipo, severidade, status e `aberto_em` obrigatórios; lacre/cilindro/evento relacionados são opcionais. Tipo, severidade e status têm `CHECK` com valores permitidos. |
+| `lacres`, `cilindros` | Entidades próprias com UUID, organização, código e status com catálogo limitado. |
+| `vinculos_dispositivo_lacre` | Relação dispositivo/lacre com início, fim e dados de vínculo/desvínculo, permitindo registrar períodos. |
+| `vinculos_cilindro_lacre` | Relação cilindro/lacre com início, fim e dados de instalação/remoção, permitindo registrar períodos. |
+
+O dump não contém tabela `commands`. As tabelas principais usam IDs UUID sem default gerador visível no DDL; novos registros sincronizados precisam de estratégia explícita para gerar ou mapear UUIDs.
+
+### 8.2 Mapeamento preliminar Oxide → FluxID
+
+| Origem Oxide | Destino FluxID | Diferença/decisão necessária |
+| --- | --- | --- |
+| `devices` | `dispositivos` | `device_id` texto pode corresponder a `codigo` ou `identificador_hardware`; definir a regra. FluxID exige `organizacao_id`, ausente no SQLite. |
+| `telemetry_queue` | `telemetrias` | Mapear `device_id` para `dispositivo_id` UUID. FluxID exige `data_coleta`, latitude e longitude não nulas; Oxide aceita coordenadas ausentes e não tem timestamp de coleta equivalente garantido. Definir rejeição, quarentena ou ajuste de schema/política antes de sincronizar essas linhas. |
+| `events` | `eventos_lacre` | Só há correspondência direta para eventos de lacre; FluxID exige `lacre_id`, usa outro catálogo de tipos e não tem `message_id` nessa tabela. Definir resolução do lacre e uma chave de idempotência no destino. |
+| `alerts` | `alertas` | FluxID exige organização, código, UUID, data de abertura e valores textuais de tipo/severidade/status; Oxide usa IDs inteiros para status/severidade e tipos com nomes diferentes. Definir todos os mapeamentos antes de inserir. |
+| `commands` | Sem tabela no dump | Decidir se comandos permanecem locais ou se será criada uma entidade correspondente no PostgreSQL. |
+| `telemetry_queue.lacre_id` / `cilindro_id` | Vínculos FluxID | No SQLite esses campos são texto opcional sem FK; não são suficientes para reconstruir os vínculos históricos do FluxID. Usar as tabelas `vinculos_*` com regras temporais próprias. |
+
+Mapeamentos semânticos candidatos de alertas que precisam ser aprovados: `SEAL_BROKEN` → `VIOLACAO_LACRE`, `GEOFENCE_EXIT` → `SAIDA_GEOCERCA`, `LOW_BATTERY` → `BATERIA_BAIXA` e `COMMUNICATION_LOST` → `SEM_COMUNICACAO`. `DEVICE_ERROR` e `COMMAND_FAILURE` não têm valor equivalente explícito no `CHECK` de `alertas.tipo` do dump. As severidades FluxID aceitas são `BAIXA`, `MEDIA`, `ALTA` e `CRITICA`; os estados aceitos são `ABERTO`, `EM_ANALISE` e `ENCERRADO`.
+
+### 8.3 Preparação pendente para iniciar a sincronização
+
+- Restaurar o dump em um banco local de análise separado, sem sobrescrever o banco principal ou dados existentes.
+- Obter acesso autorizado ao PostgreSQL: o serviço aceita conexões, mas uma tentativa sem senha retornou `fe_sendauth: no password supplied`. Credenciais devem ser fornecidas diretamente no terminal ou por configuração segura, nunca registradas neste documento.
+- Definir `organizacao_id` padrão/por dispositivo e a correspondência entre os identificadores Oxide e os UUIDs FluxID.
+- Aprovar políticas para telemetrias sem GPS ou sem timestamp de coleta, eventos sem lacre relacionado, comandos e idempotência/reprocessamento.
+- Implementar a sincronização somente depois dessas decisões e validar primeiro em banco local de análise.
 
 Para o script de criação do banco e instruções do DB Browser, consulte [Oxidedb.md](Oxidedb.md). Para payloads do firmware, consulte [ESP32-envio-de-dados.md](ESP32-envio-de-dados.md).

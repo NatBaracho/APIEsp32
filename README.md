@@ -55,6 +55,6 @@ A tabela `alerts` armazena alertas associados a dispositivos. `POST /api/v1/iot/
 ## Documentos
 
 - [Checklist de conclusão do projeto](Doc/Checklist-Projeto.md)
-- [Regras de negócio da API e banco SQLite Oxide](Doc/Regras-de-Negocio-e-Banco-Oxide.md)
+- [Regras de negócio da API e bancos FluxID/Oxide](Doc/Regras-de-Negocio-e-Banco-Oxide.md)
 - [Desenvolvimento, testes e histórico de correções](Doc/Desenvolvimento.md)
 - [Integração e payloads do ESP32](Doc/ESP32-envio-de-dados.md)
