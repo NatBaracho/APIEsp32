@@ -1,0 +1,214 @@
+# Checklist de conclusão do projeto
+
+Este documento registra o que já foi implementado e validado e o que falta para concluir o escopo planejado. Os itens de hardening estão separados das entregas do MVP.
+
+## Arquitetura local
+
+- [x] Arquitetura IoT local definida.
+- [x] Fluxo ESP32 → API → SQLite documentado.
+- [x] API em Node.js, TypeScript e Express.
+- [x] Organização em routes, controllers, services, repositories e models.
+- [x] Especificação OpenAPI e interface Swagger disponíveis.
+- [x] Inicialização do SQLite com criação e normalização de schema.
+- [x] Modelo de dados local documentado.
+- [ ] Worker de sincronização em execução real.
+- [ ] PostgreSQL central integrado.
+
+**Status:** base local da API implementada; sincronização central permanece pendente.
+
+## Segurança do MVP
+
+- [x] API Key associada a dispositivo.
+- [x] Middleware valida chave ausente (`401`), inválida (`401`) e dispositivo inativo (`403`).
+- [x] Rotas protegidas validam se a chave pertence ao dispositivo informado (`403`).
+- [x] Autenticação aplicada aos fluxos de telemetria, comandos e alertas.
+
+**Status:** segurança por API Key implementada para o MVP.
+
+### Hardening futuro
+
+Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se forem definidos como requisitos:
+
+- [ ] Hash de API Keys em repouso.
+- [ ] Rotação e revogação de chaves.
+- [ ] Rate limiting.
+- [ ] Auditoria de acesso e de alterações.
+
+## Dispositivos e estados
+
+- [x] Cadastro, consulta individual e listagem de dispositivos.
+- [x] API Key e versão de firmware associadas ao dispositivo.
+- [x] Ativação e desativação de dispositivo.
+- [x] Colunas opcionais `device_status_id`, `valve_status_id` e `seal_status_id`.
+- [x] Prevenção de cadastro duplicado (`409`).
+- [x] Criação automática de dispositivo no fluxo de eventos quando ainda não existe.
+- [x] Catálogo `status` para estados de dispositivo e lacre.
+- [x] Validação de `seal_status` em eventos (`LOCKED`, `UNLOCKED` ou `BROKEN`).
+
+**Status:** cadastro, estados e fluxo documentados e validados. As colunas opcionais de status permanecem `NULL` até serem preenchidas.
+
+## Telemetria
+
+- [x] Endpoint de ingestão `POST /api/v1/iot/telemetries`.
+- [x] Endpoint autenticado de consulta `GET /api/v1/iot/telemetries`.
+- [x] Persistência na tabela `telemetry_queue`.
+- [x] Validação dos campos obrigatórios e de `message_id` duplicado (`409`).
+- [x] Repetição do mesmo `message_id` não cria novo registro.
+- [x] Atualização de `last_seen_at` quando a posição GPS se repete.
+- [x] Telemetrias sem GPS aceitas e persistidas.
+- [x] Consulta ordenada por `id` decrescente (mais recentes primeiro).
+- [x] JSON malformado retorna `400`.
+
+**Status:** fluxo de telemetria validado por testes de integração.
+
+## Eventos
+
+- [x] Endpoint de ingestão `POST /api/v1/iot/events`.
+- [x] Persistência na tabela `events`.
+- [x] `message_id` obrigatório e protegido contra duplicidade (`409`).
+- [x] `event_type` obrigatório.
+- [x] Validação de `seal_status` quando informado.
+- [x] Estados de processamento definidos: `PENDING`, `PROCESSING`, `SYNCED` e `ERROR`.
+- [x] Criação automática de dispositivo inexistente no fluxo de eventos.
+
+**Status:** ingestão e validações implementadas. `event_type` é validado como obrigatório; não há catálogo fechado de tipos de evento.
+
+## Comandos
+
+- [x] Repository e service para comandos.
+- [x] Consulta de comandos pendentes por dispositivo.
+- [x] Confirmação de comando por `POST /api/v1/iot/commands/confirm`.
+- [x] Estados de confirmação `EXECUTADO` e `ERRO`.
+- [x] Registro de `executed_at` e `error_message`.
+- [x] Validação de API Key e ownership do dispositivo.
+- [x] Prevenção de reconfirmação.
+
+**Status:** fluxo manual de comandos implementado e testado.
+
+## Alertas
+
+- [x] Schema e persistência SQLite.
+- [x] Endpoint autenticado de criação `POST /api/v1/iot/alerts`.
+- [x] Validação dos tipos `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` e `COMMUNICATION_LOST`.
+- [x] Validação de existência de `status_id` e `severity_id` no catálogo `status`.
+- [x] Prevenção de `alert_id` duplicado (`409`).
+- [x] Validação da API Key e do vínculo da chave com o dispositivo.
+- [x] Teste HTTP de `SEAL_BROKEN`: resposta `201` e persistência confirmada no SQLite.
+- [ ] Definir códigos e significado de severidade no catálogo; a validação atual confirma existência do ID, não sua semântica como severidade.
+
+**Status:** endpoint básico concluído e validado; taxonomia de severidade pendente.
+
+## Banco de dados local
+
+### Tabelas
+
+- [x] `devices`
+- [x] `status`
+- [x] `telemetry_queue`
+- [x] `events`
+- [x] `commands`
+- [x] `alerts`
+- [ ] `sync_logs` e `sync_items` como tabelas operacionais no banco atual.
+
+### Relacionamentos e integridade
+
+- [x] `device_id` único em dispositivos.
+- [x] `message_id` único para eventos e telemetrias.
+- [x] `alert_id` e `command_id` únicos.
+- [x] `devices` → `telemetry_queue` por `device_id`.
+- [x] `devices` → `events` por `device_id`.
+- [x] `devices` → `commands` por `device_id`.
+- [x] `devices` → `alerts` por `device_id`.
+- [x] `alerts.status_id` e `alerts.severity_id` referenciam `status.id`.
+- [x] Chaves estrangeiras principais entre dispositivos, eventos, telemetrias, comandos e alertas.
+- [x] Migrações e normalizações de schema preservam os dados existentes nos fluxos cobertos.
+
+**Status:** schema SQLite local operacional; tabelas de sincronização ainda não estão ativas.
+
+## Testes e validação
+
+- [x] Compilação TypeScript validada com `npx tsc --noEmit`.
+- [x] Servidor iniciado localmente.
+- [x] Swagger e especificação OpenAPI validados.
+- [x] Gestão de dispositivos testada.
+- [x] Telemetria testada, incluindo duplicidade, GPS ausente e JSON inválido.
+- [x] Eventos testados, incluindo autenticação e validação de lacre.
+- [x] Comandos testados, incluindo confirmação, ownership e reconfirmação.
+- [x] Alertas testados, incluindo autenticação, validação, duplicidade e criação de `SEAL_BROKEN`.
+- [x] Casos de sucesso e erro cobertos pela suíte de integração (`40/40` na última execução registrada).
+- [ ] Reexecutar compilação e suíte após concluir as próximas funcionalidades.
+
+**Status:** funcionalidades atuais do MVP validadas; a suíte deve ser repetida a cada nova etapa.
+
+## Próximas entregas, na ordem acordada
+
+### 1. Associação Dispositivo → Lacre → Cilindro
+
+- [ ] Definir regras de associação, troca e desassociação.
+- [ ] Criar schema SQLite para lacres, cilindros e vínculos, com integridade referencial.
+- [ ] Implementar models/DTOs, repositories, services, controllers e rotas.
+- [ ] Validar ownership, entidades inexistentes, duplicidade e conflitos.
+- [ ] Testar persistência e atualização dos vínculos.
+- [ ] Atualizar OpenAPI e documentação.
+
+### 2. Histórico de associações
+
+- [ ] Definir dados e eventos que compõem o histórico.
+- [ ] Persistir início e término sem sobrescrever associações anteriores.
+- [ ] Implementar consulta por dispositivo, lacre e/ou cilindro.
+- [ ] Testar associações sucessivas, desassociação e ordenação temporal.
+- [ ] Documentar o contrato e exemplos.
+
+### 3. Geofence
+
+- [ ] Definir formato das áreas e regras de entrada, saída e limites geográficos.
+- [ ] Persistir geofences e vínculos com dispositivos.
+- [ ] Avaliar posições e detectar transições conforme as regras definidas.
+- [ ] Gerar e persistir os eventos/alertas correspondentes, incluindo `GEOFENCE_EXIT`.
+- [ ] Testar limites, transições, duplicidades e coordenadas inválidas.
+- [ ] Documentar configuração e endpoints.
+
+### 4. Comandos automáticos
+
+- [ ] Definir regras, condições e ações que disparam comandos.
+- [ ] Criar comandos automaticamente, evitando duplicidade indevida.
+- [ ] Definir expiração, repetição, falha e confirmação.
+- [ ] Testar disparo, não disparo, idempotência e confirmação.
+- [ ] Documentar regras e estados.
+
+### 5. Worker SQLite → PostgreSQL
+
+- [ ] Definir schema PostgreSQL, mapeamento e configuração segura de conexão.
+- [ ] Implementar leitura de pendências e envio ao PostgreSQL.
+- [ ] Implementar estados/tabelas de sincronização (`sync_logs` e `sync_items`).
+- [ ] Garantir transações, idempotência, retry e recuperação sem perda de dados.
+- [ ] Implementar inicialização, encerramento e logs operacionais do Worker.
+- [ ] Testar sucesso, repetição, indisponibilidade do PostgreSQL e recuperação.
+- [ ] Documentar configuração, execução e recuperação de falhas.
+
+## Fase de operação e conclusão
+
+- [ ] Definir política de expurgo e retenção.
+- [ ] Definir backup e procedimento de restauração.
+- [ ] Implementar observabilidade e métricas necessárias para operação.
+- [ ] Avaliar necessidade de dashboard operacional.
+- [ ] Executar compilação, suíte de testes e testes de integração com PostgreSQL.
+- [ ] Revisar documentação final e confirmar que todos os fluxos implantados estão descritos.
+
+## Status real
+
+| Área | Status |
+| --- | --- |
+| Arquitetura e API local | Implementada e validada para o MVP atual |
+| Segurança por API Key | Implementada para o MVP |
+| Dispositivos, estados, telemetria e eventos | Implementados e validados |
+| Comandos manuais | Implementados e validados |
+| Criação básica de alertas | Implementada e validada; severidade sem semântica definida |
+| Associação dispositivo/lacre/cilindro | Pendente |
+| Histórico de associações | Pendente |
+| Geofence | Pendente |
+| Comandos automáticos | Pendente |
+| Worker e sincronização PostgreSQL | Pendente |
+| Hardening adicional de segurança | Pendente, fora do MVP atual |
+
+**Conclusão:** a API local atual está operacional para os fluxos implementados. O projeto completo ainda não está concluído; faltam as próximas entregas do roadmap e a camada de sincronização/operação.
