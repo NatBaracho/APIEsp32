@@ -31,7 +31,7 @@ async function runTest(
 
 async function main() {
   console.log("==================================================");
-  console.log("🚀 INICIANDO SUÍTE COMPLETA DE TESTES DA API ESP32");
+  console.log("  INICIANDO SUÍTE COMPLETA DE TESTES DA API ESP32");
   console.log("==================================================\n");
 
   const TEST_DEVICE_ID = "DSP-TEST-AUTORUN";
@@ -662,15 +662,15 @@ async function main() {
   const failedCount = total - passedCount;
 
   console.log("\n==================================================");
-  console.log(`📊 RESULTADO FINAL DOS TESTES:`);
+  console.log(`  RESULTADO FINAL DOS TESTES:`);
   console.log(`   Total de Testes: ${total}`);
-  console.log(`   ✅ Passaram:     ${passedCount}`);
-  console.log(`   ❌ Falharam:     ${failedCount}`);
+  console.log(`     Passaram:     ${passedCount}`);
+  console.log(`     Falharam:     ${failedCount}`);
   console.log("==================================================");
 
   // Close server
   server.close(() => {
-    console.log("🛑 Servidor finalizado com sucesso.");
+    console.log("  Servidor finalizado com sucesso.");
     process.exit(failedCount > 0 ? 1 : 0);
   });
 }

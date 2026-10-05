@@ -4,13 +4,13 @@ Este documento registra o que já foi implementado e validado e o que falta para
 
 ## Arquitetura local
 
-- [x] Arquitetura IoT local definida.
-- [x] Fluxo ESP32 → API → SQLite documentado.
-- [x] API em Node.js, TypeScript e Express.
-- [x] Organização em routes, controllers, services, repositories e models.
-- [x] Especificação OpenAPI e interface Swagger disponíveis.
-- [x] Inicialização do SQLite com criação e normalização de schema.
-- [x] Modelo de dados local documentado.
+- ✅ Arquitetura IoT local definida.
+- ✅ Fluxo ESP32 → API → SQLite documentado.
+- ✅ API em Node.js, TypeScript e Express.
+- ✅ Organização em routes, controllers, services, repositories e models.
+- ✅ Especificação OpenAPI e interface Swagger disponíveis.
+- ✅ Inicialização do SQLite com criação e normalização de schema.
+- ✅ Modelo de dados local documentado.
 - [ ] Worker de sincronização em execução real.
 - [ ] PostgreSQL central integrado.
 
@@ -18,10 +18,10 @@ Este documento registra o que já foi implementado e validado e o que falta para
 
 ## Segurança do MVP
 
-- [x] API Key associada a dispositivo.
-- [x] Middleware valida chave ausente (`401`), inválida (`401`) e dispositivo inativo (`403`).
-- [x] Rotas protegidas validam se a chave pertence ao dispositivo informado (`403`).
-- [x] Autenticação aplicada aos fluxos de telemetria, comandos e alertas.
+- ✅ API Key associada a dispositivo.
+- ✅ Middleware valida chave ausente (`401`), inválida (`401`) e dispositivo inativo (`403`).
+- ✅ Rotas protegidas validam se a chave pertence ao dispositivo informado (`403`).
+- ✅ Autenticação aplicada aos fluxos de telemetria, comandos e alertas.
 
 **Status:** segurança por API Key implementada para o MVP.
 
@@ -36,64 +36,64 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 
 ## Dispositivos e estados
 
-- [x] Cadastro, consulta individual e listagem de dispositivos.
-- [x] API Key e versão de firmware associadas ao dispositivo.
-- [x] Ativação e desativação de dispositivo.
-- [x] Colunas opcionais `device_status_id`, `valve_status_id` e `seal_status_id`.
-- [x] Prevenção de cadastro duplicado (`409`).
-- [x] Criação automática de dispositivo no fluxo de eventos quando ainda não existe.
-- [x] Catálogo `status` para estados de dispositivo e lacre.
-- [x] Validação de `seal_status` em eventos (`LOCKED`, `UNLOCKED` ou `BROKEN`).
+- ✅ Cadastro, consulta individual e listagem de dispositivos.
+- ✅ API Key e versão de firmware associadas ao dispositivo.
+- ✅ Ativação e desativação de dispositivo.
+- ✅ Colunas opcionais `device_status_id`, `valve_status_id` e `seal_status_id`.
+- ✅ Prevenção de cadastro duplicado (`409`).
+- ✅ Criação automática de dispositivo no fluxo de eventos quando ainda não existe.
+- ✅ Catálogo `status` para estados de dispositivo e lacre.
+- ✅ Validação de `seal_status` em eventos (`LOCKED`, `UNLOCKED` ou `BROKEN`).
 
 **Status:** cadastro, estados e fluxo documentados e validados. As colunas opcionais de status permanecem `NULL` até serem preenchidas.
 
 ## Telemetria
 
-- [x] Endpoint de ingestão `POST /api/v1/iot/telemetries`.
-- [x] Endpoint autenticado de consulta `GET /api/v1/iot/telemetries`.
-- [x] Persistência na tabela `telemetry_queue`.
-- [x] Validação dos campos obrigatórios e de `message_id` duplicado (`409`).
-- [x] Repetição do mesmo `message_id` não cria novo registro.
-- [x] Atualização de `last_seen_at` quando a posição GPS se repete.
-- [x] Telemetrias sem GPS aceitas e persistidas.
-- [x] Consulta ordenada por `id` decrescente (mais recentes primeiro).
-- [x] JSON malformado retorna `400`.
+- ✅ Endpoint de ingestão `POST /api/v1/iot/telemetries`.
+- ✅ Endpoint autenticado de consulta `GET /api/v1/iot/telemetries`.
+- ✅ Persistência na tabela `telemetry_queue`.
+- ✅ Validação dos campos obrigatórios e de `message_id` duplicado (`409`).
+- ✅ Repetição do mesmo `message_id` não cria novo registro.
+- ✅ Atualização de `last_seen_at` quando a posição GPS se repete.
+- ✅ Telemetrias sem GPS aceitas e persistidas.
+- ✅ Consulta ordenada por `id` decrescente (mais recentes primeiro).
+- ✅ JSON malformado retorna `400`.
 
 **Status:** fluxo de telemetria validado por testes de integração.
 
 ## Eventos
 
-- [x] Endpoint de ingestão `POST /api/v1/iot/events`.
-- [x] Persistência na tabela `events`.
-- [x] `message_id` obrigatório e protegido contra duplicidade (`409`).
-- [x] `event_type` obrigatório.
-- [x] Validação de `seal_status` quando informado.
-- [x] Estados de processamento definidos: `PENDING`, `PROCESSING`, `SYNCED` e `ERROR`.
-- [x] Criação automática de dispositivo inexistente no fluxo de eventos.
+- ✅ Endpoint de ingestão `POST /api/v1/iot/events`.
+- ✅ Persistência na tabela `events`.
+- ✅ `message_id` obrigatório e protegido contra duplicidade (`409`).
+- ✅ `event_type` obrigatório.
+- ✅ Validação de `seal_status` quando informado.
+- ✅ Estados de processamento definidos: `PENDING`, `PROCESSING`, `SYNCED` e `ERROR`.
+- ✅ Criação automática de dispositivo inexistente no fluxo de eventos.
 
 **Status:** ingestão e validações implementadas. `event_type` é validado como obrigatório; não há catálogo fechado de tipos de evento.
 
 ## Comandos
 
-- [x] Repository e service para comandos.
-- [x] Consulta de comandos pendentes por dispositivo.
-- [x] Confirmação de comando por `POST /api/v1/iot/commands/confirm`.
-- [x] Estados de confirmação `EXECUTADO` e `ERRO`.
-- [x] Registro de `executed_at` e `error_message`.
-- [x] Validação de API Key e ownership do dispositivo.
-- [x] Prevenção de reconfirmação.
+- ✅ Repository e service para comandos.
+- ✅ Consulta de comandos pendentes por dispositivo.
+- ✅ Confirmação de comando por `POST /api/v1/iot/commands/confirm`.
+- ✅ Estados de confirmação `EXECUTADO` e `ERRO`.
+- ✅ Registro de `executed_at` e `error_message`.
+- ✅ Validação de API Key e ownership do dispositivo.
+- ✅ Prevenção de reconfirmação.
 
 **Status:** fluxo manual de comandos implementado e testado.
 
 ## Alertas
 
-- [x] Schema e persistência SQLite.
-- [x] Endpoint autenticado de criação `POST /api/v1/iot/alerts`.
-- [x] Validação dos tipos `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` e `COMMUNICATION_LOST`.
-- [x] Validação de existência de `status_id` e `severity_id` no catálogo `status`.
-- [x] Prevenção de `alert_id` duplicado (`409`).
-- [x] Validação da API Key e do vínculo da chave com o dispositivo.
-- [x] Teste HTTP de `SEAL_BROKEN`: resposta `201` e persistência confirmada no SQLite.
+- ✅ Schema e persistência SQLite.
+- ✅ Endpoint autenticado de criação `POST /api/v1/iot/alerts`.
+- ✅ Validação dos tipos `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` e `COMMUNICATION_LOST`.
+- ✅ Validação de existência de `status_id` e `severity_id` no catálogo `status`.
+- ✅ Prevenção de `alert_id` duplicado (`409`).
+- ✅ Validação da API Key e do vínculo da chave com o dispositivo.
+- ✅ Teste HTTP de `SEAL_BROKEN`: resposta `201` e persistência confirmada no SQLite.
 - [ ] Definir códigos e significado de severidade no catálogo; a validação atual confirma existência do ID, não sua semântica como severidade.
 
 **Status:** endpoint básico concluído e validado; taxonomia de severidade pendente.
@@ -102,40 +102,40 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 
 ### Tabelas
 
-- [x] `devices`
-- [x] `status`
-- [x] `telemetry_queue`
-- [x] `events`
-- [x] `commands`
-- [x] `alerts`
+- ✅ `devices`
+- ✅ `status`
+- ✅ `telemetry_queue`
+- ✅ `events`
+- ✅ `commands`
+- ✅ `alerts`
 - [ ] `sync_logs` e `sync_items` como tabelas operacionais no banco atual.
 
 ### Relacionamentos e integridade
 
-- [x] `device_id` único em dispositivos.
-- [x] `message_id` único para eventos e telemetrias.
-- [x] `alert_id` e `command_id` únicos.
-- [x] `devices` → `telemetry_queue` por `device_id`.
-- [x] `devices` → `events` por `device_id`.
-- [x] `devices` → `commands` por `device_id`.
-- [x] `devices` → `alerts` por `device_id`.
-- [x] `alerts.status_id` e `alerts.severity_id` referenciam `status.id`.
-- [x] Chaves estrangeiras principais entre dispositivos, eventos, telemetrias, comandos e alertas.
-- [x] Migrações e normalizações de schema preservam os dados existentes nos fluxos cobertos.
+- ✅ `device_id` único em dispositivos.
+- ✅ `message_id` único para eventos e telemetrias.
+- ✅ `alert_id` e `command_id` únicos.
+- ✅ `devices` → `telemetry_queue` por `device_id`.
+- ✅ `devices` → `events` por `device_id`.
+- ✅ `devices` → `commands` por `device_id`.
+- ✅ `devices` → `alerts` por `device_id`.
+- ✅ `alerts.status_id` e `alerts.severity_id` referenciam `status.id`.
+- ✅ Chaves estrangeiras principais entre dispositivos, eventos, telemetrias, comandos e alertas.
+- ✅ Migrações e normalizações de schema preservam os dados existentes nos fluxos cobertos.
 
 **Status:** schema SQLite local operacional; tabelas de sincronização ainda não estão ativas.
 
 ## Testes e validação
 
-- [x] Compilação TypeScript validada com `npx tsc --noEmit`.
-- [x] Servidor iniciado localmente.
-- [x] Swagger e especificação OpenAPI validados.
-- [x] Gestão de dispositivos testada.
-- [x] Telemetria testada, incluindo duplicidade, GPS ausente e JSON inválido.
-- [x] Eventos testados, incluindo autenticação e validação de lacre.
-- [x] Comandos testados, incluindo confirmação, ownership e reconfirmação.
-- [x] Alertas testados, incluindo autenticação, validação, duplicidade e criação de `SEAL_BROKEN`.
-- [x] Casos de sucesso e erro cobertos pela suíte de integração (`40/40` na última execução registrada).
+- ✅ Compilação TypeScript validada com `npx tsc --noEmit`.
+- ✅ Servidor iniciado localmente.
+- ✅ Swagger e especificação OpenAPI validados.
+- ✅ Gestão de dispositivos testada.
+- ✅ Telemetria testada, incluindo duplicidade, GPS ausente e JSON inválido.
+- ✅ Eventos testados, incluindo autenticação e validação de lacre.
+- ✅ Comandos testados, incluindo confirmação, ownership e reconfirmação.
+- ✅ Alertas testados, incluindo autenticação, validação, duplicidade e criação de `SEAL_BROKEN`.
+- ✅ Casos de sucesso e erro cobertos pela suíte de integração (`40/40` na última execução registrada).
 - [ ] Reexecutar compilação e suíte após concluir as próximas funcionalidades.
 
 **Status:** funcionalidades atuais do MVP validadas; a suíte deve ser repetida a cada nova etapa.
