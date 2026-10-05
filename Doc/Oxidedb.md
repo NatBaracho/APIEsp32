@@ -37,7 +37,7 @@ Worker de sincronização (futuro)
 - A API autentica o dispositivo, valida o JSON e grava a mensagem no SQLite.
 - Telemetrias, eventos e comandos são mantidos localmente no SQLite.
 - A tabela `commands` armazena comandos destinados aos dispositivos e seus resultados.
-- A sincronização com PostgreSQL ainda não está implementada no projeto atual.
+- Através desta API e do seu Worker de sincronização futuro, as telemetrias, eventos e comandos armazenados no SQLite serão sincronizados com o banco principal PostgreSQL (FluxID).
 
 ---
 

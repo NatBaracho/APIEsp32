@@ -9,7 +9,7 @@ Este documento descreve as regras implementadas na API, o schema do SQLite Oxide
 - Banco principal do projeto: PostgreSQL FluxID.
 - Banco local SQLite: `oxide.db` no diretório de trabalho do processo (`process.cwd()`); a Oxide funciona como buffer persistente da API.
 - A conexão habilita `PRAGMA foreign_keys = ON`.
-- A API atual ainda grava somente no SQLite e não sincroniza dados com PostgreSQL. Um serviço chamado `SyncService` está vazio e não há Worker operacional.
+- A API utiliza o banco local SQLite (`oxide.db`) como buffer de ingestão. Através desta API e de um Worker (como o `SyncService`, atualmente preparado como estrutura), os dados serão sincronizados com o banco principal PostgreSQL (FluxID).
 - O arquivo `FluxID.sql` é um dump PostgreSQL em formato custom, identificado pela assinatura `PGDMP`; apesar da extensão, não é um script SQL texto e deve ser tratado com `pg_restore`.
 
 ## 2. Rotas disponíveis
