@@ -2,6 +2,8 @@
 
 API REST em Node.js, TypeScript, Express e SQLite para receber dados de dispositivos ESP32.
 
+O banco principal do projeto é o PostgreSQL FluxID. A Oxide (`oxide.db`) funciona como armazenamento local e buffer persistente; a API ainda grava somente no SQLite, pois o Worker de sincronização não está implementado. O arquivo `FluxID.sql` acompanha um dump PostgreSQL em formato custom (`PGDMP`), não um script SQL texto; use as ferramentas `pg_restore` para inspecioná-lo ou restaurá-lo.
+
 ## Executar localmente
 
 ```bash

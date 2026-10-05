@@ -7,8 +7,10 @@ Este documento descreve o comportamento implementado atualmente na API e no banc
 - API REST em Node.js, TypeScript e Express.
 - Prefixo das rotas versionadas: `/api/v1`.
 - Banco local SQLite: `oxide.db` no diretório de trabalho do processo (`process.cwd()`).
+- Banco principal do projeto: PostgreSQL FluxID; a Oxide é o buffer local persistente da API.
 - A conexão habilita `PRAGMA foreign_keys = ON`.
-- A API atual não sincroniza dados com PostgreSQL. Um serviço chamado `SyncService` está vazio e não há Worker operacional.
+- A API atual ainda grava somente no SQLite e não sincroniza dados com PostgreSQL. Um serviço chamado `SyncService` está vazio e não há Worker operacional.
+- O arquivo `FluxID.sql` é um dump PostgreSQL em formato custom, identificado pela assinatura `PGDMP`; apesar da extensão, não é um script SQL texto e deve ser tratado com `pg_restore`.
 
 ## 2. Rotas disponíveis
 
@@ -212,5 +214,12 @@ A inicialização insere, se estiverem ausentes, os códigos `ACTIVE`, `INACTIVE
 - Geração automática de comandos.
 - Worker de sincronização, tabelas operacionais de sync e integração com PostgreSQL.
 - Política de severidade de alertas.
+
+## 8. Banco principal PostgreSQL FluxID
+
+- `FluxID.sql` é o artefato do banco principal PostgreSQL do projeto.
+- O cabeçalho do arquivo identifica um dump em formato custom do PostgreSQL. Não execute esse arquivo com `sqlite3` nem como script SQL simples via `psql -f`; inspecione ou restaure o dump com `pg_restore` em um ambiente PostgreSQL apropriado.
+- A API Oxide ainda não grava diretamente no FluxID. A integração e o Worker SQLite → PostgreSQL continuam pendentes; até sua implementação, `oxide.db` é a persistência usada pelos endpoints.
+- O catálogo interno do dump não foi listado neste ambiente porque `pg_restore` não está instalado. Use `pg_restore --list FluxID.sql` antes de planejar restauração ou mapeamento de tabelas.
 
 Para o script de criação do banco e instruções do DB Browser, consulte [Oxidedb.md](Oxidedb.md). Para payloads do firmware, consulte [ESP32-envio-de-dados.md](ESP32-envio-de-dados.md).
