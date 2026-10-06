@@ -52,22 +52,20 @@ export class TelemetryService {
         telemetry.device_id
       );
 
+    // Só é repetição quando posição e estado do lacre são iguais; uma mudança
+    // de estado (ex.: LOCKED -> BROKEN) no mesmo lugar precisa de registro próprio
     if (
       lastTelemetry &&
       typeof telemetry.latitude === "number" &&
       typeof telemetry.longitude === "number" &&
       lastTelemetry.latitude === telemetry.latitude &&
-      lastTelemetry.longitude === telemetry.longitude
+      lastTelemetry.longitude === telemetry.longitude &&
+      (lastTelemetry.seal_status ?? null) === (telemetry.seal_status ?? null)
     ) {
 
       this.repository.updateLastSeen(
-        lastTelemetry.id!
-      );
-
-      this.repository.registerPositionRepeat(
-        telemetry.message_id,
-        telemetry.device_id,
-        lastTelemetry.id!
+        lastTelemetry.id!,
+        telemetry.message_id
       );
 
       console.log(

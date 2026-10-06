@@ -33,10 +33,14 @@ export class TelemetryQueueRepository {
         gsm_signal,
         payload_json,
         last_seen_at,
+        seal_status,
+        device_attempt_count,
         status,
         attempt_count
       )
       VALUES (
+        ?,
+        ?,
         ?,
         ?,
         ?,
@@ -63,6 +67,8 @@ export class TelemetryQueueRepository {
       telemetry.gsm_signal ?? null,
       telemetry.payload_json ?? JSON.stringify(telemetry),
       telemetry.last_seen_at ?? null,
+      telemetry.seal_status ?? null,
+      telemetry.device_attempt_count ?? null,
       "PENDING",
       0
     );
@@ -83,7 +89,7 @@ export class TelemetryQueueRepository {
 
   }
 
-  // Considera também os message_id de posições repetidas, que não têm linha própria
+  // Considera também o message_id da última posição repetida, que não tem linha própria
   messageIdExists(
     messageId: string
   ): boolean {
@@ -91,32 +97,12 @@ export class TelemetryQueueRepository {
     return Boolean(
       db
         .prepare(`
-          SELECT 1 FROM telemetry_queue WHERE message_id = ?
-          UNION ALL
-          SELECT 1 FROM telemetry_position_repeats WHERE message_id = ?
+          SELECT 1
+          FROM telemetry_queue
+          WHERE message_id = ?
+            OR last_repeat_message_id = ?
         `)
         .get(messageId, messageId)
-    );
-
-  }
-
-  registerPositionRepeat(
-    messageId: string,
-    deviceId: string,
-    telemetryId: number
-  ): void {
-
-    db.prepare(`
-      INSERT INTO telemetry_position_repeats (
-        message_id,
-        device_id,
-        telemetry_id
-      )
-      VALUES (?, ?, ?)
-    `).run(
-      messageId,
-      deviceId,
-      telemetryId
     );
 
   }
@@ -162,14 +148,20 @@ export class TelemetryQueueRepository {
   }
 
   updateLastSeen(
-    id: number
+    id: number,
+    repeatMessageId: string
   ): void {
 
     db.prepare(`
       UPDATE telemetry_queue
-      SET last_seen_at = CURRENT_TIMESTAMP
+      SET
+        last_seen_at = CURRENT_TIMESTAMP,
+        last_repeat_message_id = ?
       WHERE id = ?
-    `).run(id);
+    `).run(
+      repeatMessageId,
+      id
+    );
 
   }
 

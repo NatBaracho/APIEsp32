@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { sealStatuses } from "../models/Event";
 import { EventService } from "../services/EventService";
 
 export class EventController {
@@ -29,8 +30,6 @@ export class EventController {
         return;
       }
 
-      const sealStatuses = ["LOCKED", "UNLOCKED", "BROKEN"];
-
       if (
         event.seal_status != null &&
         !sealStatuses.includes(event.seal_status)
@@ -43,9 +42,25 @@ export class EventController {
         return;
       }
 
-      const created = this.service.create(
-        event
-      );
+      if (
+        event.attempt_count != null &&
+        (!Number.isInteger(event.attempt_count) || event.attempt_count < 0)
+      ) {
+        res.status(400).json({
+          success: false,
+          message: "attempt_count deve ser um inteiro maior ou igual a 0"
+        });
+
+        return;
+      }
+
+      // attempt_count do ESP32 conta as tentativas de envio do dispositivo;
+      // a coluna attempt_count da fila pertence ao Worker de sincronização
+      const created = this.service.create({
+        ...event,
+        device_attempt_count: event.attempt_count,
+        payload_json: event.payload_json ?? JSON.stringify(event)
+      });
 
       if (!created) {
         res.status(409).json({

@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { sealStatuses } from "../models/Event";
 import { TelemetryService } from "../services/TelemetryService";
 
 const numericFields = [
@@ -93,7 +94,37 @@ export class TelemetryController {
         return;
       }
 
-      const result = this.service.create(telemetry);
+      if (
+        telemetry.seal_status != null &&
+        !sealStatuses.includes(telemetry.seal_status)
+      ) {
+        res.status(400).json({
+          success: false,
+          message: "seal_status deve ser LOCKED, UNLOCKED ou BROKEN"
+        });
+
+        return;
+      }
+
+      if (
+        telemetry.attempt_count != null &&
+        (!Number.isInteger(telemetry.attempt_count) || telemetry.attempt_count < 0)
+      ) {
+        res.status(400).json({
+          success: false,
+          message: "attempt_count deve ser um inteiro maior ou igual a 0"
+        });
+
+        return;
+      }
+
+      // attempt_count do ESP32 conta as tentativas de envio do dispositivo;
+      // a coluna attempt_count da fila pertence ao Worker de sincronização
+      const result = this.service.create({
+        ...telemetry,
+        device_attempt_count: telemetry.attempt_count,
+        payload_json: telemetry.payload_json ?? JSON.stringify(telemetry)
+      });
 
       if (result === "duplicate") {
         res.status(409).json({
@@ -108,6 +139,15 @@ export class TelemetryController {
         res.status(404).json({
           success: false,
           message: "Dispositivo não encontrado"
+        });
+
+        return;
+      }
+
+      if (result === "position_repeated") {
+        res.status(200).json({
+          success: true,
+          message: "Posição já registrada; data e hora atualizadas"
         });
 
         return;

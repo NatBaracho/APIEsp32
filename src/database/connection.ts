@@ -264,19 +264,17 @@ if (
   db.exec("ALTER TABLE telemetry_queue ADD COLUMN last_seen_at DATETIME");
 }
 
-// Registra o message_id das telemetrias com posição repetida, que não geram
-// nova linha em telemetry_queue, para que um reenvio seja detectado (409)
+// Adicionadas depois da normalização, que recria telemetry_queue sem elas.
+// last_repeat_message_id: message_id da última posição repetida, para que
+// um reenvio dela seja detectado (409) sem criar nova linha
+addColumnIfMissing("telemetry_queue", "last_repeat_message_id", "TEXT");
+addColumnIfMissing("telemetry_queue", "seal_status", "TEXT");
+addColumnIfMissing("telemetry_queue", "device_attempt_count", "INTEGER");
+addColumnIfMissing("events", "device_attempt_count", "INTEGER");
+
 db.exec(`
-  CREATE TABLE IF NOT EXISTS telemetry_position_repeats (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    message_id TEXT NOT NULL UNIQUE,
-    device_id TEXT NOT NULL,
-    telemetry_id INTEGER NOT NULL,
-    received_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (telemetry_id)
-      REFERENCES telemetry_queue(id)
-      ON DELETE CASCADE
-  )
+  CREATE INDEX IF NOT EXISTS idx_telemetry_last_repeat_message_id
+  ON telemetry_queue(last_repeat_message_id)
 `);
 
 // Bancos antigos não têm CHECK em devices.active; SQLite não permite

@@ -226,6 +226,17 @@ const openApiSpec = {
                     type: "string",
                     format: "date-time",
                     example: "2026-10-04T15:30:00.000Z"
+                  },
+                  seal_status: {
+                    type: "string",
+                    enum: ["LOCKED", "UNLOCKED", "BROKEN"],
+                    example: "LOCKED"
+                  },
+                  attempt_count: {
+                    type: "integer",
+                    minimum: 0,
+                    description: "Tentativas de envio do ESP32; gravado em device_attempt_count",
+                    example: 1
                   }
                 }
               }
@@ -233,6 +244,7 @@ const openApiSpec = {
           }
         },
         responses: {
+          "200": { description: "Posição e estado do lacre iguais à última telemetria; data e hora atualizadas" },
           "202": { description: "Telemetria recebida" },
           "400": { description: "message_id e device_id são obrigatórios ou campo com tipo inválido" },
           "404": { description: "Dispositivo não encontrado" },
@@ -278,6 +290,12 @@ const openApiSpec = {
                     example: "LOCKED"
                   },
                   payload_json: { type: "string", example: "{\"source\":\"sensor\"}" },
+                  attempt_count: {
+                    type: "integer",
+                    minimum: 0,
+                    description: "Tentativas de envio do ESP32; gravado em device_attempt_count",
+                    example: 1
+                  }
                 }
               }
             }
