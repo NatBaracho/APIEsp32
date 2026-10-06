@@ -1,11 +1,11 @@
 # Plano de Teste — FluxID / Oxide IoT
 
-**Versão:** 1.2
+**Versão:** 1.3
 **Data:** 06/10/2026
 **Escopo:** API Oxide (Node.js + TypeScript + Express + SQLite), sincronização com o PostgreSQL FluxID e API FluxID (NestJS) planejada
 **Validação humana:** Natã da Silva Baracho
 
-> Este plano consolida o que já foi implementado e testado (suíte `tests/api.test.ts`, 50 casos) e o que ainda precisa ser testado conforme o `Checklist-Projeto.md`, o `Banco_FluxID.md` (v3.0) e o `Regras-de-Negocio-e-Banco-Oxide.md`. Cada caso indica sua situação: **Automatizado**, **Manual executado** ou **Pendente**.
+> Este plano consolida o que já foi implementado e testado (suíte `tests/api.test.ts`, 52 casos) e o que ainda precisa ser testado conforme o `Checklist-Projeto.md`, o `Banco_FluxID.md` (v3.0) e o `Regras-de-Negocio-e-Banco-Oxide.md`. Cada caso indica sua situação: **Automatizado**, **Manual executado** ou **Pendente**.
 
 ---
 
@@ -74,7 +74,7 @@ Princípios:
 | Servidor | `npm start`, porta 3000 (`PORT` configurável) |
 | Banco | `oxide.db` em `process.cwd()`, com `PRAGMA foreign_keys = ON` |
 | Dispositivo semente | `DSP-000001`, chave `auto-DSP-000001` |
-| Dispositivos de teste | `DSP-TEST-AUTORUN`, `DSP-TEST-INACTIVE` (`active = 0`), `DSP-TEST-AUTOCREATE` |
+| Dispositivos de teste | `DSP-TEST-AUTORUN`, `DSP-TEST-INACTIVE` (`active = 0`); `DSP-TEST-AUTOCREATE` é usado só para confirmar que **não** há criação automática |
 | Catálogo `status` | `ACTIVE`, `INACTIVE`, `LOCKED`, `UNLOCKED`, `BROKEN` (IDs não devem ser assumidos) |
 | PostgreSQL | Dump `FluxID.sql` (formato custom, `PGDMP`) restaurado em banco local separado via `pg_restore` |
 | Massa FluxID | 3 organizações, 3 usuários, 20 destinatários, 50 cilindros/lacres/dispositivos, 200 telemetrias, 10 eventos, 10 alertas (sintética) |
@@ -93,7 +93,7 @@ Pré-condição para toda execução: banco com schema criado pelo script do `Ox
 **Saída (aprovação)**
 - 100% dos casos de severidade Alta aprovados.
 - Nenhum defeito crítico ou alto aberto.
-- Suíte automatizada sem falhas (hoje 50/50).
+- Suíte automatizada sem falhas (hoje 52/52).
 - Banco limpo após o teardown (zero registros `DSP-TEST%`).
 
 **Suspensão**
@@ -121,8 +121,8 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 
 | ID | Caso | Resultado esperado | Prior. | Sit. |
 | --- | --- | --- | --- | --- |
-| DEV-01 | `GET /devices` | `200`, array contendo `DSP-000001` | Alta | A |
-| DEV-02 | `GET /devices/:deviceId` existente | `200`, `device_id` correto | Alta | A |
+| DEV-01 | `GET /devices` | `200`, array contendo `DSP-000001`, sem `api_key` em nenhum item | Alta | A |
+| DEV-02 | `GET /devices/:deviceId` existente | `200`, `device_id` correto, sem `api_key` | Alta | A |
 | DEV-03 | `GET /devices/:deviceId` inexistente | `404`, `success: false` | Alta | A |
 | DEV-04 | `POST /devices` sem campos | `400` | Alta | A |
 | DEV-05 | `POST /devices` válido | `201`, `active = 1` por padrão, status opcionais `NULL` | Alta | A |
@@ -145,8 +145,8 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 | AUT-05 | Chave de outro dispositivo em comandos | `403 API Key não pertence ao dispositivo` | Alta | A |
 | AUT-06 | Chave de outro dispositivo em alertas | `403` | Alta | A |
 | AUT-07 | Dispositivo-alvo inexistente em rota protegida | `404` | Média | P |
-| AUT-08 | Chave de outro dispositivo em `POST /telemetries` | **Hoje aceita (`202`)**; decisão pendente. Definir esperado (`403`) e testar após a correção | Alta | P |
-| AUT-09 | Chave de outro dispositivo em `POST /events` | **Hoje aceita (`202`)**; decisão pendente | Alta | P |
+| AUT-08 | Chave de outro dispositivo em `POST /telemetries` | `403 API Key não pertence ao dispositivo`, nenhuma linha | Alta | A |
+| AUT-09 | Chave de outro dispositivo em `POST /events` | `403 API Key não pertence ao dispositivo`, nenhuma linha | Alta | A |
 | AUT-10 | Header em minúsculas (`x-api-key`) | Aceito (headers HTTP não diferenciam caixa) | Baixa | P |
 
 ### 6.4 Telemetria
@@ -189,7 +189,7 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 | EVT-04 | Evento válido com `seal_status: LOCKED` | `202`, `seal_status = LOCKED`, `status = PENDING` | Alta | A |
 | EVT-05 | `seal_status` `UNLOCKED` e `BROKEN` | `202` em ambos | Alta | P |
 | EVT-06 | `seal_status` `ACTIVE`/`INACTIVE` | `400` (não pertencem ao lacre) | Média | P |
-| EVT-07 | Dispositivo inexistente | `202` e dispositivo criado com chave `auto-<device_id>` e firmware `unknown` | Alta | A |
+| EVT-07 | Dispositivo não cadastrado | `404 Dispositivo não encontrado`; nenhum dispositivo é criado (sem criação automática) | Alta | A |
 | EVT-08 | `message_id` duplicado | `409`, sem nova linha | Alta | A |
 | EVT-09 | `event_type` gravado em `events.message_type` | Valor conferido via SQL | Média | P |
 | EVT-10 | Cliente tenta enviar `status` no payload | Ignorado; servidor define `PENDING` | Média | P |
@@ -264,10 +264,10 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 
 | ID | Caso | Esperado | Prior. | Sit. |
 | --- | --- | --- | --- | --- |
-| SEG-01 | `GET /devices` e `GET /devices/:id` sem autenticação | **Risco conhecido:** retornam `api_key`. Definir correção (autenticação e projeção sem `api_key`) e criar teste de regressão que garanta ausência de `api_key` na resposta | Alta | P |
-| SEG-02 | `POST /devices` sem autenticação | Definir se deve exigir credencial administrativa | Alta | P |
-| SEG-03 | `GET /iot/telemetries` | Hoje retorna dados de todos os dispositivos a qualquer chave válida; definir se deve filtrar pelo dispositivo da chave | Alta | P |
-| SEG-04 | Dispositivo criado automaticamente via evento recebe chave previsível `auto-<device_id>` | Avaliar risco; teste que impeça acesso indevido com chave deduzida | Alta | P |
+| SEG-01 | `GET /devices` e `GET /devices/:id` sem autenticação | `200` sem o campo `api_key`. As rotas continuam abertas por decisão do responsável (equipe e montador do lacre) | Alta | A |
+| SEG-02 | `POST /devices` sem autenticação | **Decisão aceita:** continua aberto, sem credencial administrativa. É cadastro provisório até o Worker trazer o cadastro oficial do FluxID | Média | Decidido |
+| SEG-03 | `GET /iot/telemetries` | **Decisão aceita:** continua retornando as telemetrias de todos os dispositivos a qualquer chave válida, para a equipe acompanhar os testes | Média | Decidido |
+| SEG-04 | Evento para dispositivo não cadastrado | `404`; nenhum dispositivo criado e a chave deduzida `auto-<device_id>` responde `401` | Alta | M |
 | SEG-05 | Injeção SQL em `device_id`, `message_id`, `title` (ex.: `' OR 1=1 --`) | Consultas parametrizadas; nenhuma alteração; resposta tratada | Alta | P |
 | SEG-06 | Payload muito grande (ex.: 10 MB) | Rejeitado com `413` ou tratado sem derrubar o servidor | Média | P |
 | SEG-07 | Erro interno | Resposta padronizada sem stack trace ou detalhes do banco | Média | P |
@@ -433,11 +433,11 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 
 | Indicador | Valor |
 | --- | --- |
-| Suíte automatizada (`npm test`) | 50 casos (49 testes e 1 de teardown), 50 aprovados em 06/10/2026 |
+| Suíte automatizada (`npm test`) | 52 casos (51 testes e 1 de teardown), 52 aprovados em 06/10/2026 |
 | Compilação (`npx tsc --noEmit`) | Aprovada em 06/10/2026 |
-| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. Ambos **aprovados por Natã da Silva Baracho** |
+| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança). Todos **aprovados por Natã da Silva Baracho** |
 | Cobertura da suíte | Dispositivos, autenticação, telemetria, eventos, comandos e alertas (fluxo principal e erros mais comuns) |
-| Lacunas prioritárias | AUT-08/09, SEG-01 a SEG-05, TEL-19, ALT-07/08/12, EVT-05, BD-04/11/16 |
+| Lacunas prioritárias | SEG-05, TEL-19, ALT-07/08/12, EVT-05, BD-04/11/16 (fora da suíte; cobertos pelo Roteiro) |
 | Entregas futuras | Todos os casos da seção 10 pendentes (funcionalidades ainda não implementadas) |
 
 ---
@@ -449,8 +449,8 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | R1 | A suíte atual grava na `oxide.db` real (limpa por `DELETE ... LIKE 'DSP-TEST%'` no início e no fim); falha no meio pode deixar resíduos ou afetar dados | Usar banco de teste dedicado (`DB_PATH` por variável de ambiente) ou cópia temporária |
 | R2 | Testes dependem do dispositivo semente `DSP-000001` e da chave `auto-DSP-000001` | Criar a semente no setup da suíte |
 | R3 | Testes assumem `status_id = 1` e `severity_id = 2`; IDs do catálogo podem variar entre bancos | Buscar os IDs por `code` no setup |
-| R4 | Exposição de `api_key` nos `GET /devices` | SEG-01; corrigir antes de expor a API fora de ambiente controlado |
-| R5 | Ownership não validado em telemetria e eventos | AUT-08/09; decidir regra |
+| R4 | Exposição de `api_key` nos `GET /devices` | **Mitigado** na entrega A: respostas sem `api_key` (SEG-01) |
+| R5 | Ownership não validado em telemetria e eventos | **Mitigado** na entrega A: `403` para chave de outro dispositivo (AUT-08/09) |
 | R6 | Severidade sem semântica | ALT-12; definir catálogo |
 | R7 | Divergência de modelos (Oxide × FluxID) pode causar rejeição em massa no Worker | Casos SYN-06 a SYN-13 antes de implementar a sincronização |
 | R8 | Testes concorrentes não cobertos (SQLite com `better-sqlite3` é síncrono, mas há risco entre processos). Telemetria e alertas convertem violação `UNIQUE` em `409`; eventos e dispositivos ainda responderiam `500` | TEL-19 |
@@ -488,3 +488,4 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | 1.0 | 05/10/2026 | Criação do plano com base nos documentos do projeto e na suíte de 40 testes |
 | 1.1 | 06/10/2026 | Correções na API: idempotência de posição repetida, `status`/`attempt_count` controlados pelo servidor, `api_key` única, validação de `active` e de tipos da telemetria, `404` para dispositivo inexistente. Novos casos DEV-10 a DEV-12, TEL-20 a TEL-22, BD-16 e BD-17; TEL-12, TEL-15 e BD-08 revisados; suíte com 46 casos |
 | 1.2 | 06/10/2026 | Ajustes definidos por Natã da Silva Baracho: `last_repeat_message_id` no lugar da tabela `telemetry_position_repeats`; posição repetida responde `200`; `seal_status` na telemetria e repetição só com posição e lacre iguais; `attempt_count` do ESP32 em `device_attempt_count`. Novos casos TEL-23 a TEL-25 e EVT-13; TEL-04, TEL-20, TEL-21, EVT-11, BD-01 e BD-17 revisados; suíte com 50 casos |
+| 1.3 | 06/10/2026 | Entrega A (segurança), decisões de Natã da Silva Baracho: `api_key` fora das respostas de `/devices` (SEG-01), chave do próprio dispositivo em telemetria e eventos (AUT-08/09), sem criação automática de dispositivo (EVT-07, SEG-04); SEG-02 e SEG-03 registrados como decisões aceitas; R4 e R5 mitigados; suíte com 52 casos |

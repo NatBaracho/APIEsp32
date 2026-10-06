@@ -48,7 +48,7 @@ Use **Try it out** para executar as requisições. Para telemetrias e eventos, c
 | `POST` | `/api/v1/iot/commands/confirm` | Confirmar execução ou erro de comando |
 | `POST` | `/api/v1/iot/alerts` | Registrar alerta do dispositivo |
 
-Os POSTs de telemetria, eventos e alertas exigem `X-API-Key`; no alerta, a chave deve pertencer ao `device_id` enviado. Os campos `device_id` e `message_id` identificam os registros; `message_id` deve ser único por mensagem. Dispositivo repetido retorna `409 Dispositivo duplicado` e API Key já usada por outro dispositivo retorna `409 API Key já está em uso`; mensagem repetida retorna `409 Mensagem duplicada` e não cria outro registro. `status` e `attempt_count` da fila são sempre definidos pelo servidor; o `attempt_count` enviado pelo ESP32 (tentativas de envio) é gravado em `device_attempt_count`.
+Os POSTs de telemetria, eventos e alertas exigem `X-API-Key` do próprio `device_id` enviado (`403` se for de outro). O dispositivo precisa estar cadastrado em `POST /api/v1/devices` (provisório até o cadastro vir do FluxID); não há criação automática (`404`). As rotas de dispositivos são abertas, mas não mostram a `api_key`. Os campos `device_id` e `message_id` identificam os registros; `message_id` deve ser único por mensagem. Dispositivo repetido retorna `409 Dispositivo duplicado` e API Key já usada por outro dispositivo retorna `409 API Key já está em uso`; mensagem repetida retorna `409 Mensagem duplicada` e não cria outro registro. `status` e `attempt_count` da fila são sempre definidos pelo servidor; o `attempt_count` enviado pelo ESP32 (tentativas de envio) é gravado em `device_attempt_count`.
 
 Telemetrias também podem informar `last_seen_at` em ISO 8601; o campo é opcional e fica `NULL` quando omitido.
 A telemetria informa o estado do lacre em `seal_status` (`LOCKED`, `UNLOCKED` ou `BROKEN`). Quando latitude, longitude e `seal_status` forem iguais aos da última telemetria do dispositivo, a API responde `200 Posição já registrada; data e hora atualizadas`, atualiza apenas `last_seen_at` e guarda o `message_id` em `last_repeat_message_id`, sem inserir outra linha; um reenvio desse `message_id` retorna `409`. Se o estado do lacre mudar no mesmo lugar, uma nova linha é gravada.
@@ -68,7 +68,7 @@ A tabela `alerts` armazena alertas associados a dispositivos. `POST /api/v1/iot/
 
 - [Checklist de conclusão do projeto](Doc/Checklist-Projeto.md)
 - [Regras de negócio da API e bancos FluxID/Oxide](Doc/Regras-de-Negocio-e-Banco-Oxide.md)
-- [Desenvolvimento, testes e histórico de correções](Doc/Desenvolvimento.md)
+- [Desenvolvimento: como a API funciona (guia para o ESP32) e histórico de testes](Doc/Desenvolvimento.md)
 - [Integração e payloads do ESP32](Doc/ESP32-envio-de-dados.md)
 - [Especificação do banco SQLite Oxide](Doc/Oxidedb.md)
 - [Banco PostgreSQL FluxID](Doc/Banco_FluxID.md)

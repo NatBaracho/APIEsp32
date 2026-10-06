@@ -52,13 +52,11 @@ X-API-Key: abc123
 - Em termos de banco, essa chave fica na tabela `devices`, no campo `api_key`.
 - O backend valida essa chave antes de aceitar os dados do ESP32.
 
-A chave deve ser a do dispositivo cadastrado no banco, geralmente com o padrão:
+A chave deve ser a **do próprio dispositivo** informado em `device_id`. Com a chave de outro dispositivo, a API responde `403` com `{"success":false,"message":"API Key não pertence ao dispositivo"}`.
 
-```text
-auto-DSP-000001
-```
+O dispositivo precisa estar **cadastrado antes** de enviar dados. O cadastro oficial fica no FluxID; até o Worker trazer esse cadastro, ele é feito uma vez em `POST /api/v1/devices` com `device_id` e `api_key` (veja a seção 1.3 do [Desenvolvimento.md](Desenvolvimento.md)). Dispositivo não cadastrado recebe `404` com `{"success":false,"message":"Dispositivo não encontrado"}`; a API não cria dispositivos automaticamente.
 
-O header `X-API-Key` é exigido nos POSTs de telemetria e eventos. As rotas GET de dispositivos não usam esse middleware atualmente.
+O header `X-API-Key` é exigido nos POSTs de telemetria e eventos. As rotas de dispositivos (`/api/v1/devices`) são abertas, mas não mostram a `api_key`: guarde a chave no momento do cadastro.
 O GET de telemetrias também exige `X-API-Key`, pois retorna dados armazenados dos dispositivos.
 As rotas de comandos exigem a chave do próprio dispositivo consultado ou informado na confirmação.
 O registro de alertas também exige `X-API-Key` correspondente ao `device_id` enviado.
@@ -508,6 +506,7 @@ O firmware do ESP32 deve seguir este padrão:
 4. enviar por HTTP para a API
 5. incluir `X-API-Key` no header
 6. evitar repetir `message_id` para não disparar duplicidade
+7. tratar cada código de resposta conforme a tabela da seção 1.5 do [Desenvolvimento.md](Desenvolvimento.md): `200`, `202` e `409` são sucesso; `400`, `401`, `403` e `404` não devem ser reenviados; `500` ou falta de resposta são reenviados com o mesmo `message_id` e `attempt_count + 1`
 
 ---
 
