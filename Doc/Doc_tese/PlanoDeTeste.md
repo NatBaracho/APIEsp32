@@ -1,0 +1,475 @@
+# Plano de Teste — FluxID / Oxide IoT
+
+**Versão:** 1.0
+**Data:** 05/10/2026
+**Escopo:** API Oxide (Node.js + TypeScript + Express + SQLite), sincronização com o PostgreSQL FluxID e API FluxID (NestJS) planejada
+**Validação humana:** Natã da Silva Baracho
+
+> Este plano consolida o que já foi implementado e testado (suíte `tests/api.test.ts`, 40 casos) e o que ainda precisa ser testado conforme o `Checklist-Projeto.md`, o `Banco_FluxID.md` (v3.0) e o `Regras-de-Negocio-e-Banco-Oxide.md`. Cada caso indica sua situação: **Automatizado**, **Manual executado** ou **Pendente**.
+
+---
+
+## 1. Objetivo
+
+Garantir que a cadeia ESP32 → API Oxide → SQLite (→ Worker → PostgreSQL FluxID) atenda às regras de negócio de segurança, rastreabilidade e controle operacional, com integridade de dados, idempotência e tratamento correto de erros.
+
+Objetivos específicos:
+
+- Confirmar os contratos HTTP (status e mensagens) de todos os endpoints.
+- Validar autenticação por API Key e ownership do dispositivo.
+- Garantir idempotência por `message_id`, `alert_id`, `command_id` e `device_id`.
+- Verificar integridade do schema SQLite (constraints, FKs, migrações).
+- Preparar a verificação das próximas entregas: associação dispositivo/lacre/cilindro, histórico, geofence, comandos automáticos e Worker SQLite → PostgreSQL.
+- Registrar riscos de segurança conhecidos e seus testes de regressão.
+
+---
+
+## 2. Escopo
+
+### 2.1 Dentro do escopo
+
+| Área | Itens |
+| --- | --- |
+| API Oxide | `/`, `/api-docs`, `/api/v1/devices`, `/api/v1/iot/telemetries`, `/events`, `/commands`, `/alerts` |
+| Segurança | Middleware `X-API-Key`, ownership, dispositivo inativo |
+| Banco SQLite | Tabelas `devices`, `status`, `telemetry_queue`, `events`, `commands`, `alerts`; constraints; migrações |
+| Regras de telemetria | Duplicidade, mesma posição GPS, ausência de GPS, `last_seen_at` |
+| Firmware | Contrato de payload do ESP32 |
+| Entregas futuras | Associação, histórico, geofence, comandos automáticos, Worker |
+| API FluxID (planejada) | CRUD NestJS, RBAC, multiempresa, transações |
+
+### 2.2 Fora do escopo (neste momento)
+
+- Financeiro, portal do cliente final, contratos avançados, IA e ERP (fora do MVP).
+- Testes de hardware do lacre (mecânica e NFC).
+- Testes de carga em produção (apenas planejados na seção 10).
+- Backup, retenção e observabilidade (fase de operação; ver seção 11).
+
+---
+
+## 3. Estratégia e níveis de teste
+
+| Nível | Descrição | Ferramenta |
+| --- | --- | --- |
+| Compilação | Verificação de tipos | `npx tsc --noEmit` |
+| Integração (E2E HTTP) | Chamadas reais à API contra SQLite | `npm test` (`tests/api.test.ts`, `fetch`) |
+| Banco de dados | Verificação de schema, constraints e FKs | `PRAGMA table_info`, `PRAGMA foreign_key_list`, consultas SQL |
+| Manual exploratório | Swagger UI e Postman | `http://localhost:3000/api-docs` |
+| Segurança | Casos de acesso indevido e exposição de dados | Postman / scripts |
+| Sincronização | SQLite → PostgreSQL com falhas simuladas | Banco local de análise, `pg_restore` do dump |
+| Desempenho (futuro) | Ingestão de telemetria em volume | A definir (k6 ou autocannon) |
+
+Princípios:
+
+1. Testes não devem alterar a base real: usar cópia ou banco dedicado (ver risco R1).
+2. Cada caso é repetível; dados de teste usam prefixo `DSP-TEST`.
+3. Cada nova entrega reexecuta compilação e suíte completa (item pendente do checklist).
+
+---
+
+## 4. Ambiente e dados de teste
+
+| Item | Definição |
+| --- | --- |
+| Servidor | `npm start`, porta 3000 (`PORT` configurável) |
+| Banco | `oxide.db` em `process.cwd()`, com `PRAGMA foreign_keys = ON` |
+| Dispositivo semente | `DSP-000001`, chave `auto-DSP-000001` |
+| Dispositivos de teste | `DSP-TEST-AUTORUN`, `DSP-TEST-INACTIVE` (`active = 0`), `DSP-TEST-AUTOCREATE` |
+| Catálogo `status` | `ACTIVE`, `INACTIVE`, `LOCKED`, `UNLOCKED`, `BROKEN` (IDs não devem ser assumidos) |
+| PostgreSQL | Dump `FluxID.sql` (formato custom, `PGDMP`) restaurado em banco local separado via `pg_restore` |
+| Massa FluxID | 3 organizações, 3 usuários, 20 destinatários, 50 cilindros/lacres/dispositivos, 200 telemetrias, 10 eventos, 10 alertas (sintética) |
+
+Pré-condição para toda execução: banco com schema criado pelo script do `Oxidedb.md` ou pela inicialização da aplicação; backup antes de alterações estruturais.
+
+---
+
+## 5. Critérios de entrada, saída e suspensão
+
+**Entrada**
+- Compilação sem erros.
+- Servidor iniciado e `GET /` respondendo `200`.
+- Banco acessível e com permissão de escrita.
+
+**Saída (aprovação)**
+- 100% dos casos de severidade Alta aprovados.
+- Nenhum defeito crítico ou alto aberto.
+- Suíte automatizada sem falhas (hoje 40/40).
+- Banco limpo após o teardown (zero registros `DSP-TEST%`).
+
+**Suspensão**
+- Falha de compilação.
+- Corrupção ou perda de dados no `oxide.db`.
+- Servidor não inicia.
+
+---
+
+## 6. Casos de teste — API Oxide
+
+Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = Pendente. Prioridade: Alta / Média / Baixa.
+
+### 6.1 Geral e documentação
+
+| ID | Caso | Resultado esperado | Prior. | Sit. |
+| --- | --- | --- | --- | --- |
+| GER-01 | `GET /` | `200`, texto "API ESP32 Online" | Alta | A |
+| GER-02 | `GET /api-docs/` | `200`, HTML do Swagger UI | Média | A |
+| GER-03 | `GET /api-docs/swagger-ui-init.js` | `200`, contém título "API ESP32" e `X-API-Key` | Média | A |
+| GER-04 | Rota inexistente | `404` sem detalhes internos | Média | P |
+| GER-05 | Corpo JSON literal `null` | `400` (rejeitado pelo parser) | Baixa | M |
+
+### 6.2 Dispositivos (`/api/v1/devices`)
+
+| ID | Caso | Resultado esperado | Prior. | Sit. |
+| --- | --- | --- | --- | --- |
+| DEV-01 | `GET /devices` | `200`, array contendo `DSP-000001` | Alta | A |
+| DEV-02 | `GET /devices/:deviceId` existente | `200`, `device_id` correto | Alta | A |
+| DEV-03 | `GET /devices/:deviceId` inexistente | `404`, `success: false` | Alta | A |
+| DEV-04 | `POST /devices` sem campos | `400` | Alta | A |
+| DEV-05 | `POST /devices` válido | `201`, `active = 1` por padrão, status opcionais `NULL` | Alta | A |
+| DEV-06 | `POST /devices` duplicado | `409 Dispositivo duplicado`, sem nova linha | Alta | A |
+| DEV-07 | `POST /devices` sem `active` e sem `firmware_version` | `201` (fallbacks `?? 1` e `?? null`) | Alta | A (indireto, DEV-05) |
+| DEV-08 | `POST /devices` com `firmware_version` omitido | Persiste `NULL` | Baixa | P |
+| DEV-09 | `GET /devices` não cria registros (idempotência de leitura) | Contagem inalterada | Baixa | M |
+
+### 6.3 Autenticação e autorização
+
+| ID | Caso | Resultado esperado | Prior. | Sit. |
+| --- | --- | --- | --- | --- |
+| AUT-01 | `GET /iot/telemetries` sem header | `401 API Key obrigatória` | Alta | A |
+| AUT-02 | Chave inválida | `401 API Key inválida` | Alta | A |
+| AUT-03 | Chave de dispositivo inativo | `403 Dispositivo desativado` | Alta | A |
+| AUT-04 | Chave válida | `200` | Alta | A |
+| AUT-05 | Chave de outro dispositivo em comandos | `403 API Key não pertence ao dispositivo` | Alta | A |
+| AUT-06 | Chave de outro dispositivo em alertas | `403` | Alta | A |
+| AUT-07 | Dispositivo-alvo inexistente em rota protegida | `404` | Média | P |
+| AUT-08 | Chave de outro dispositivo em `POST /telemetries` | **Hoje aceita (`202`)**; decisão pendente. Definir esperado (`403`) e testar após a correção | Alta | P |
+| AUT-09 | Chave de outro dispositivo em `POST /events` | **Hoje aceita (`202`)**; decisão pendente | Alta | P |
+| AUT-10 | Header em minúsculas (`x-api-key`) | Aceito (headers HTTP não diferenciam caixa) | Baixa | P |
+
+### 6.4 Telemetria
+
+| ID | Caso | Resultado esperado | Prior. | Sit. |
+| --- | --- | --- | --- | --- |
+| TEL-01 | Sem `message_id`/`device_id` | `400 message_id e device_id são obrigatórios` | Alta | A |
+| TEL-02 | Payload válido completo | `202 Telemetria recebida`, linha em `telemetry_queue` com `status = PENDING` | Alta | A |
+| TEL-03 | `message_id` duplicado | `409 Mensagem duplicada`, uma única linha | Alta | A |
+| TEL-04 | Mesma lat/long da última telemetria, `message_id` novo | `202`, sem nova linha, `last_seen_at` atualizado | Alta | A |
+| TEL-05 | Posição diferente | `202`, nova linha | Alta | A |
+| TEL-06 | Duas telemetrias sem coordenadas | Ambas inseridas | Alta | M |
+| TEL-07 | JSON malformado | `400 Requisição inválida` | Alta | A |
+| TEL-08 | `last_seen_at` em ISO 8601 | Persistido como enviado | Média | M |
+| TEL-09 | `last_seen_at` omitido | Persistido como `NULL` | Média | M |
+| TEL-10 | Na repetição de posição, `last_seen_at` usa `CURRENT_TIMESTAMP` (não o enviado) | Conferir valor gravado | Média | P |
+| TEL-11 | Apenas latitude informada (sem longitude) | Inserida como nova linha (não é posição repetida) | Média | P |
+| TEL-12 | Coordenadas como string | Tratadas como não numéricas: nova linha, sem atualização de `last_seen_at` | Média | P |
+| TEL-13 | Latitude fora de faixa (`> 90`) e longitude fora de faixa (`> 180`) | Definir regra (rejeitar `400`?) e testar; hoje não há validação | Média | P |
+| TEL-14 | `payload_json` omitido | Grava serialização do objeto recebido | Baixa | P |
+| TEL-15 | Telemetria para `device_id` inexistente | Falha de FK; esperado erro tratado (não `500` com detalhes) | Alta | P |
+| TEL-16 | `GET /telemetries` ordem decrescente por `id` | `200`, `id` 10 antes do 9 | Média | M |
+| TEL-17 | Corpo ausente em `POST` | `400` (corpo tratado como objeto vazio) | Média | P |
+| TEL-18 | Campos extras desconhecidos | Ignorados sem erro | Baixa | P |
+| TEL-19 | Mesmo `message_id` em duas requisições concorrentes | Uma `202`, outra `409`; uma linha | Alta | P |
+
+### 6.5 Eventos
+
+| ID | Caso | Resultado esperado | Prior. | Sit. |
+| --- | --- | --- | --- | --- |
+| EVT-01 | Sem `X-API-Key` | `401` | Alta | A |
+| EVT-02 | Sem `device_id` ou `event_type` | `400 message_id, device_id e event_type são obrigatórios` | Alta | A |
+| EVT-03 | `seal_status` inválido (`OPEN`, `closed`) | `400`, nenhuma linha | Alta | A |
+| EVT-04 | Evento válido com `seal_status: LOCKED` | `202`, `seal_status = LOCKED`, `status = PENDING` | Alta | A |
+| EVT-05 | `seal_status` `UNLOCKED` e `BROKEN` | `202` em ambos | Alta | P |
+| EVT-06 | `seal_status` `ACTIVE`/`INACTIVE` | `400` (não pertencem ao lacre) | Média | P |
+| EVT-07 | Dispositivo inexistente | `202` e dispositivo criado com chave `auto-<device_id>` e firmware `unknown` | Alta | A |
+| EVT-08 | `message_id` duplicado | `409`, sem nova linha | Alta | A |
+| EVT-09 | `event_type` gravado em `events.message_type` | Valor conferido via SQL | Média | P |
+| EVT-10 | Cliente tenta enviar `status` no payload | Ignorado; servidor define `PENDING` | Média | P |
+| EVT-11 | `attempt_count` inicial | `0` | Baixa | P |
+| EVT-12 | Evento sem `seal_status` | `202`, `seal_status = NULL` | Baixa | P |
+
+### 6.6 Comandos
+
+| ID | Caso | Resultado esperado | Prior. | Sit. |
+| --- | --- | --- | --- | --- |
+| CMD-01 | `GET /commands/:deviceId` sem chave | `401` | Alta | A |
+| CMD-02 | Chave de outro dispositivo | `403` | Alta | A |
+| CMD-03 | Chave correta | `200`, apenas `PENDENTE`, ordem crescente de `id` | Alta | A |
+| CMD-04 | `confirm` com status inválido | `400` | Alta | A |
+| CMD-05 | `confirm` de comando inexistente | `404` | Alta | A |
+| CMD-06 | `confirm` como `EXECUTADO` | `200`, `executed_at` preenchido | Alta | A |
+| CMD-07 | Reconfirmação | `409 Comando já confirmado` | Alta | A |
+| CMD-08 | Comando confirmado some da lista de pendentes | Lista sem o comando | Alta | A |
+| CMD-09 | `confirm` como `ERRO` com `error_message` | `200`, mensagem gravada | Alta | M |
+| CMD-10 | `error_message` não textual | `400` | Média | P |
+| CMD-11 | `confirm` de comando de outro dispositivo | `404` | Alta | P |
+| CMD-12 | Ordem de múltiplos comandos pendentes | Crescente por `id` | Média | P |
+| CMD-13 | Não existe endpoint de criação de comando | `404` em `POST /iot/commands` | Baixa | P |
+
+### 6.7 Alertas
+
+| ID | Caso | Resultado esperado | Prior. | Sit. |
+| --- | --- | --- | --- | --- |
+| ALT-01 | Sem chave | `401` | Alta | A |
+| ALT-02 | Chave de outro dispositivo | `403` | Alta | A |
+| ALT-03 | `alert_type` inválido | `400` | Alta | A |
+| ALT-04 | `status_id` inexistente | `400 devem existir na tabela status` | Alta | A |
+| ALT-05 | Alerta `SEAL_BROKEN` válido | `201`, objeto retornado, `resolved_at = null` | Alta | A |
+| ALT-06 | `alert_id` duplicado | `409 Alerta duplicado` | Alta | A |
+| ALT-07 | Cada um dos 6 tipos aceitos | `201` para `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE`, `COMMUNICATION_LOST` | Alta | P (só `SEAL_BROKEN`) |
+| ALT-08 | `severity_id` inexistente | `400` | Alta | P |
+| ALT-09 | `status_id`/`severity_id` não inteiro ou ≤ 0 | `400` | Média | P |
+| ALT-10 | Falta `title` | `400` | Média | P |
+| ALT-11 | `description` omitida | `201` | Baixa | P |
+| ALT-12 | Severidade com semântica | Após definir códigos de severidade no catálogo, validar que `severity_id` só aceita níveis de severidade | Alta | P (bloqueado) |
+
+> Observação: os testes atuais usam `status_id = 1` e `severity_id = 2`, que hoje correspondem a `ACTIVE` e `INACTIVE`. Revisar esses valores quando a taxonomia de severidade for definida.
+
+---
+
+## 7. Casos de teste — Banco de dados SQLite
+
+| ID | Caso | Verificação | Prior. | Sit. |
+| --- | --- | --- | --- | --- |
+| BD-01 | Tabelas existentes | `SELECT name FROM sqlite_master` retorna `devices`, `status`, `telemetry_queue`, `events`, `commands`, `alerts` | Alta | M |
+| BD-02 | Tabelas `sync_logs`/`sync_items` | Inexistentes até a entrega do Worker | Média | M |
+| BD-03 | Unicidade | `device_id`, `message_id` (eventos e telemetrias), `command_id`, `alert_id`, `status.code` rejeitam duplicatas | Alta | M |
+| BD-04 | FKs ativas | `PRAGMA foreign_keys` = 1; inserir evento/telemetria/alerta com `device_id` inexistente falha | Alta | P |
+| BD-05 | `commands` FK | `ON UPDATE CASCADE`, `ON DELETE RESTRICT`; apagar dispositivo com comandos falha | Alta | M |
+| BD-06 | `alerts` FKs | Três FKs (dispositivo, `status_id`, `severity_id`) | Alta | M |
+| BD-07 | Defaults | `devices.active = 1`, `commands.status = 'PENDENTE'`, `alerts.created_at = CURRENT_TIMESTAMP`, `telemetry_queue.status = 'PENDING'`, `attempt_count = 0` | Média | M |
+| BD-08 | `CHECK (active IN (0,1))` | Inserir `active = 2` falha | Média | P |
+| BD-09 | Migração de colunas legadas | `messge_tyoe`, `seel_status`, `firmware_versin ` renomeadas sem perda de dados | Alta | M |
+| BD-10 | Migração de `telemetry_queue` legada | Recriação transacional preserva linhas e IDs; campos opcionais passam a aceitar `NULL` | Alta | M |
+| BD-11 | Inicialização idempotente | Subir a aplicação duas vezes não duplica `status` nem falha | Alta | P |
+| BD-12 | Colunas de status em `devices` | `device_status_id`, `valve_status_id`, `seal_status_id` existem e permanecem `NULL` | Média | M |
+| BD-13 | Seed de `status` | 5 códigos inseridos uma única vez | Média | P |
+| BD-14 | Criação do banco pelo script do `Oxidedb.md` em arquivo vazio | Schema equivalente ao criado pela aplicação | Média | P |
+| BD-15 | Teardown | Zero registros `DSP-TEST%` após a suíte | Alta | A |
+
+---
+
+## 8. Testes de segurança
+
+| ID | Caso | Esperado | Prior. | Sit. |
+| --- | --- | --- | --- | --- |
+| SEG-01 | `GET /devices` e `GET /devices/:id` sem autenticação | **Risco conhecido:** retornam `api_key`. Definir correção (autenticação e projeção sem `api_key`) e criar teste de regressão que garanta ausência de `api_key` na resposta | Alta | P |
+| SEG-02 | `POST /devices` sem autenticação | Definir se deve exigir credencial administrativa | Alta | P |
+| SEG-03 | `GET /iot/telemetries` | Hoje retorna dados de todos os dispositivos a qualquer chave válida; definir se deve filtrar pelo dispositivo da chave | Alta | P |
+| SEG-04 | Dispositivo criado automaticamente via evento recebe chave previsível `auto-<device_id>` | Avaliar risco; teste que impeça acesso indevido com chave deduzida | Alta | P |
+| SEG-05 | Injeção SQL em `device_id`, `message_id`, `title` (ex.: `' OR 1=1 --`) | Consultas parametrizadas; nenhuma alteração; resposta tratada | Alta | P |
+| SEG-06 | Payload muito grande (ex.: 10 MB) | Rejeitado com `413` ou tratado sem derrubar o servidor | Média | P |
+| SEG-07 | Erro interno | Resposta padronizada sem stack trace ou detalhes do banco | Média | P |
+| SEG-08 | Chave enviada por query string | Não aceita | Baixa | P |
+| SEG-09 | Rate limiting | Hardening futuro; teste após implementação | Baixa | P (futuro) |
+| SEG-10 | Hash, rotação e revogação de chaves | Hardening futuro | Baixa | P (futuro) |
+| SEG-11 | Auditoria de acesso e alteração | Hardening futuro | Baixa | P (futuro) |
+
+---
+
+## 9. Testes do contrato do firmware (ESP32)
+
+| ID | Caso | Esperado | Sit. |
+| --- | --- | --- | --- |
+| ESP-01 | Payload de telemetria do guia (`message_id`, `device_id`, lat/long, velocidade, bateria, GSM) | `202` | M |
+| ESP-02 | Retry com o **mesmo** `message_id` | `409`, sem duplicar linha; firmware trata `409` como "já recebido" | P |
+| ESP-03 | Reinício do ESP32 | Sequência de `message_id` persistida (NVS) não reutiliza valores | P (teste no firmware) |
+| ESP-04 | Sem GPS (fix ainda não obtido) | Telemetria aceita com coordenadas ausentes | M |
+| ESP-05 | Consulta periódica de comandos e confirmação `EXECUTADO`/`ERRO` | Fluxo completo conforme seção 6.6 | P (ponta a ponta com hardware) |
+| ESP-06 | Falha de rede durante o envio | Firmware reenvia sem perder a leitura | P |
+| ESP-07 | Evento de lacre `BROKEN` seguido de alerta `SEAL_BROKEN` | Evento `202` e alerta `201` | P |
+
+---
+
+## 10. Testes das próximas entregas (roadmap)
+
+### 10.1 Associação Dispositivo → Lacre → Cilindro
+
+| ID | Caso | Esperado |
+| --- | --- | --- |
+| ASC-01 | Associar dispositivo a lacre e lacre a cilindro | Vínculos ativos criados |
+| ASC-02 | Lacre com mais de um cilindro ativo (RN04) | Conflito (`409`) |
+| ASC-03 | Cilindro com mais de um lacre ativo (RN04) | Conflito |
+| ASC-04 | Lacre com mais de um dispositivo ativo (RN05) | Conflito |
+| ASC-05 | Entidades inexistentes | `404` |
+| ASC-06 | Troca de dispositivo/lacre | Vínculo anterior encerrado, novo aberto, histórico preservado |
+| ASC-07 | Desassociação | Vínculo encerrado (sem `DELETE` físico, RN21) |
+| ASC-08 | Ownership | Chave de um dispositivo não altera vínculos de outro |
+| ASC-09 | Telemetria passa a preencher `lacre_id`/`cilindro_id` a partir do vínculo ativo | Valores coerentes |
+
+### 10.2 Histórico de associações
+
+| ID | Caso | Esperado |
+| --- | --- | --- |
+| HIS-01 | Associações sucessivas | Linhas com início e fim, sem sobrescrita |
+| HIS-02 | Consulta por dispositivo, por lacre e por cilindro | Resultados corretos e completos |
+| HIS-03 | Ordenação temporal | Mais recente primeiro (ou conforme contrato) |
+| HIS-04 | Associar, desassociar e reassociar o mesmo par | Três registros distintos |
+| HIS-05 | Períodos sem sobreposição para o mesmo ativo | Garantido por constraint ou serviço |
+
+### 10.3 Geofence (RN10 e RN11)
+
+| ID | Caso | Esperado |
+| --- | --- | --- |
+| GEO-01 | Cadastro de geofence (formato e raio, referência inicial de 10 m, configurável) | Persistido e vinculado |
+| GEO-02 | Posição dentro do raio | Nenhum alerta |
+| GEO-03 | Posição exatamente no limite | Comportamento definido e documentado |
+| GEO-04 | Saída da área | Evento e alerta `GEOFENCE_EXIT` criados |
+| GEO-05 | Múltiplas telemetrias fora da área em sequência | Um único alerta por transição (sem duplicidade) |
+| GEO-06 | Reentrada e nova saída | Novo alerta |
+| GEO-07 | Coordenadas inválidas ou ausentes | Rejeitadas ou ignoradas conforme regra; nunca geram alerta falso |
+| GEO-08 | Telemetria sem GPS | Não gera saída |
+| GEO-09 | Geofence sem dispositivo vinculado | Nenhuma avaliação |
+
+### 10.4 Comandos automáticos
+
+| ID | Caso | Esperado |
+| --- | --- | --- |
+| AUT-C01 | Condição atendida (ex.: lacre `BROKEN` ou saída de geofence) | Comando criado `PENDENTE` |
+| AUT-C02 | Condição não atendida | Nenhum comando |
+| AUT-C03 | Mesmo gatilho repetido | Idempotência: sem comando duplicado |
+| AUT-C04 | Expiração de comando não executado | Estado definido e não retornado como pendente |
+| AUT-C05 | Falha (`ERRO`) | Política de repetição conforme regra |
+| AUT-C06 | Confirmação do comando automático pelo dispositivo | Mesmo fluxo da seção 6.6 |
+
+### 10.5 Worker SQLite → PostgreSQL
+
+| ID | Caso | Esperado |
+| --- | --- | --- |
+| SYN-01 | Sincronização de itens `PENDING` | Marcados `SYNCED`; dados corretos no destino |
+| SYN-02 | Reprocessamento do mesmo lote | Sem duplicar (idempotência por `message_id`) |
+| SYN-03 | PostgreSQL indisponível | Itens permanecem pendentes ou `ERROR`, `attempt_count` incrementa, retry posterior |
+| SYN-04 | Recuperação após queda | Sem perda e sem duplicidade |
+| SYN-05 | Falha no meio do lote | Transação garante consistência |
+| SYN-06 | Telemetria sem GPS ou sem data de coleta | Política aprovada: rejeição, quarentena ou ajuste; destino exige `data_coleta`, latitude e longitude |
+| SYN-07 | Mapeamento `device_id` → `dispositivo_id` (UUID) e `organizacao_id` | Resolvido conforme regra aprovada |
+| SYN-08 | Evento sem lacre relacionado | Política definida (destino exige `lacre_id`) |
+| SYN-09 | Alertas: tipos `SEAL_BROKEN`→`VIOLACAO_LACRE`, `GEOFENCE_EXIT`→`SAIDA_GEOCERCA`, `LOW_BATTERY`→`BATERIA_BAIXA`, `COMMUNICATION_LOST`→`SEM_COMUNICACAO` | Satisfazem os `CHECK` do destino |
+| SYN-10 | `DEVICE_ERROR` e `COMMAND_FAILURE` | Sem equivalente explícito: comportamento definido (mapear, ajustar `CHECK` ou manter local) |
+| SYN-11 | Severidade e estado | Somente `BAIXA/MEDIA/ALTA/CRITICA` e `ABERTO/EM_ANALISE/ENCERRADO` |
+| SYN-12 | Comandos | Decisão: permanecem locais ou entidade criada no PostgreSQL |
+| SYN-13 | Geração de UUIDs | Estratégia explícita (o dump não define default) |
+| SYN-14 | Registro em `sync_logs`/`sync_items` | Cada tentativa registrada |
+| SYN-15 | Inicialização e encerramento do Worker | Sem perda de itens em processamento |
+| SYN-16 | Credenciais do PostgreSQL | Fornecidas por configuração segura, nunca registradas em documentos |
+
+---
+
+## 11. Testes da API FluxID (NestJS) — fase planejada
+
+Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
+
+| ID | Caso | Esperado |
+| --- | --- | --- |
+| FLX-01 | Conexão com usuário PostgreSQL sem privilégio de superusuário (RNF13) | Conecta; operações de DDL negadas |
+| FLX-02 | Swagger exibe e executa todas as rotas CRUD | Todas funcionais |
+| FLX-03 | DTOs rejeitam dados inválidos | `400` padronizado |
+| FLX-04 | Isolamento multiempresa (RN22) | Organização A não lê nem altera dados da B |
+| FLX-05 | Autorização por perfis e permissões (RBAC) | `403` sem permissão |
+| FLX-06 | Autenticação JWT | Token ausente/expirado → `401` |
+| FLX-07 | Operações compostas (vínculo, entrega, custódia) em transação (RNF09) | Falha parcial faz rollback |
+| FLX-08 | Sem `DELETE` físico em histórico (RN21) | Desativação lógica |
+| FLX-09 | Violação de chave única/estrangeira | Convertida em erro HTTP legível (`409`/`400`) |
+| FLX-10 | Telemetria única por `message_id` (RN14) | Duplicata rejeitada |
+| FLX-11 | Um lacre ativo por cilindro e um dispositivo ativo por lacre (RN04, RN05) | Índices únicos parciais confirmados no schema |
+| FLX-12 | Custódia ativa única por cilindro | Índice único parcial confirmado |
+| FLX-13 | Busca por código, série, UID NFC e identificador de hardware (RF13, RNF14) | Resultados corretos sem expor UUID |
+| FLX-14 | Teste hidrostático e inspeção de lacre (RF11, RF12) | Registro e alerta de vencimento (RN15) |
+| FLX-15 | Auditoria de ações críticas (RN20) | Usuário, instante, entidade, valores anterior e novo |
+| FLX-16 | Contagem contra a massa de teste | Tabelas conferem com a seção 11 do documento FluxID |
+| FLX-17 | Migração para PostGIS (geocerca de produção) | Telemetrias migradas sem perda de coordenadas |
+
+---
+
+## 12. Fase de operação
+
+| ID | Caso | Esperado |
+| --- | --- | --- |
+| OPE-01 | Backup e restauração do `oxide.db` e do PostgreSQL | Restauração íntegra, procedimento documentado |
+| OPE-02 | Política de expurgo e retenção | Dados antigos removidos sem quebrar a sincronização |
+| OPE-03 | Observabilidade (logs e métricas do Worker e da API) | Falhas visíveis |
+| OPE-04 | Carga: ingestão de telemetria em volume (frequência real a definir) | Sem perda, latência dentro do limite a definir |
+| OPE-05 | Integração completa ESP32 → API → SQLite → Worker → PostgreSQL | Dado chega íntegro ao destino |
+| OPE-06 | LGPD, RLS e retenção | Conforme definição antes da produção |
+
+> Não foram definidos SLA, RPO, RTO, frequência de telemetria ou prazo de alertas; os limites dos casos OPE-01 e OPE-04 devem ser preenchidos quando forem aprovados.
+
+---
+
+## 13. Matriz de rastreabilidade (regras → testes)
+
+| Regra / requisito | Casos |
+| --- | --- |
+| RN03, RN14 (unicidade, `message_id`) | DEV-06, TEL-03, TEL-19, EVT-08, ALT-06, BD-03, SYN-02 |
+| RN04, RN05 (um vínculo ativo) | ASC-02 a ASC-04, FLX-11 |
+| RN08, RN09 (lacre e abertura) | EVT-04, EVT-05, ALT-05, ESP-07 |
+| RN10, RN11 (geofence e alerta) | GEO-01 a GEO-09, ALT-07 |
+| RN12, RN13 (velocidade e telemetria) | TEL-02, TEL-14, ESP-01 |
+| RN17 (valores controlados) | EVT-03, EVT-06, ALT-03, CMD-04, SYN-11 |
+| RN20, RN21 (auditoria e histórico) | HIS-01, ASC-07, FLX-08, FLX-15, SEG-11 |
+| RN22 (multiempresa) | FLX-04 |
+| RN23 (alertas rastreáveis) | ALT-05, ALT-12, SYN-09 |
+| RF04, RF16 (CRUD e API) | DEV-01 a DEV-08, FLX-02 |
+| RF08 (telemetria) | TEL-01 a TEL-19 |
+| RF09, RF10 (eventos e alertas) | EVT-01 a EVT-12, ALT-01 a ALT-12 |
+| RNF08 (telemetria indexada) | OPE-04 |
+| RNF10 (erros padronizados) | SEG-07, FLX-03, FLX-09 |
+| Autenticação por API Key (MVP) | AUT-01 a AUT-10, SEG-01 a SEG-04 |
+
+---
+
+## 14. Situação atual da execução
+
+| Indicador | Valor |
+| --- | --- |
+| Suíte automatizada (`npm test`) | 40 casos, 40 aprovados na última execução registrada |
+| Compilação (`npx tsc --noEmit`) | Aprovada na última verificação |
+| Cobertura da suíte | Dispositivos, autenticação, telemetria, eventos, comandos e alertas (fluxo principal e erros mais comuns) |
+| Lacunas prioritárias | AUT-08/09, SEG-01 a SEG-05, TEL-15, TEL-19, ALT-07/08/12, EVT-05, BD-04/11 |
+| Entregas futuras | Todos os casos da seção 10 pendentes (funcionalidades ainda não implementadas) |
+
+---
+
+## 15. Riscos e observações
+
+| ID | Risco | Mitigação |
+| --- | --- | --- |
+| R1 | A suíte atual grava na `oxide.db` real (limpa por `DELETE ... LIKE 'DSP-TEST%'` no início e no fim); falha no meio pode deixar resíduos ou afetar dados | Usar banco de teste dedicado (`DB_PATH` por variável de ambiente) ou cópia temporária |
+| R2 | Testes dependem do dispositivo semente `DSP-000001` e da chave `auto-DSP-000001` | Criar a semente no setup da suíte |
+| R3 | Testes assumem `status_id = 1` e `severity_id = 2`; IDs do catálogo podem variar entre bancos | Buscar os IDs por `code` no setup |
+| R4 | Exposição de `api_key` nos `GET /devices` | SEG-01; corrigir antes de expor a API fora de ambiente controlado |
+| R5 | Ownership não validado em telemetria e eventos | AUT-08/09; decidir regra |
+| R6 | Severidade sem semântica | ALT-12; definir catálogo |
+| R7 | Divergência de modelos (Oxide × FluxID) pode causar rejeição em massa no Worker | Casos SYN-06 a SYN-13 antes de implementar a sincronização |
+| R8 | Testes concorrentes não cobertos (SQLite com `better-sqlite3` é síncrono, mas há risco entre processos) | TEL-19 |
+| R9 | Ausência de `CHECK` para `alert_type` e `seal_status` no SQLite (validação só na aplicação) | Testes de API compensam; avaliar constraint |
+
+---
+
+## 16. Responsabilidades
+
+| Papel | Responsável |
+| --- | --- |
+| Execução e automação | Desenvolvimento (com apoio de IA para compilação e chamadas HTTP) |
+| Validação humana | Natã da Silva Baracho |
+| Definições de regra pendentes (severidade, ownership, mapeamentos FluxID, políticas de sincronização) | Responsáveis de produto e arquitetura a indicar |
+
+---
+
+## 17. Procedimento de execução
+
+1. Fazer backup de `oxide.db` (ou apontar para um banco de teste).
+2. Executar `npx tsc --noEmit`.
+3. Iniciar a API (`npm start`) em uma instância nova (reiniciar se houver processo antigo na porta 3000).
+4. Executar `npm test` e registrar o resultado final.
+5. Executar os casos manuais pendentes no Swagger ou Postman.
+6. Conferir o banco com as consultas da seção de verificação do `Oxidedb.md` (`PRAGMA table_info` e contagens).
+7. Registrar defeitos com ID do caso, passos, resultado obtido e esperado.
+8. Repetir a suíte completa a cada nova entrega do roadmap e atualizar este plano.
+
+---
+
+## 18. Histórico do documento
+
+| Versão | Data | Descrição |
+| --- | --- | --- |
+| 1.0 | 05/10/2026 | Criação do plano com base nos documentos do projeto e na suíte de 40 testes |
