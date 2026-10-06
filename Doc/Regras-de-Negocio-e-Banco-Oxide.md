@@ -244,7 +244,7 @@ A inicialização insere, se estiverem ausentes, os códigos `ACTIVE`, `INACTIVE
 | Tabela PostgreSQL | Campos/regras relevantes para integração |
 | --- | --- |
 | `organizacoes` | Identificador UUID e dados da organização/tenant. |
-| `dispositivos` | `id` UUID, `organizacao_id` obrigatório, `codigo` único, `identificador_hardware` único, `versao_firmware` e `ativo`. Não há coluna `api_key` no DDL do dump. |
+| `dispositivos` | `id` UUID, `organizacao_id` obrigatório, `codigo` único, `identificador_hardware` único, `versao_firmware` e `ativo`. O `codigo` segue o mesmo padrão do `device_id` da Oxide. A chave de API fica em `api_key_hash` (SHA-256), criada pelo script `sql/fluxid/001_ajustes_estrutura.sql`. |
 | `telemetrias` | `id` UUID, `dispositivo_id` UUID, `message_id` único, `data_coleta` obrigatória e latitude/longitude obrigatórias; inclui velocidade, bateria, GSM e `payload_raw JSONB`. |
 | `eventos_lacre` | Evento ligado a `lacre_id` obrigatório; `telemetria_id` opcional; tipo limitado a um catálogo de eventos de lacre. |
 | `alertas` | `organizacao_id`, código, tipo, severidade, status e `aberto_em` obrigatórios; lacre/cilindro/evento relacionados são opcionais. Tipo, severidade e status têm `CHECK` com valores permitidos. |
@@ -252,7 +252,7 @@ A inicialização insere, se estiverem ausentes, os códigos `ACTIVE`, `INACTIVE
 | `vinculos_dispositivo_lacre` | Relação dispositivo/lacre com início, fim e dados de vínculo/desvínculo, permitindo registrar períodos. |
 | `vinculos_cilindro_lacre` | Relação cilindro/lacre com início, fim e dados de instalação/remoção, permitindo registrar períodos. |
 
-O dump não contém tabela `commands`. As tabelas principais usam IDs UUID sem default gerador visível no DDL; novos registros sincronizados precisam de estratégia explícita para gerar ou mapear UUIDs.
+O dump não contém tabela `commands`. No dump de 23/09/2026 os IDs UUID não tinham valor padrão; o script `001_ajustes_estrutura.sql` acrescenta `DEFAULT gen_random_uuid()` às 21 tabelas, além de `eventos_lacre.message_id`, `dispositivos.api_key_hash`, índice de última posição e `CHECK` de coordenadas (ver `Banco_FluxID.md`, seção 17).
 
 ### 8.2 Mapeamento preliminar Oxide → FluxID
 
@@ -260,7 +260,7 @@ O dump não contém tabela `commands`. As tabelas principais usam IDs UUID sem d
 | --- | --- | --- |
 | `devices` | `dispositivos` | `device_id` texto pode corresponder a `codigo` ou `identificador_hardware`; definir a regra. FluxID exige `organizacao_id`, ausente no SQLite. |
 | `telemetry_queue` | `telemetrias` | Mapear `device_id` para `dispositivo_id` UUID. FluxID exige `data_coleta`, latitude e longitude não nulas; Oxide aceita coordenadas ausentes e não tem timestamp de coleta equivalente garantido. Definir rejeição, quarentena ou ajuste de schema/política antes de sincronizar essas linhas. |
-| `events` | `eventos_lacre` | Só há correspondência direta para eventos de lacre; FluxID exige `lacre_id`, usa outro catálogo de tipos e não tem `message_id` nessa tabela. Definir resolução do lacre e uma chave de idempotência no destino. |
+| `events` | `eventos_lacre` | Só há correspondência direta para eventos de lacre; FluxID exige `lacre_id`, usa outro catálogo de tipos. A idempotência usa `eventos_lacre.message_id` (script 001). Definir a resolução do lacre e os eventos sem estado de lacre. |
 | `alerts` | `alertas` | FluxID exige organização, código, UUID, data de abertura e valores textuais de tipo/severidade/status; severidade e status já usam os mesmos valores nas duas bases; os tipos têm nomes diferentes. Definir todos os mapeamentos antes de inserir. |
 | `commands` | Sem tabela no dump | Decidir se comandos permanecem locais ou se será criada uma entidade correspondente no PostgreSQL. |
 | `telemetry_queue.lacre_id` / `cilindro_id` | Vínculos FluxID | No SQLite esses campos são texto opcional sem FK; não são suficientes para reconstruir os vínculos históricos do FluxID. Usar as tabelas `vinculos_*` com regras temporais próprias. |
@@ -269,10 +269,14 @@ Mapeamentos semânticos candidatos de alertas que precisam ser aprovados: `SEAL_
 
 ### 8.3 Preparação pendente para iniciar a sincronização
 
-- Restaurar o dump em um banco local de análise separado, sem sobrescrever o banco principal ou dados existentes.
+O plano completo, com as tabelas de conversão e as decisões pendentes P1 a P8, está em [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md).
+
+- ✅ Dump restaurado e analisado num servidor PostgreSQL temporário, separado do banco principal (entrega E).
+- Aplicar os scripts de `sql/fluxid/` no banco principal e gerar um novo dump.
 - Obter acesso autorizado ao PostgreSQL: o serviço aceita conexões, mas uma tentativa sem senha retornou `fe_sendauth: no password supplied`. Credenciais devem ser fornecidas diretamente no terminal ou por configuração segura, nunca registradas neste documento.
 - Definir `organizacao_id` padrão/por dispositivo e a correspondência entre os identificadores Oxide e os UUIDs FluxID.
 - Aprovar políticas para telemetrias sem GPS ou sem timestamp de coleta, eventos sem lacre relacionado, comandos e idempotência/reprocessamento.
 - Implementar a sincronização somente depois dessas decisões e validar primeiro em banco local de análise.
+- Ao implementar o Worker, a Oxide passa a guardar `api_key_hash` e a comparar o SHA-256 da `X-API-Key` (decisão da entrega E).
 
 Para o script de criação do banco e instruções do DB Browser, consulte [Oxidedb.md](Oxidedb.md). Para payloads do firmware, consulte [ESP32-envio-de-dados.md](ESP32-envio-de-dados.md).

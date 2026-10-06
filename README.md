@@ -71,6 +71,7 @@ A tabela `alerts` armazena alertas associados a dispositivos. `POST /api/v1/iot/
 - [Desenvolvimento: como a API funciona (guia para o ESP32) e histórico de testes](Doc/Desenvolvimento.md)
 - [Integração e payloads do ESP32](Doc/ESP32-envio-de-dados.md)
 - [Especificação do banco SQLite Oxide](Doc/Oxidedb.md)
-- [Banco PostgreSQL FluxID](Doc/Banco_FluxID.md)
+- [Banco PostgreSQL FluxID](Doc/Banco_FluxID.md) e scripts de ajuste em [`sql/fluxid/`](sql/fluxid)
+- [Plano de integração Oxide → FluxID](Doc/Integracao-Oxide-FluxID.md)
 - [Plano de Teste](Doc/Doc_tese/PlanoDeTeste.md)
 - [Roteiro de Teste para IA](Doc/Doc_tese/RoteiroDeTeste.md)
