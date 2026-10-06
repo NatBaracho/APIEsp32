@@ -13,20 +13,14 @@ export class AlertRepository {
       .get(alertId) as Alert | undefined;
   }
 
-  statusExists(statusId: number): boolean {
-    return Boolean(
-      db.prepare("SELECT 1 FROM status WHERE id = ?").get(statusId)
-    );
-  }
-
   create(alert: Alert): Alert {
     const result = db.prepare(`
       INSERT INTO alerts (
         alert_id,
         device_id,
         alert_type,
-        status_id,
-        severity_id,
+        severity,
+        status,
         title,
         description
       )
@@ -35,8 +29,8 @@ export class AlertRepository {
       alert.alert_id,
       alert.device_id,
       alert.alert_type,
-      alert.status_id,
-      alert.severity_id,
+      alert.severity,
+      alert.status,
       alert.title,
       alert.description ?? null
     );

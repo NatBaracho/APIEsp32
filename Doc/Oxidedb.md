@@ -4,7 +4,7 @@
 
 **Buffer temporário de ingestão para dispositivos ESP32**
 
-**Versão:** 1.2  
+**Versão:** 1.3  
 **Projeto:** FluxID / Oxide IoT
 
 Inclui instruções de criação, modelo de dados e script SQL completo.
@@ -70,7 +70,6 @@ Worker de sincronização (futuro)
 | devices | events | 1:N | `events.device_id → devices.device_id` |
 | devices | commands | 1:N | `commands.device_id → devices.device_id` |
 | devices | alerts | 1:N | `alerts.device_id → devices.device_id` |
-| status | alerts | 1:N | `alerts.status_id/severity_id → status.id` |
 
 `device_status_id`, `valve_status_id` e `seal_status_id` são colunas opcionais em `devices`; atualmente não possuem constraints de chave estrangeira para `status`.
 
@@ -182,15 +181,15 @@ CREATE TABLE IF NOT EXISTS alerts (
     alert_id TEXT NOT NULL UNIQUE,
     device_id TEXT NOT NULL,
     alert_type TEXT NOT NULL,
-    status_id INTEGER NOT NULL,
-    severity_id INTEGER NOT NULL,
+    severity TEXT NOT NULL
+        CHECK (severity IN ('BAIXA', 'MEDIA', 'ALTA', 'CRITICA')),
+    status TEXT NOT NULL DEFAULT 'ABERTO'
+        CHECK (status IN ('ABERTO', 'EM_ANALISE', 'ENCERRADO')),
     title TEXT NOT NULL,
     description TEXT,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     resolved_at DATETIME,
-    FOREIGN KEY (device_id) REFERENCES devices(device_id),
-    FOREIGN KEY (status_id) REFERENCES status(id),
-    FOREIGN KEY (severity_id) REFERENCES status(id)
+    FOREIGN KEY (device_id) REFERENCES devices(device_id)
 );
 
 CREATE TABLE IF NOT EXISTS telemetry_queue (
@@ -260,7 +259,7 @@ O campo da API `event_type` é gravado pela aplicação na coluna `events.messag
 
 Tipos de alerta previstos: `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` e `COMMUNICATION_LOST`. O schema atual não inclui `CHECK` para restringir `alert_type` a essa lista.
 
-> **Pendência de severidade:** `severity_id` referencia `status(id)` conforme o DDL solicitado, mas o catálogo atual contém estados de dispositivo/lacre, não níveis de severidade. Defina os códigos de severidade antes de inserir alertas com severidade validada semanticamente.
+> **Severidade e status do alerta:** usam texto com os mesmos valores do FluxID (`BAIXA`/`MEDIA`/`ALTA`/`CRITICA` e `ABERTO`/`EM_ANALISE`/`ENCERRADO`). Bancos criados antes disso tinham `status_id` e `severity_id` apontando para `status(id)`; a aplicação migra a tabela `alerts` automaticamente, preservando os alertas (severidade pelo tipo; alerta já resolvido vira `ENCERRADO`).
 
 ## 9. Tabelas não existentes no banco atual
 

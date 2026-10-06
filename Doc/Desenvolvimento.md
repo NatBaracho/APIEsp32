@@ -114,6 +114,7 @@ Rotas de apoio para a equipe: `GET /iot/telemetries` (lista as telemetrias de to
 
 - Obrigatórios: `message_id` e `device_id` (texto).
 - Números (`latitude`, `longitude`, `speed_kmh`, `battery_percent`, `gsm_signal`) vão como número JSON, **não** como texto.
+- `latitude` e `longitude` vão **juntas**, com latitude entre -90 e 90 e longitude entre -180 e 180. Sem posição do GPS, não envie nenhuma das duas.
 - `seal_status`: `LOCKED` (fechado), `UNLOCKED` (aberto) ou `BROKEN` (rompido).
 - `attempt_count`: quantas vezes o ESP32 já tentou enviar esta mensagem (inteiro ≥ 0).
 - **Posição repetida:** se latitude, longitude e `seal_status` forem iguais aos da última telemetria do dispositivo, a API responde `200 "Posição já registrada; data e hora atualizadas"`, atualiza só a data e hora e não cria outra linha. Se o lacre mudar de estado no mesmo lugar (ex.: `LOCKED` → `BROKEN`), é gravada uma linha nova (`202`).
@@ -125,6 +126,16 @@ Rotas de apoio para a equipe: `GET /iot/telemetries` (lista as telemetrias de to
 ```
 
 - Obrigatórios: `message_id`, `device_id` e `event_type`. O `event_type` é texto livre (ex.: `startup`, `seal_changed`, `hardware_failure`).
+
+### Alerta — exemplo
+
+```json
+{ "alert_id": "ALT-000001", "device_id": "DSP-000001", "alert_type": "SEAL_BROKEN", "severity": "CRITICA", "title": "Lacre rompido" }
+```
+
+- Obrigatórios: `alert_id`, `device_id`, `alert_type` e `title`.
+- `severity` é opcional (`BAIXA`, `MEDIA`, `ALTA`, `CRITICA`). Sem ela, vale o padrão do tipo: `SEAL_BROKEN` → `CRITICA`; `GEOFENCE_EXIT` e `COMMAND_FAILURE` → `ALTA`; `DEVICE_ERROR` e `COMMUNICATION_LOST` → `MEDIA`; `LOW_BATTERY` → `BAIXA`.
+- O alerta nasce sempre `ABERTO`. Campos antigos `status_id` e `severity_id` são ignorados.
 
 ## 1.5 O que o firmware faz com cada resposta
 
@@ -192,7 +203,7 @@ Rotas de apoio para a equipe: `GET /iot/telemetries` (lista as telemetrias de to
 ### Comandos e alertas
 
 - `commands`: `command_id`, `device_id`, `command_type`, `status` (`PENDENTE` → `EXECUTADO`/`ERRO`), `created_at`, `executed_at`, `error_message`.
-- `alerts`: `alert_id`, `device_id`, `alert_type`, `status_id`, `severity_id`, `title`, `description`, `created_at`, `resolved_at`. `status_id` e `severity_id` apontam para a tabela `status` (a lista de severidades ainda será definida).
+- `alerts`: `alert_id`, `device_id`, `alert_type`, `severity` (`BAIXA`, `MEDIA`, `ALTA`, `CRITICA`), `status` (`ABERTO`, `EM_ANALISE`, `ENCERRADO`), `title`, `description`, `created_at`, `resolved_at`. Severidade e status usam os mesmos valores do FluxID.
 
 ### Estados da fila
 
@@ -203,13 +214,13 @@ Rotas de apoio para a equipe: `GET /iot/telemetries` (lista as telemetrias de to
 - Worker de sincronização com o FluxID.
 - Cadastro vindo do FluxID (por isso o `POST /devices` provisório).
 - Lista fechada de tipos de comando e criação de comandos pela API.
-- Lista de severidades dos alertas e validação da faixa de latitude/longitude.
+- Rotas para analisar e encerrar alertas.
 - Geofence, comandos automáticos e associação dispositivo → lacre → cilindro.
 
 ## 1.10 Estado atual
 
-- API em funcionamento, validada pela suíte automatizada (`npm test`, 52/52) e pelo Roteiro de Teste completo no `oxide.db` real.
-- Próximas entregas, nesta ordem: severidade e coordenadas → catálogo de comandos → associação dispositivo/lacre/cilindro → Worker.
+- API em funcionamento, validada pela suíte automatizada (`npm test`, 55/55) e pelo Roteiro de Teste completo no `oxide.db` real.
+- Próximas entregas, nesta ordem: ajustes do banco FluxID e plano de integração → catálogo de comandos → associação dispositivo/lacre/cilindro → Worker.
 - Pendências conhecidas: firmware do ESP32 precisa enviar `seal_status` e `attempt_count` e tratar as respostas da seção 1.5; `nodemon` com vulnerabilidade apenas em desenvolvimento.
 
 ---
@@ -410,17 +421,29 @@ Decisões de Natã da Silva Baracho, considerando que a API precisa ficar aberta
 
 Na mesma entrega, este documento foi reorganizado em duas partes para servir de guia a quem programa o ESP32. Compilação aprovada, suíte com 52/52 (dois casos novos) e Roteiro de Teste v1.4 executado por completo no `oxide.db` real, com checksum idêntico antes e depois. Validação registrada em [Relatorio-de-Teste-2026-10-06-17h35.md](Doc_tese/Relatorio-de-Teste-2026-10-06-17h35.md), **aprovada por Natã da Silva Baracho**.
 
+### 7.15 Entrega C — severidade dos alertas e faixa de coordenadas (06/10/2026)
+Decisões de Natã da Silva Baracho:
+
+| Achado | Decisão | Implementação |
+| --- | --- | --- |
+| ALT-12: `severity_id` e `status_id` apontavam para a tabela `status`, que só tem estados de dispositivo/lacre | Severidade e status em texto, com os mesmos valores do FluxID | Colunas `severity` (`BAIXA`, `MEDIA`, `ALTA`, `CRITICA`) e `status` (`ABERTO`, `EM_ANALISE`, `ENCERRADO`) com `CHECK`; severidade padrão por tipo; status sempre `ABERTO` na criação |
+| Firmware antigo envia `status_id`/`severity_id` | Não quebrar o ESP32 | Campos ignorados |
+| Bancos com a tabela `alerts` antiga | Preservar os alertas | Migração automática e transacional em `connection.ts` |
+| TEL-13: coordenadas fora da faixa aceitas | Rejeitar | `400` para latitude fora de -90 a 90, longitude fora de -180 a 180 ou só uma das duas; `0,0` continua aceito |
+
+Compilação aprovada, suíte com 55/55 (três casos novos e um substituído), migração testada com alertas antigos gravados e Roteiro de Teste v1.5 executado por completo no `oxide.db` real, com checksum idêntico antes e depois. Validação registrada em [Relatorio-de-Teste-2026-10-06-19h28.md](Doc_tese/Relatorio-de-Teste-2026-10-06-19h28.md), **aprovada por Natã da Silva Baracho**.
+
 ## 9. Suíte de testes automatizados (`npm test`)
 
-A suíte `tests/api.test.ts` cobre hoje 52 casos de ponta a ponta:
+A suíte `tests/api.test.ts` cobre hoje 55 casos de ponta a ponta:
 
 1. **Geral & Documentação:** `/`, `/api-docs/` e `/api-docs/swagger-ui-init.js`.
 2. **Dispositivos:** listagem e busca sem `api_key`, `404`, validação `400`, criação `201`, `device_id` duplicado (`409`), `api_key` já usada (`409`) e `active` inválido (`400`).
 3. **Autenticação:** `401` sem header, `401` com chave inválida, `403` para dispositivo inativo e `200` com chave válida.
-4. **Telemetria:** campos obrigatórios (`400`), payload válido (`202`), `message_id` duplicado (`409`), posição repetida (`200`, sem nova linha), posição nova (nova linha), reenvio de posição repetida (`409`), `attempt_count` em `device_attempt_count`, tipo inválido (`400`), dispositivo inexistente (`404`), chave de outro dispositivo (`403`), `seal_status` inválido (`400`), mudança do lacre na mesma posição (nova linha), `attempt_count` negativo (`400`) e JSON malformado (`400`).
+4. **Telemetria:** campos obrigatórios (`400`), payload válido (`202`), `message_id` duplicado (`409`), posição repetida (`200`, sem nova linha), posição nova (nova linha), reenvio de posição repetida (`409`), `attempt_count` em `device_attempt_count`, tipo inválido (`400`), dispositivo inexistente (`404`), chave de outro dispositivo (`403`), `seal_status` inválido (`400`), mudança do lacre na mesma posição (nova linha), `attempt_count` negativo (`400`), latitude fora da faixa (`400`), só latitude (`400`) e JSON malformado (`400`).
 5. **Eventos:** sem chave (`401`), campos obrigatórios (`400`), `seal_status` inválido (`400`), evento válido (`202`), `attempt_count` em `device_attempt_count`, dispositivo não cadastrado (`404`, sem criação), chave de outro dispositivo (`403`) e duplicidade (`409`).
 6. **Comandos:** sem chave (`401`), chave de outro dispositivo (`403`), pendentes (`200`), status inválido (`400`), comando inexistente (`404`), confirmação (`200`), reconfirmação (`409`) e lista após confirmação.
-7. **Alertas:** sem chave (`401`), chave de outro dispositivo (`403`), tipo inválido (`400`), `status_id` inexistente (`400`), criação (`201`) e duplicidade (`409`).
+7. **Alertas:** sem chave (`401`), chave de outro dispositivo (`403`), tipo inválido (`400`), severidade inválida (`400`), criação com severidade padrão e status `ABERTO` (`201`), severidade informada com campos antigos ignorados (`201`) e duplicidade (`409`).
 8. **Limpeza:** remoção dos registros `DSP-TEST%` ao final.
 
 ### Correção no cadastro de dispositivos (fase inicial)

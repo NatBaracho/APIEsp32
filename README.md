@@ -52,7 +52,7 @@ Os POSTs de telemetria, eventos e alertas exigem `X-API-Key` do próprio `device
 
 Telemetrias também podem informar `last_seen_at` em ISO 8601; o campo é opcional e fica `NULL` quando omitido.
 A telemetria informa o estado do lacre em `seal_status` (`LOCKED`, `UNLOCKED` ou `BROKEN`). Quando latitude, longitude e `seal_status` forem iguais aos da última telemetria do dispositivo, a API responde `200 Posição já registrada; data e hora atualizadas`, atualiza apenas `last_seen_at` e guarda o `message_id` em `last_repeat_message_id`, sem inserir outra linha; um reenvio desse `message_id` retorna `409`. Se o estado do lacre mudar no mesmo lugar, uma nova linha é gravada.
-Campos numéricos da telemetria (`latitude`, `longitude`, `speed_kmh`, `battery_percent`, `gsm_signal`) precisam ser números, senão a API retorna `400`. Telemetria para um `device_id` não cadastrado retorna `404`.
+Campos numéricos da telemetria (`latitude`, `longitude`, `speed_kmh`, `battery_percent`, `gsm_signal`) precisam ser números, senão a API retorna `400`. Latitude e longitude vêm juntas, com latitude entre -90 e 90 e longitude entre -180 e 180 (`400` fora disso). Telemetria para um `device_id` não cadastrado retorna `404`.
 
 `ACTIVE`/`INACTIVE` representam o estado do dispositivo (`devices.active` igual a `1`/`0`). Em eventos, `seal_status` aceita `LOCKED`, `UNLOCKED` ou `BROKEN`; `events.status` continua reservado ao processamento da fila.
 
@@ -62,7 +62,7 @@ Comandos são consultados por dispositivo e só podem ser acessados pela API Key
 
 A tabela `devices` também possui `device_status_id`, `valve_status_id` e `seal_status_id`, colunas opcionais para guardar os IDs de estado associados. Dispositivos já cadastrados mantêm `NULL` nesses campos até serem atualizados.
 
-A tabela `alerts` armazena alertas associados a dispositivos. `POST /api/v1/iot/alerts` exige a API Key do dispositivo e aceita `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` ou `COMMUNICATION_LOST`. `severity_id` referencia `status.id`, mas os níveis de severidade ainda precisam ser definidos no catálogo.
+A tabela `alerts` armazena alertas associados a dispositivos. `POST /api/v1/iot/alerts` exige a API Key do dispositivo e aceita `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` ou `COMMUNICATION_LOST`. `severity` é opcional e aceita `BAIXA`, `MEDIA`, `ALTA` ou `CRITICA` (os mesmos valores do FluxID); sem ela, a API usa o padrão do tipo (`SEAL_BROKEN` → `CRITICA`; `GEOFENCE_EXIT` e `COMMAND_FAILURE` → `ALTA`; `DEVICE_ERROR` e `COMMUNICATION_LOST` → `MEDIA`; `LOW_BATTERY` → `BAIXA`). Todo alerta nasce com `status` `ABERTO`. Os campos antigos `status_id` e `severity_id` são ignorados.
 
 ## Documentos
 

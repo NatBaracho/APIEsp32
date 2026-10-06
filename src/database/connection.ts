@@ -77,20 +77,82 @@ db.exec(`
     alert_id TEXT NOT NULL UNIQUE,
     device_id TEXT NOT NULL,
     alert_type TEXT NOT NULL,
-    status_id INTEGER NOT NULL,
-    severity_id INTEGER NOT NULL,
+    severity TEXT NOT NULL
+      CHECK (severity IN ('BAIXA', 'MEDIA', 'ALTA', 'CRITICA')),
+    status TEXT NOT NULL DEFAULT 'ABERTO'
+      CHECK (status IN ('ABERTO', 'EM_ANALISE', 'ENCERRADO')),
     title TEXT NOT NULL,
     description TEXT,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     resolved_at DATETIME,
     FOREIGN KEY (device_id)
-      REFERENCES devices(device_id),
-    FOREIGN KEY (status_id)
-      REFERENCES status(id),
-    FOREIGN KEY (severity_id)
-      REFERENCES status(id)
+      REFERENCES devices(device_id)
   )
 `);
+
+// Bancos anteriores guardavam status_id/severity_id apontando para a tabela
+// status (estados de dispositivo/lacre). Recria a tabela com severity e status
+// em texto, nos valores do FluxID, preservando os alertas existentes
+function migrateLegacyAlerts(): void {
+  const columns = db
+    .prepare("PRAGMA table_info(alerts)")
+    .all() as Array<{ name: string }>;
+
+  if (!columns.some(column => column.name === "severity_id")) {
+    return;
+  }
+
+  const migrate = db.transaction(() => {
+    db.exec(`
+      CREATE TABLE alerts_migrated (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        alert_id TEXT NOT NULL UNIQUE,
+        device_id TEXT NOT NULL,
+        alert_type TEXT NOT NULL,
+        severity TEXT NOT NULL
+          CHECK (severity IN ('BAIXA', 'MEDIA', 'ALTA', 'CRITICA')),
+        status TEXT NOT NULL DEFAULT 'ABERTO'
+          CHECK (status IN ('ABERTO', 'EM_ANALISE', 'ENCERRADO')),
+        title TEXT NOT NULL,
+        description TEXT,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        resolved_at DATETIME,
+        FOREIGN KEY (device_id)
+          REFERENCES devices(device_id)
+      )
+    `);
+    db.exec(`
+      INSERT INTO alerts_migrated (
+        id, alert_id, device_id, alert_type, severity, status,
+        title, description, created_at, resolved_at
+      )
+      SELECT
+        id,
+        alert_id,
+        device_id,
+        alert_type,
+        CASE alert_type
+          WHEN 'SEAL_BROKEN' THEN 'CRITICA'
+          WHEN 'GEOFENCE_EXIT' THEN 'ALTA'
+          WHEN 'COMMAND_FAILURE' THEN 'ALTA'
+          WHEN 'LOW_BATTERY' THEN 'BAIXA'
+          ELSE 'MEDIA'
+        END,
+        CASE WHEN resolved_at IS NULL THEN 'ABERTO' ELSE 'ENCERRADO' END,
+        title,
+        description,
+        created_at,
+        resolved_at
+      FROM alerts
+    `);
+    db.exec("DROP TABLE alerts");
+    db.exec("ALTER TABLE alerts_migrated RENAME TO alerts");
+  });
+
+  migrate();
+}
+
+migrateLegacyAlerts();
 
 function addColumnIfMissing(
   tableName: string,

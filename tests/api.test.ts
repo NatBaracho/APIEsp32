@@ -420,6 +420,44 @@ async function main() {
     return { passed, status: res.status, expectedStatus: 403, details: json.message };
   });
 
+  await runTest("POST /api/v1/iot/telemetries com latitude fora da faixa -> 400", async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": TEST_API_KEY
+      },
+      body: JSON.stringify({
+        message_id: "MSG-TEST-TEL-011",
+        device_id: TEST_DEVICE_ID,
+        latitude: 91,
+        longitude: -34.9
+      })
+    });
+    const json: any = await res.json();
+    const row = db.prepare("SELECT 1 FROM telemetry_queue WHERE message_id = ?").get("MSG-TEST-TEL-011");
+    const passed = res.status === 400 && json.message === "latitude deve estar entre -90 e 90 e longitude entre -180 e 180" && !row;
+    return { passed, status: res.status, expectedStatus: 400, details: json.message };
+  });
+
+  await runTest("POST /api/v1/iot/telemetries só com latitude -> 400", async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": TEST_API_KEY
+      },
+      body: JSON.stringify({
+        message_id: "MSG-TEST-TEL-012",
+        device_id: TEST_DEVICE_ID,
+        latitude: -8.4
+      })
+    });
+    const json: any = await res.json();
+    const passed = res.status === 400 && json.message === "latitude e longitude devem ser enviadas juntas";
+    return { passed, status: res.status, expectedStatus: 400, details: json.message };
+  });
+
   await runTest("POST /api/v1/iot/telemetries com seal_status inválido -> 400", async () => {
     const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
       method: "POST",
@@ -769,8 +807,6 @@ async function main() {
         alert_id: TEST_ALT_ID,
         device_id: TEST_DEVICE_ID,
         alert_type: "SEAL_BROKEN",
-        status_id: 1,
-        severity_id: 2,
         title: "Lacre rompido"
       })
     });
@@ -790,8 +826,6 @@ async function main() {
         alert_id: TEST_ALT_ID,
         device_id: TEST_DEVICE_ID,
         alert_type: "SEAL_BROKEN",
-        status_id: 1,
-        severity_id: 2,
         title: "Lacre rompido"
       })
     });
@@ -811,8 +845,6 @@ async function main() {
         alert_id: TEST_ALT_ID,
         device_id: TEST_DEVICE_ID,
         alert_type: "UNKNOWN_TYPE",
-        status_id: 1,
-        severity_id: 2,
         title: "Alerta inválido"
       })
     });
@@ -821,7 +853,7 @@ async function main() {
     return { passed, status: res.status, expectedStatus: 400, details: json.message };
   });
 
-  await runTest("POST /api/v1/iot/alerts com status_id inexistente -> 400", async () => {
+  await runTest("POST /api/v1/iot/alerts com severity inválida -> 400", async () => {
     const res = await fetch(`${BASE_URL}/api/v1/iot/alerts`, {
       method: "POST",
       headers: {
@@ -832,13 +864,12 @@ async function main() {
         alert_id: TEST_ALT_ID,
         device_id: TEST_DEVICE_ID,
         alert_type: "SEAL_BROKEN",
-        status_id: 9999,
-        severity_id: 2,
-        title: "Alerta status inválido"
+        severity: "URGENTE",
+        title: "Alerta com severidade inválida"
       })
     });
     const json: any = await res.json();
-    const passed = res.status === 400 && json.message.includes("devem existir na tabela status");
+    const passed = res.status === 400 && json.message === "severity deve ser BAIXA, MEDIA, ALTA ou CRITICA";
     return { passed, status: res.status, expectedStatus: 400, details: json.message };
   });
 
@@ -853,15 +884,46 @@ async function main() {
         alert_id: TEST_ALT_ID,
         device_id: TEST_DEVICE_ID,
         alert_type: "SEAL_BROKEN",
-        status_id: 1,
-        severity_id: 2,
         title: "Lacre rompido detectado",
         description: "Sensor detectou rompimento físico"
       })
     });
     const json: any = await res.json();
-    const passed = res.status === 201 && json.success === true && json.alert?.alert_id === TEST_ALT_ID;
-    return { passed, status: res.status, expectedStatus: 201, details: `Alerta criado: ${json.alert?.title}` };
+    const passed =
+      res.status === 201 &&
+      json.success === true &&
+      json.alert?.alert_id === TEST_ALT_ID &&
+      json.alert?.severity === "CRITICA" &&
+      json.alert?.status === "ABERTO";
+    return { passed, status: res.status, expectedStatus: 201, details: `severity=${json.alert?.severity} (padrão do tipo), status=${json.alert?.status}` };
+  });
+
+  await runTest("POST /api/v1/iot/alerts com severity informada e campos antigos ignorados -> 201", async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/iot/alerts`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": TEST_API_KEY
+      },
+      body: JSON.stringify({
+        alert_id: "ALT-TEST-AUTORUN-002",
+        device_id: TEST_DEVICE_ID,
+        alert_type: "LOW_BATTERY",
+        severity: "ALTA",
+        status: "ENCERRADO",
+        status_id: 9999,
+        severity_id: 9999,
+        title: "Bateria baixa"
+      })
+    });
+    const json: any = await res.json();
+    const passed =
+      res.status === 201 &&
+      json.alert?.severity === "ALTA" &&
+      json.alert?.status === "ABERTO" &&
+      !("status_id" in json.alert) &&
+      !("severity_id" in json.alert);
+    return { passed, status: res.status, expectedStatus: 201, details: `severity=${json.alert?.severity}, status=${json.alert?.status}` };
   });
 
   await runTest("POST /api/v1/iot/alerts com alert_id duplicado -> 409", async () => {
@@ -875,8 +937,6 @@ async function main() {
         alert_id: TEST_ALT_ID,
         device_id: TEST_DEVICE_ID,
         alert_type: "SEAL_BROKEN",
-        status_id: 1,
-        severity_id: 2,
         title: "Lacre rompido repetido"
       })
     });
