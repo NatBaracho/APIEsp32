@@ -1,0 +1,18 @@
+# Dependências (reinstalar com npm install)
+node_modules/
+
+# Backups e arquivos temporários do SQLite
+*.db.bak*
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Arquivos temporários do RoteiroDeTeste.md
+roteiro-env.sh
+api.pid
+big.json
+
+# Build e logs
+dist/
+*.log
+.env
