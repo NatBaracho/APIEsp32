@@ -147,12 +147,14 @@ Para a telemetria, o payload deve ter, pelo menos:
 - `message_id` é obrigatório
 - `device_id` é obrigatório
 - `message_id` deve ser único para evitar duplicidade
-- `device_id` deve corresponder a um dispositivo cadastrado
+- `device_id` deve corresponder a um dispositivo cadastrado; caso contrário a API responde `404` com `{"success":false,"message":"Dispositivo não encontrado"}`
 - campos como `latitude`, `longitude`, `speed_kmh`, `battery_percent` e `gsm_signal` são opcionais, mas devem ser enviados quando houver dados úteis
+- esses campos precisam ser números JSON (ex.: `-7.2091939`), não texto (`"-7.2091939"`); tipo inválido retorna `400` com `Campo <nome> com tipo inválido`
+- não envie `status` nem `attempt_count`: são controlados pelo servidor e ignorados se vierem no payload
 - `last_seen_at` é opcional e aceita data/hora em ISO 8601; a coluna SQLite tem tipo `DATETIME`
 - uma mensagem aceita é salva em `telemetry_queue`
 - se latitude e longitude forem iguais às da última telemetria do dispositivo, a API retorna `202` e atualiza `last_seen_at` sem criar outra linha
-- se o mesmo `message_id` for enviado novamente, a API responde `409 Conflict` com `{"success":false,"message":"Mensagem duplicada"}` e não grava outra linha
+- se o mesmo `message_id` for enviado novamente, inclusive o de uma posição repetida, a API responde `409 Conflict` com `{"success":false,"message":"Mensagem duplicada"}` e não grava outra linha
 
 ### Resposta esperada quando tudo estiver correto
 
@@ -426,6 +428,9 @@ void loop() {
 
     if (httpCode == 409) {
       Serial.println("Mensagem duplicada; não foi gravada novamente");
+    } else if (httpCode == 400 || httpCode == 404) {
+      // Erro no payload ou dispositivo não cadastrado: reenviar não resolve
+      Serial.println(http.getString());
     } else if (httpCode > 0) {
       String response = http.getString();
       Serial.println(response);

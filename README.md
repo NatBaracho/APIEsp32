@@ -13,6 +13,15 @@ npm start
 
 O servidor inicia na porta `3000`.
 
+## Testes
+
+```bash
+npx tsc --noEmit
+npm test
+```
+
+O `npm test` sobe a própria instância da API; pare o `npm start` antes de executá-lo para que a suíte não teste um processo antigo. A suíte grava no `oxide.db` do diretório atual e remove os registros `DSP-TEST%` ao final; faça backup do banco antes. Resultado atual: 46/46.
+
 ## Documentação interativa
 
 Com o servidor ativo, acesse o Swagger UI em:
@@ -37,10 +46,11 @@ Use **Try it out** para executar as requisições. Para telemetrias e eventos, c
 | `POST` | `/api/v1/iot/commands/confirm` | Confirmar execução ou erro de comando |
 | `POST` | `/api/v1/iot/alerts` | Registrar alerta do dispositivo |
 
-Os POSTs de telemetria, eventos e alertas exigem `X-API-Key`; no alerta, a chave deve pertencer ao `device_id` enviado. Os campos `device_id` e `message_id` identificam os registros; `message_id` deve ser único por mensagem. Dispositivo repetido retorna `409 Dispositivo duplicado`; mensagem repetida retorna `409 Mensagem duplicada` e não cria outro registro.
+Os POSTs de telemetria, eventos e alertas exigem `X-API-Key`; no alerta, a chave deve pertencer ao `device_id` enviado. Os campos `device_id` e `message_id` identificam os registros; `message_id` deve ser único por mensagem. Dispositivo repetido retorna `409 Dispositivo duplicado` e API Key já usada por outro dispositivo retorna `409 API Key já está em uso`; mensagem repetida retorna `409 Mensagem duplicada` e não cria outro registro. `status` e `attempt_count` da fila são sempre definidos pelo servidor.
 
 Telemetrias também podem informar `last_seen_at` em ISO 8601; o campo é opcional e fica `NULL` quando omitido.
-Quando latitude e longitude forem iguais à última posição registrada para o dispositivo, a API responde `202` e atualiza apenas `last_seen_at`, sem inserir outra linha.
+Quando latitude e longitude forem iguais à última posição registrada para o dispositivo, a API responde `202` e atualiza apenas `last_seen_at`, sem inserir outra linha; o `message_id` fica registrado em `telemetry_position_repeats` e um reenvio dele retorna `409`.
+Campos numéricos da telemetria (`latitude`, `longitude`, `speed_kmh`, `battery_percent`, `gsm_signal`) precisam ser números, senão a API retorna `400`. Telemetria para um `device_id` não cadastrado retorna `404`.
 
 `ACTIVE`/`INACTIVE` representam o estado do dispositivo (`devices.active` igual a `1`/`0`). Em eventos, `seal_status` aceita `LOCKED`, `UNLOCKED` ou `BROKEN`; `events.status` continua reservado ao processamento da fila.
 
@@ -58,3 +68,7 @@ A tabela `alerts` armazena alertas associados a dispositivos. `POST /api/v1/iot/
 - [Regras de negócio da API e bancos FluxID/Oxide](Doc/Regras-de-Negocio-e-Banco-Oxide.md)
 - [Desenvolvimento, testes e histórico de correções](Doc/Desenvolvimento.md)
 - [Integração e payloads do ESP32](Doc/ESP32-envio-de-dados.md)
+- [Especificação do banco SQLite Oxide](Doc/Oxidedb.md)
+- [Banco PostgreSQL FluxID](Doc/Banco_FluxID.md)
+- [Plano de Teste](Doc/Doc_tese/PlanoDeTeste.md)
+- [Roteiro de Teste para IA](Doc/Doc_tese/RoteiroDeTeste.md)

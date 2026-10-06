@@ -1,11 +1,11 @@
 # Plano de Teste — FluxID / Oxide IoT
 
-**Versão:** 1.0
-**Data:** 05/10/2026
+**Versão:** 1.1
+**Data:** 06/10/2026
 **Escopo:** API Oxide (Node.js + TypeScript + Express + SQLite), sincronização com o PostgreSQL FluxID e API FluxID (NestJS) planejada
 **Validação humana:** Natã da Silva Baracho
 
-> Este plano consolida o que já foi implementado e testado (suíte `tests/api.test.ts`, 40 casos) e o que ainda precisa ser testado conforme o `Checklist-Projeto.md`, o `Banco_FluxID.md` (v3.0) e o `Regras-de-Negocio-e-Banco-Oxide.md`. Cada caso indica sua situação: **Automatizado**, **Manual executado** ou **Pendente**.
+> Este plano consolida o que já foi implementado e testado (suíte `tests/api.test.ts`, 46 casos) e o que ainda precisa ser testado conforme o `Checklist-Projeto.md`, o `Banco_FluxID.md` (v3.0) e o `Regras-de-Negocio-e-Banco-Oxide.md`. Cada caso indica sua situação: **Automatizado**, **Manual executado** ou **Pendente**.
 
 ---
 
@@ -93,7 +93,7 @@ Pré-condição para toda execução: banco com schema criado pelo script do `Ox
 **Saída (aprovação)**
 - 100% dos casos de severidade Alta aprovados.
 - Nenhum defeito crítico ou alto aberto.
-- Suíte automatizada sem falhas (hoje 40/40).
+- Suíte automatizada sem falhas (hoje 46/46).
 - Banco limpo após o teardown (zero registros `DSP-TEST%`).
 
 **Suspensão**
@@ -130,6 +130,9 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 | DEV-07 | `POST /devices` sem `active` e sem `firmware_version` | `201` (fallbacks `?? 1` e `?? null`) | Alta | A (indireto, DEV-05) |
 | DEV-08 | `POST /devices` com `firmware_version` omitido | Persiste `NULL` | Baixa | P |
 | DEV-09 | `GET /devices` não cria registros (idempotência de leitura) | Contagem inalterada | Baixa | M |
+| DEV-10 | `POST /devices` com `api_key` já usada por outro dispositivo | `409 API Key já está em uso`, sem nova linha | Alta | A |
+| DEV-11 | `POST /devices` com `active` diferente de `0`/`1` (ex.: `7`, `"abc"`) | `400 active deve ser 0 ou 1` | Média | A |
+| DEV-12 | `POST /devices` com `firmware_version` não textual | `400` | Baixa | P |
 
 ### 6.3 Autenticação e autorização
 
@@ -161,14 +164,17 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 | TEL-09 | `last_seen_at` omitido | Persistido como `NULL` | Média | M |
 | TEL-10 | Na repetição de posição, `last_seen_at` usa `CURRENT_TIMESTAMP` (não o enviado) | Conferir valor gravado | Média | P |
 | TEL-11 | Apenas latitude informada (sem longitude) | Inserida como nova linha (não é posição repetida) | Média | P |
-| TEL-12 | Coordenadas como string | Tratadas como não numéricas: nova linha, sem atualização de `last_seen_at` | Média | P |
+| TEL-12 | Coordenadas como string | `400 Campo latitude com tipo inválido`, nenhuma linha | Média | P |
 | TEL-13 | Latitude fora de faixa (`> 90`) e longitude fora de faixa (`> 180`) | Definir regra (rejeitar `400`?) e testar; hoje não há validação | Média | P |
 | TEL-14 | `payload_json` omitido | Grava serialização do objeto recebido | Baixa | P |
-| TEL-15 | Telemetria para `device_id` inexistente | Falha de FK; esperado erro tratado (não `500` com detalhes) | Alta | P |
+| TEL-15 | Telemetria para `device_id` inexistente | `404 Dispositivo não encontrado`, nenhuma linha | Alta | A |
 | TEL-16 | `GET /telemetries` ordem decrescente por `id` | `200`, `id` 10 antes do 9 | Média | M |
 | TEL-17 | Corpo ausente em `POST` | `400` (corpo tratado como objeto vazio) | Média | P |
 | TEL-18 | Campos extras desconhecidos | Ignorados sem erro | Baixa | P |
-| TEL-19 | Mesmo `message_id` em duas requisições concorrentes | Uma `202`, outra `409`; uma linha | Alta | P |
+| TEL-19 | Mesmo `message_id` em duas requisições concorrentes | Uma `202`, outra `409`; uma linha (violação `UNIQUE` também é convertida em `409`) | Alta | P |
+| TEL-20 | Reenvio do `message_id` de uma telemetria de posição repetida (TEL-04) | `409 Mensagem duplicada`; `message_id` registrado em `telemetry_position_repeats` | Alta | A |
+| TEL-21 | Cliente envia `status: "SYNCED"` e `attempt_count: 99` | `202`; gravado `status = PENDING` e `attempt_count = 0` | Alta | A |
+| TEL-22 | Campo numérico com tipo não numérico (`latitude: true`) ou `payload_json` como objeto | `400 Campo <nome> com tipo inválido` (antes: `500`) | Média | A (latitude) |
 
 ### 6.5 Eventos
 
@@ -184,7 +190,7 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 | EVT-08 | `message_id` duplicado | `409`, sem nova linha | Alta | A |
 | EVT-09 | `event_type` gravado em `events.message_type` | Valor conferido via SQL | Média | P |
 | EVT-10 | Cliente tenta enviar `status` no payload | Ignorado; servidor define `PENDING` | Média | P |
-| EVT-11 | `attempt_count` inicial | `0` | Baixa | P |
+| EVT-11 | `attempt_count` inicial, inclusive quando o cliente envia outro valor | `0` | Baixa | P |
 | EVT-12 | Evento sem `seal_status` | `202`, `seal_status = NULL` | Baixa | P |
 
 ### 6.6 Comandos
@@ -230,14 +236,14 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 
 | ID | Caso | Verificação | Prior. | Sit. |
 | --- | --- | --- | --- | --- |
-| BD-01 | Tabelas existentes | `SELECT name FROM sqlite_master` retorna `devices`, `status`, `telemetry_queue`, `events`, `commands`, `alerts` | Alta | M |
+| BD-01 | Tabelas existentes | `SELECT name FROM sqlite_master` retorna `devices`, `status`, `telemetry_queue`, `telemetry_position_repeats`, `events`, `commands`, `alerts` | Alta | M |
 | BD-02 | Tabelas `sync_logs`/`sync_items` | Inexistentes até a entrega do Worker | Média | M |
 | BD-03 | Unicidade | `device_id`, `message_id` (eventos e telemetrias), `command_id`, `alert_id`, `status.code` rejeitam duplicatas | Alta | M |
 | BD-04 | FKs ativas | `PRAGMA foreign_keys` = 1; inserir evento/telemetria/alerta com `device_id` inexistente falha | Alta | P |
 | BD-05 | `commands` FK | `ON UPDATE CASCADE`, `ON DELETE RESTRICT`; apagar dispositivo com comandos falha | Alta | M |
 | BD-06 | `alerts` FKs | Três FKs (dispositivo, `status_id`, `severity_id`) | Alta | M |
 | BD-07 | Defaults | `devices.active = 1`, `commands.status = 'PENDENTE'`, `alerts.created_at = CURRENT_TIMESTAMP`, `telemetry_queue.status = 'PENDING'`, `attempt_count = 0` | Média | M |
-| BD-08 | `CHECK (active IN (0,1))` | Inserir `active = 2` falha | Média | P |
+| BD-08 | Regra `active IN (0,1)` | Inserir ou atualizar `active = 2` falha com `CHECK constraint failed`. Em bancos antigos sem `CHECK`, a regra vem dos triggers `trg_devices_active_insert`/`_update` | Média | M |
 | BD-09 | Migração de colunas legadas | `messge_tyoe`, `seel_status`, `firmware_versin ` renomeadas sem perda de dados | Alta | M |
 | BD-10 | Migração de `telemetry_queue` legada | Recriação transacional preserva linhas e IDs; campos opcionais passam a aceitar `NULL` | Alta | M |
 | BD-11 | Inicialização idempotente | Subir a aplicação duas vezes não duplica `status` nem falha | Alta | P |
@@ -245,6 +251,8 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 | BD-13 | Seed de `status` | 5 códigos inseridos uma única vez | Média | P |
 | BD-14 | Criação do banco pelo script do `Oxidedb.md` em arquivo vazio | Schema equivalente ao criado pela aplicação | Média | P |
 | BD-15 | Teardown | Zero registros `DSP-TEST%` após a suíte | Alta | A |
+| BD-16 | Índice único `idx_devices_api_key` | Existe quando não há chaves duplicadas; inserir chave repetida falha. Com duplicatas pré-existentes, a aplicação sobe e registra aviso | Alta | P |
+| BD-17 | `telemetry_position_repeats` com `ON DELETE CASCADE` | Apagar a telemetria de referência remove os registros de repetição | Média | P |
 
 ---
 
@@ -399,7 +407,7 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 
 | Regra / requisito | Casos |
 | --- | --- |
-| RN03, RN14 (unicidade, `message_id`) | DEV-06, TEL-03, TEL-19, EVT-08, ALT-06, BD-03, SYN-02 |
+| RN03, RN14 (unicidade, `message_id`) | DEV-06, DEV-10, TEL-03, TEL-19, TEL-20, EVT-08, ALT-06, BD-03, BD-16, SYN-02 |
 | RN04, RN05 (um vínculo ativo) | ASC-02 a ASC-04, FLX-11 |
 | RN08, RN09 (lacre e abertura) | EVT-04, EVT-05, ALT-05, ESP-07 |
 | RN10, RN11 (geofence e alerta) | GEO-01 a GEO-09, ALT-07 |
@@ -408,8 +416,8 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | RN20, RN21 (auditoria e histórico) | HIS-01, ASC-07, FLX-08, FLX-15, SEG-11 |
 | RN22 (multiempresa) | FLX-04 |
 | RN23 (alertas rastreáveis) | ALT-05, ALT-12, SYN-09 |
-| RF04, RF16 (CRUD e API) | DEV-01 a DEV-08, FLX-02 |
-| RF08 (telemetria) | TEL-01 a TEL-19 |
+| RF04, RF16 (CRUD e API) | DEV-01 a DEV-12, FLX-02 |
+| RF08 (telemetria) | TEL-01 a TEL-22 |
 | RF09, RF10 (eventos e alertas) | EVT-01 a EVT-12, ALT-01 a ALT-12 |
 | RNF08 (telemetria indexada) | OPE-04 |
 | RNF10 (erros padronizados) | SEG-07, FLX-03, FLX-09 |
@@ -421,10 +429,10 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 
 | Indicador | Valor |
 | --- | --- |
-| Suíte automatizada (`npm test`) | 40 casos, 40 aprovados na última execução registrada |
-| Compilação (`npx tsc --noEmit`) | Aprovada na última verificação |
+| Suíte automatizada (`npm test`) | 46 casos (45 testes e 1 de teardown), 46 aprovados em 06/10/2026 |
+| Compilação (`npx tsc --noEmit`) | Aprovada em 06/10/2026 |
 | Cobertura da suíte | Dispositivos, autenticação, telemetria, eventos, comandos e alertas (fluxo principal e erros mais comuns) |
-| Lacunas prioritárias | AUT-08/09, SEG-01 a SEG-05, TEL-15, TEL-19, ALT-07/08/12, EVT-05, BD-04/11 |
+| Lacunas prioritárias | AUT-08/09, SEG-01 a SEG-05, TEL-19, ALT-07/08/12, EVT-05, BD-04/11/16 |
 | Entregas futuras | Todos os casos da seção 10 pendentes (funcionalidades ainda não implementadas) |
 
 ---
@@ -440,7 +448,7 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | R5 | Ownership não validado em telemetria e eventos | AUT-08/09; decidir regra |
 | R6 | Severidade sem semântica | ALT-12; definir catálogo |
 | R7 | Divergência de modelos (Oxide × FluxID) pode causar rejeição em massa no Worker | Casos SYN-06 a SYN-13 antes de implementar a sincronização |
-| R8 | Testes concorrentes não cobertos (SQLite com `better-sqlite3` é síncrono, mas há risco entre processos) | TEL-19 |
+| R8 | Testes concorrentes não cobertos (SQLite com `better-sqlite3` é síncrono, mas há risco entre processos). Telemetria e alertas convertem violação `UNIQUE` em `409`; eventos e dispositivos ainda responderiam `500` | TEL-19 |
 | R9 | Ausência de `CHECK` para `alert_type` e `seal_status` no SQLite (validação só na aplicação) | Testes de API compensam; avaliar constraint |
 
 ---
@@ -459,10 +467,10 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 
 1. Fazer backup de `oxide.db` (ou apontar para um banco de teste).
 2. Executar `npx tsc --noEmit`.
-3. Iniciar a API (`npm start`) em uma instância nova (reiniciar se houver processo antigo na porta 3000).
-4. Executar `npm test` e registrar o resultado final.
-5. Executar os casos manuais pendentes no Swagger ou Postman.
-6. Conferir o banco com as consultas da seção de verificação do `Oxidedb.md` (`PRAGMA table_info` e contagens).
+3. Com a porta 3000 livre, executar `npm test` e registrar o resultado final. A suíte sobe a própria instância da API; se houver outra rodando, ela é testada no lugar do código atual.
+4. Iniciar a API (`npm start`) em uma instância nova para os casos manuais.
+5. Executar os casos manuais pendentes no Swagger, no Postman ou pelo `RoteiroDeTeste.md`.
+6. Conferir o banco com as consultas da seção de verificação do `Oxidedb.md` ou da seção 6 do `RoteiroDeTeste.md`.
 7. Registrar defeitos com ID do caso, passos, resultado obtido e esperado.
 8. Repetir a suíte completa a cada nova entrega do roadmap e atualizar este plano.
 
@@ -473,3 +481,4 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | Versão | Data | Descrição |
 | --- | --- | --- |
 | 1.0 | 05/10/2026 | Criação do plano com base nos documentos do projeto e na suíte de 40 testes |
+| 1.1 | 06/10/2026 | Correções na API: idempotência de posição repetida, `status`/`attempt_count` controlados pelo servidor, `api_key` única, validação de `active` e de tipos da telemetria, `404` para dispositivo inexistente. Novos casos DEV-10 a DEV-12, TEL-20 a TEL-22, BD-16 e BD-17; TEL-12, TEL-15 e BD-08 revisados; suíte com 46 casos |
