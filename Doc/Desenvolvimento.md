@@ -379,14 +379,14 @@ Na validação da 7.11, Natã da Silva Baracho recusou a tabela `telemetry_posit
 | Rompimento no mesmo lugar não pode se perder | Só é repetição quando posição **e** `seal_status` são iguais; mudança de estado gera nova linha. |
 | Tentativas de envio do ESP32 | `attempt_count` do payload vai para `device_attempt_count` (telemetria e eventos), inteiro ≥ 0; `attempt_count` da fila continua sendo do Worker. |
 
-Compilação aprovada, suíte com 50/50 (quatro casos novos) e Roteiro de Teste v1.2 executado de ponta a ponta. Validação registrada em [Relatorio-de-Teste-2026-10-06.md](Doc_tese/Relatorio-de-Teste-2026-10-06.md), **aprovada por Natã da Silva Baracho**.
+Compilação aprovada, suíte com 50/50 (quatro casos novos) e Roteiro de Teste v1.2 executado de ponta a ponta. Validação registrada em [Relatorio-de-Teste-2026-10-06-15h14.md](Doc_tese/Relatorio-de-Teste-2026-10-06-15h14.md), **aprovada por Natã da Silva Baracho**.
 
 ### 7.13 Teste completo no banco real e remoção do `sqlite3` (06/10/2026)
 - Como foi testado: Roteiro de Teste v1.2 executado por completo no `oxide.db` real, com backup antes e restauração depois. O checksum SHA-256 do banco foi igual antes e depois. O FluxID ficou fora desta rodada por decisão do responsável.
 - Resultado: compilação sem erros, suíte 50/50, 77 respostas HTTP iguais ao esperado e todas as verificações de banco conforme. A migração das colunas novas funcionou no banco real.
 - Achado fora do roteiro: o `npm audit` aponta 3 vulnerabilidades altas no `nodemon` (via `chokidar`/`braces`), ferramenta usada só no `npm run dev`. O conserto automático rebaixaria o `nodemon`, por isso não foi aplicado.
 - Correção: a dependência `sqlite3`, que não era usada (a API usa `better-sqlite3`), foi removida. Uma rodada curta repetiu compilação, suíte (50/50) e `npm start` (`GET /` → `200`). Uma instalação do zero (`npm ci`) também foi testada e o `better-sqlite3` carregou normalmente.
-- Validação registrada em [Relatorio-de-Teste-2026-10-06-2.md](Doc_tese/Relatorio-de-Teste-2026-10-06-2.md), **aprovada por Natã da Silva Baracho**.
+- Validação registrada em [Relatorio-de-Teste-2026-10-06-15h49.md](Doc_tese/Relatorio-de-Teste-2026-10-06-15h49.md), **aprovada por Natã da Silva Baracho**.
 
 ## 8. Status atual
 

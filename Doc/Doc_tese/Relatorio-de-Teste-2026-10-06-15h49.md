@@ -1,11 +1,11 @@
 # Relatório de Teste — API Oxide (execução completa no banco real)
 
-**Data/hora:** 06/10/2026, 15:20:19 a 15:20:46 (execução do Roteiro), seguida da rodada curta após a remoção do `sqlite3`
+**Data/hora:** 06/10/2026, publicado às 15:49; execução do Roteiro das 15:20:19 a 15:20:46, seguida da rodada curta após a remoção do `sqlite3`
 **Executor:** IA (Claude Code, modelo Claude Opus 5.5), com validação humana de Natã da Silva Baracho
 **Commit/versão:** branch `fix/revisao-plano-de-teste` (`9a7187c`), mais a remoção da dependência `sqlite3` desta entrega
 **Ambiente:** Windows 11 Pro, Node.js v24.21.0, npm 11.19.0, Git Bash 5.3, porta 3000, banco **`oxide.db` real** do projeto (com backup e restauração)
 **Base:** `RoteiroDeTeste.md` v1.2 (todas as seções executáveis) e `PlanoDeTeste.md` v1.2
-**Relatório anterior:** [Relatorio-de-Teste-2026-10-06.md](Relatorio-de-Teste-2026-10-06.md)
+**Relatório anterior:** [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md)
 
 ## 1. Resumo
 

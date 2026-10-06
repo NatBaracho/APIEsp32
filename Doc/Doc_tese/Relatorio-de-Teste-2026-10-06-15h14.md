@@ -1,6 +1,6 @@
 # Relatório de Teste — API Oxide
 
-**Data/hora:** 06/10/2026
+**Data/hora:** 06/10/2026, publicado às 15:14
 **Executor:** IA (Claude Code, modelo Claude Opus 5.5), com validação humana de Natã da Silva Baracho
 **Commit/versão:** branch `fix/revisao-plano-de-teste`, a partir de `f49ef6e`
 **Ambiente:** Windows 11 Pro, Node.js v24.21.0, Git Bash 5.3, porta 3000 (suíte isolada na 3999), cópias isoladas do `oxide.db` (o banco real não foi alterado)

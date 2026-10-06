@@ -1,6 +1,6 @@
 # Roteiro de Teste para IA — API Oxide (FluxID / Oxide IoT)
 
-**Versão:** 1.2
+**Versão:** 1.3
 **Data:** 06/10/2026
 **Uso:** instruções executáveis para uma IA (ou pessoa) testar a API Oxide e produzir um relatório padronizado.
 **Base:** `Doc/Doc_tese/PlanoDeTeste.md` (IDs dos casos entre colchetes, ex.: `[TEL-03]`).
@@ -546,7 +546,7 @@ Severidade dos defeitos: **Crítica** (perda de dados, exposição de segredo), 
 
 ## 11. Formato do relatório (entregar em Markdown)
 
-Gere o arquivo `Relatorio-de-Teste-AAAA-MM-DD.md` em `Doc/Doc_tese/` com a estrutura abaixo.
+Gere o arquivo `Relatorio-de-Teste-AAAA-MM-DD-HHhMM.md` em `Doc/Doc_tese/` (ex.: `Relatorio-de-Teste-2026-10-06-15h49.md`), com a hora da publicação para distinguir relatórios do mesmo dia, e a estrutura abaixo.
 
 ```markdown
 # Relatório de Teste — API Oxide
@@ -598,7 +598,7 @@ no Windows). Siga as regras da seção 1: faça backup do oxide.db, use apenas d
 teste, não altere código-fonte, não invente resultados e registre o que foi realmente
 obtido. Comece cada bloco de comandos com "source ./roteiro-env.sh". Ao final, restaure
 o banco e gere o relatório no formato da seção 11 em
-Doc/Doc_tese/Relatorio-de-Teste-AAAA-MM-DD.md. Se uma etapa for impossível de executar,
+Doc/Doc_tese/Relatorio-de-Teste-AAAA-MM-DD-HHhMM.md. Se uma etapa for impossível de executar,
 marque NÃO EXECUTADO com o motivo.
 ```
 
@@ -611,3 +611,4 @@ marque NÃO EXECUTADO com o motivo.
 | 1.0 | 05/10/2026 | Criação do roteiro |
 | 1.1 | 06/10/2026 | Nomes de arquivo corrigidos; consultas via `better-sqlite3` (sem depender do `sqlite3`); arquivo `roteiro-env.sh` para shells sem estado; API parada durante o `npm test`; IDs e coordenadas exclusivos por caso; casos DEV-10 a DEV-12, TEL-20 a TEL-22, EVT-11, BD-16 e BD-17; expectativas alinhadas às correções da API |
 | 1.2 | 06/10/2026 | Ajustes definidos por Natã da Silva Baracho: `last_repeat_message_id` no lugar de `telemetry_position_repeats`, resposta `200` para posição repetida, `seal_status` na telemetria e `device_attempt_count`; casos TEL-23 a TEL-25 e EVT-13; BD-17 passa a verificar as colunas novas |
+| 1.3 | 06/10/2026 | Nome do relatório passa a incluir a hora da publicação (`AAAA-MM-DD-HHhMM`), a pedido de Natã da Silva Baracho |
