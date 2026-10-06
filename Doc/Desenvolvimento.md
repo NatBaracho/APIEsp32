@@ -440,6 +440,7 @@ Compilação aprovada, suíte com 55/55 (três casos novos e um substituído), m
 - Validação: servidor PostgreSQL 18.6 temporário, separado do banco principal (o Docker ficou para depois, por exigir habilitar a virtualização na BIOS). Dump restaurado sem erros; scripts executados duas vezes (a segunda sem alterações); coerência e regras novas conferidas; servidor apagado ao final.
 - Documentos: `Banco_FluxID.md` v3.1 e novo `Integracao-Oxide-FluxID.md`, com as tabelas de conversão e as decisões pendentes P1 a P8 para o Worker.
 - Validação registrada em [Relatorio-de-Teste-2026-10-06-20h00.md](Doc_tese/Relatorio-de-Teste-2026-10-06-20h00.md), **aprovada por Natã da Silva Baracho**.
+- Ocorrência no envio: logo após o merge do PR #4, um revert (PR #5) foi mesclado sem intenção e desfez a entrega na `main`. O conteúdo foi reaplicado sem nenhuma alteração por um novo pull request, conferido como idêntico ao aprovado.
 
 ## 9. Suíte de testes automatizados (`npm test`)
 
