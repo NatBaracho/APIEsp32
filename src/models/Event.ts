@@ -1,3 +1,5 @@
+export const sealStatuses = ["LOCKED", "UNLOCKED", "BROKEN"];
+
 export interface Event {
   id?: number;
 
@@ -10,6 +12,9 @@ export interface Event {
   seal_status?: string;
 
   payload_json?: string;
+
+  // Tentativas de envio informadas pelo ESP32 (o payload usa attempt_count)
+  device_attempt_count?: number;
 
   status?: string;
 

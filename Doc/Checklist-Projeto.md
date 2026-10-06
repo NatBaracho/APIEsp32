@@ -20,7 +20,9 @@ Este documento registra o que já foi implementado e validado e o que falta para
 
 - ✅ API Key associada a dispositivo.
 - ✅ Middleware valida chave ausente (`401`), inválida (`401`) e dispositivo inativo (`403`).
-- ✅ Rotas protegidas validam se a chave pertence ao dispositivo informado (`403`).
+- ✅ Rotas de comandos e alertas validam se a chave pertence ao dispositivo informado (`403`).
+- [ ] Decidir e aplicar a mesma validação de ownership em telemetria e eventos (casos AUT-08 e AUT-09 do plano de teste).
+- ✅ API Key exclusiva por dispositivo (`409` na duplicidade e índice único no banco).
 - ✅ Autenticação aplicada aos fluxos de telemetria, comandos e alertas.
 
 **Status:** segurança por API Key implementada para o MVP.
@@ -41,6 +43,7 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ Ativação e desativação de dispositivo.
 - ✅ Colunas opcionais `device_status_id`, `valve_status_id` e `seal_status_id`.
 - ✅ Prevenção de cadastro duplicado (`409`).
+- ✅ `active` restrito a `0`/`1` na API (`400`) e no banco (triggers em bancos antigos).
 - ✅ Criação automática de dispositivo no fluxo de eventos quando ainda não existe.
 - ✅ Catálogo `status` para estados de dispositivo e lacre.
 - ✅ Validação de `seal_status` em eventos (`LOCKED`, `UNLOCKED` ou `BROKEN`).
@@ -55,6 +58,11 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ Validação dos campos obrigatórios e de `message_id` duplicado (`409`).
 - ✅ Repetição do mesmo `message_id` não cria novo registro.
 - ✅ Atualização de `last_seen_at` quando a posição GPS se repete.
+- ✅ Posição e lacre iguais à última telemetria respondem `200 Posição já registrada; data e hora atualizadas`.
+- ✅ Reenvio do `message_id` de posição repetida retorna `409` (coluna `last_repeat_message_id`).
+- ✅ Estado do lacre (`seal_status`) na telemetria; mudança de estado na mesma posição gera nova linha.
+- ✅ `status` e `attempt_count` da fila definidos pelo servidor; tentativas de envio do ESP32 em `device_attempt_count`.
+- ✅ Validação de tipos dos campos (`400`) e dispositivo inexistente (`404`).
 - ✅ Telemetrias sem GPS aceitas e persistidas.
 - ✅ Consulta ordenada por `id` decrescente (mais recentes primeiro).
 - ✅ JSON malformado retorna `400`.
@@ -112,7 +120,7 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 
 ### Relacionamentos e integridade
 
-- ✅ `device_id` único em dispositivos.
+- ✅ `device_id` e `api_key` únicos em dispositivos.
 - ✅ `message_id` único para eventos e telemetrias.
 - ✅ `alert_id` e `command_id` únicos.
 - ✅ `devices` → `telemetry_queue` por `device_id`.
@@ -135,7 +143,13 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ Eventos testados, incluindo autenticação e validação de lacre.
 - ✅ Comandos testados, incluindo confirmação, ownership e reconfirmação.
 - ✅ Alertas testados, incluindo autenticação, validação, duplicidade e criação de `SEAL_BROKEN`.
-- ✅ Casos de sucesso e erro cobertos pela suíte de integração (`40/40` na última execução registrada).
+- ✅ Casos de sucesso e erro cobertos pela suíte de integração (`50/50` em 06/10/2026).
+- ✅ Plano de Teste e Roteiro de Teste para IA documentados em `Doc/Doc_tese/`.
+- ✅ Validação por entrega registrada em `Doc/Doc_tese/Relatorio-de-Teste-*.md` (IA + questionário do responsável); entrega de 06/10/2026 aprovada por Natã da Silva Baracho.
+- ✅ Teste completo da API e do banco Oxide no `oxide.db` real, com backup e restauração (06/10/2026).
+- ✅ Dependência não usada `sqlite3` removida.
+- [ ] Atualizar o `nodemon` quando houver versão sem a vulnerabilidade do `braces` (3 alertas altos no `npm audit`, só em desenvolvimento).
+- [ ] Verificar a estrutura do FluxID (PostgreSQL) numa rodada de teste antes de iniciar o Worker.
 - [ ] Reexecutar compilação e suíte após concluir as próximas funcionalidades.
 
 **Status:** funcionalidades atuais do MVP validadas; a suíte deve ser repetida a cada nova etapa.

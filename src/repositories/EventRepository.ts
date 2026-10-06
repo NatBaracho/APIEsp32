@@ -18,10 +18,12 @@ export class EventRepository {
         message_type,
         seal_status,
         payload_json,
+        device_attempt_count,
         status,
         attempt_count
       )
       VALUES (
+        ?,
         ?,
         ?,
         ?,
@@ -36,8 +38,9 @@ export class EventRepository {
       event.event_type ?? "EVENT",
       event.seal_status ?? null,
       payloadJson,
+      event.device_attempt_count ?? null,
       "PENDING",
-      event.attempt_count ?? 0
+      0
     );
 
   }

@@ -23,6 +23,13 @@ export interface TelemetryQueue {
 
   last_seen_at?: string;
 
+  seal_status?: string;
+
+  // Tentativas de envio informadas pelo ESP32 (o payload usa attempt_count)
+  device_attempt_count?: number;
+
+  last_repeat_message_id?: string;
+
   status?: string;
 
   attempt_count?: number;

@@ -143,6 +143,36 @@ async function main() {
     return { passed, status: res.status, expectedStatus: 409, details: json.message };
   });
 
+  await runTest("POST /api/v1/devices (API Key já usada por outro dispositivo -> 409)", async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/devices`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        device_id: "DSP-TEST-DUPKEY",
+        api_key: TEST_API_KEY
+      })
+    });
+    const json: any = await res.json();
+    const exists = db.prepare("SELECT 1 FROM devices WHERE device_id = 'DSP-TEST-DUPKEY'").get();
+    const passed = res.status === 409 && json.message === "API Key já está em uso" && !exists;
+    return { passed, status: res.status, expectedStatus: 409, details: json.message };
+  });
+
+  await runTest("POST /api/v1/devices (active diferente de 0/1 -> 400)", async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/devices`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        device_id: "DSP-TEST-ACTIVE7",
+        api_key: "key-test-active7",
+        active: 7
+      })
+    });
+    const json: any = await res.json();
+    const passed = res.status === 400 && json.success === false;
+    return { passed, status: res.status, expectedStatus: 400, details: json.message };
+  });
+
   // Group 3: Authentication & Middleware
   console.log("\n--- [3] Autenticação & Middleware (X-API-Key) ---");
 
@@ -239,7 +269,7 @@ async function main() {
     return { passed, status: res.status, expectedStatus: 409, details: json.message };
   });
 
-  await runTest("POST /api/v1/iot/telemetries mesma posição GPS -> 202 e atualiza apenas last_seen_at", async () => {
+  await runTest("POST /api/v1/iot/telemetries mesma posição GPS -> 200 e atualiza apenas last_seen_at", async () => {
     const countBefore = (db.prepare("SELECT COUNT(*) as c FROM telemetry_queue WHERE device_id = ?").get(TEST_DEVICE_ID) as any).c;
 
     const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
@@ -257,8 +287,11 @@ async function main() {
     });
     const json: any = await res.json();
     const countAfter = (db.prepare("SELECT COUNT(*) as c FROM telemetry_queue WHERE device_id = ?").get(TEST_DEVICE_ID) as any).c;
-    const passed = res.status === 202 && countBefore === countAfter;
-    return { passed, status: res.status, expectedStatus: 202, details: `Linhas mantidas em ${countAfter}` };
+    const passed =
+      res.status === 200 &&
+      json.message === "Posição já registrada; data e hora atualizadas" &&
+      countBefore === countAfter;
+    return { passed, status: res.status, expectedStatus: 200, details: `Linhas mantidas em ${countAfter}` };
   });
 
   await runTest("POST /api/v1/iot/telemetries nova posição GPS -> 202 e insere nova linha", async () => {
@@ -281,6 +314,150 @@ async function main() {
     const countAfter = (db.prepare("SELECT COUNT(*) as c FROM telemetry_queue WHERE device_id = ?").get(TEST_DEVICE_ID) as any).c;
     const passed = res.status === 202 && countAfter === countBefore + 1;
     return { passed, status: res.status, expectedStatus: 202, details: `Nova linha criada (total: ${countAfter})` };
+  });
+
+  await runTest("POST /api/v1/iot/telemetries reenvio de posição repetida -> 409", async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": TEST_API_KEY
+      },
+      body: JSON.stringify({
+        message_id: "MSG-TEST-TEL-002",
+        device_id: TEST_DEVICE_ID,
+        latitude: -8.05,
+        longitude: -34.88
+      })
+    });
+    const json: any = await res.json();
+    const passed = res.status === 409 && json.message === "Mensagem duplicada";
+    return { passed, status: res.status, expectedStatus: 409, details: json.message };
+  });
+
+  await runTest("POST /api/v1/iot/telemetries grava attempt_count do ESP32 em device_attempt_count -> 202", async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": TEST_API_KEY
+      },
+      body: JSON.stringify({
+        message_id: "MSG-TEST-TEL-004",
+        device_id: TEST_DEVICE_ID,
+        latitude: -8.20,
+        longitude: -34.95,
+        status: "SYNCED",
+        attempt_count: 99
+      })
+    });
+    const row = db.prepare("SELECT status, attempt_count, device_attempt_count FROM telemetry_queue WHERE message_id = ?").get("MSG-TEST-TEL-004") as any;
+    const passed =
+      res.status === 202 &&
+      row?.status === "PENDING" &&
+      row?.attempt_count === 0 &&
+      row?.device_attempt_count === 99;
+    return { passed, status: res.status, expectedStatus: 202, details: `status=${row?.status}, attempt_count=${row?.attempt_count}, device_attempt_count=${row?.device_attempt_count}` };
+  });
+
+  await runTest("POST /api/v1/iot/telemetries com latitude não numérica -> 400", async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": TEST_API_KEY
+      },
+      body: JSON.stringify({
+        message_id: "MSG-TEST-TEL-005",
+        device_id: TEST_DEVICE_ID,
+        latitude: true,
+        longitude: -34.95
+      })
+    });
+    const json: any = await res.json();
+    const passed = res.status === 400 && json.success === false;
+    return { passed, status: res.status, expectedStatus: 400, details: json.message };
+  });
+
+  await runTest("POST /api/v1/iot/telemetries para dispositivo inexistente -> 404", async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": TEST_API_KEY
+      },
+      body: JSON.stringify({
+        message_id: "MSG-TEST-TEL-006",
+        device_id: "DSP-TEST-NAO-EXISTE"
+      })
+    });
+    const json: any = await res.json();
+    const passed = res.status === 404 && json.message === "Dispositivo não encontrado";
+    return { passed, status: res.status, expectedStatus: 404, details: json.message };
+  });
+
+  await runTest("POST /api/v1/iot/telemetries com seal_status inválido -> 400", async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": TEST_API_KEY
+      },
+      body: JSON.stringify({
+        message_id: "MSG-TEST-TEL-007",
+        device_id: TEST_DEVICE_ID,
+        latitude: -8.25,
+        longitude: -34.96,
+        seal_status: "OPEN"
+      })
+    });
+    const json: any = await res.json();
+    const passed = res.status === 400 && json.message === "seal_status deve ser LOCKED, UNLOCKED ou BROKEN";
+    return { passed, status: res.status, expectedStatus: 400, details: json.message };
+  });
+
+  await runTest("POST /api/v1/iot/telemetries mesma posição com lacre alterado -> 202 e nova linha", async () => {
+    const send = (messageId: string, sealStatus: string) =>
+      fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": TEST_API_KEY
+        },
+        body: JSON.stringify({
+          message_id: messageId,
+          device_id: TEST_DEVICE_ID,
+          latitude: -8.30,
+          longitude: -34.97,
+          seal_status: sealStatus
+        })
+      });
+
+    await send("MSG-TEST-TEL-008", "LOCKED");
+    const countBefore = (db.prepare("SELECT COUNT(*) as c FROM telemetry_queue WHERE device_id = ?").get(TEST_DEVICE_ID) as any).c;
+    const res = await send("MSG-TEST-TEL-009", "BROKEN");
+    const countAfter = (db.prepare("SELECT COUNT(*) as c FROM telemetry_queue WHERE device_id = ?").get(TEST_DEVICE_ID) as any).c;
+    const row = db.prepare("SELECT seal_status FROM telemetry_queue WHERE message_id = ?").get("MSG-TEST-TEL-009") as any;
+    const passed = res.status === 202 && countAfter === countBefore + 1 && row?.seal_status === "BROKEN";
+    return { passed, status: res.status, expectedStatus: 202, details: `seal_status=${row?.seal_status}, linhas ${countBefore} -> ${countAfter}` };
+  });
+
+  await runTest("POST /api/v1/iot/telemetries com attempt_count negativo -> 400", async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": TEST_API_KEY
+      },
+      body: JSON.stringify({
+        message_id: "MSG-TEST-TEL-010",
+        device_id: TEST_DEVICE_ID,
+        attempt_count: -1
+      })
+    });
+    const json: any = await res.json();
+    const passed = res.status === 400 && json.success === false;
+    return { passed, status: res.status, expectedStatus: 400, details: json.message };
   });
 
   await runTest("POST /api/v1/iot/telemetries com JSON malformado -> 400", async () => {
@@ -342,6 +519,29 @@ async function main() {
     const json: any = await res.json();
     const passed = res.status === 400 && json.message.includes("seal_status deve ser LOCKED, UNLOCKED ou BROKEN");
     return { passed, status: res.status, expectedStatus: 400, details: json.message };
+  });
+
+  await runTest("POST /api/v1/iot/events grava attempt_count do ESP32 em device_attempt_count -> 202", async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/iot/events`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": TEST_API_KEY
+      },
+      body: JSON.stringify({
+        message_id: "EVT-TEST-ATTEMPT",
+        device_id: TEST_DEVICE_ID,
+        event_type: "startup",
+        attempt_count: 3
+      })
+    });
+    const row = db.prepare("SELECT status, attempt_count, device_attempt_count FROM events WHERE message_id = ?").get("EVT-TEST-ATTEMPT") as any;
+    const passed =
+      res.status === 202 &&
+      row?.status === "PENDING" &&
+      row?.attempt_count === 0 &&
+      row?.device_attempt_count === 3;
+    return { passed, status: res.status, expectedStatus: 202, details: `attempt_count=${row?.attempt_count}, device_attempt_count=${row?.device_attempt_count}` };
   });
 
   await runTest("POST /api/v1/iot/events com payload válido -> 202", async () => {

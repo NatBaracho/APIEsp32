@@ -4,7 +4,7 @@
 
 **Buffer temporário de ingestão para dispositivos ESP32**
 
-**Versão:** 1.0  
+**Versão:** 1.2  
 **Projeto:** FluxID / Oxide IoT
 
 Inclui instruções de criação, modelo de dados e script SQL completo.
@@ -82,7 +82,7 @@ Worker de sincronização (futuro)
 |----------|----------|
 | devices | Dispositivos autorizados, API Key, firmware, estado booleano e IDs opcionais de estado |
 | status | Catálogo de códigos e descrições de estado |
-| telemetry_queue | Fila persistente de GPS, bateria, GSM, payload e `last_seen_at` |
+| telemetry_queue | Fila persistente de GPS, bateria, GSM, estado do lacre (`seal_status`), payload, `last_seen_at`, tentativas de envio do ESP32 (`device_attempt_count`) e `message_id` da última posição repetida (`last_repeat_message_id`) |
 | events | Fila temporária de eventos; `seal_status` representa o estado do lacre |
 | commands | Comandos destinados aos dispositivos e estado de execução |
 | alerts | Alertas associados a dispositivos, com tipo, estado, severidade e resolução |
@@ -144,6 +144,10 @@ CREATE TABLE IF NOT EXISTS devices (
     seal_status_id INTEGER
 );
 
+-- Cada dispositivo tem uma API Key exclusiva
+CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_api_key
+    ON devices(api_key);
+
 CREATE TABLE IF NOT EXISTS status (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL UNIQUE,
@@ -202,6 +206,9 @@ CREATE TABLE IF NOT EXISTS telemetry_queue (
     gsm_signal INTEGER,
     payload_json TEXT,
     last_seen_at DATETIME,
+    seal_status TEXT,
+    device_attempt_count INTEGER,
+    last_repeat_message_id TEXT,
     status TEXT NOT NULL DEFAULT 'PENDING',
     attempt_count INTEGER NOT NULL DEFAULT 0,
     last_error TEXT,
@@ -211,6 +218,10 @@ CREATE TABLE IF NOT EXISTS telemetry_queue (
     ON UPDATE CASCADE
     ON DELETE RESTRICT
 );
+
+-- Busca do message_id da última posição repetida (idempotência)
+CREATE INDEX IF NOT EXISTS idx_telemetry_last_repeat_message_id
+    ON telemetry_queue(last_repeat_message_id);
 
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -222,6 +233,8 @@ CREATE TABLE IF NOT EXISTS events (
     seal_status TEXT,
 
     payload_json TEXT,
+
+    device_attempt_count INTEGER,
 
     status TEXT DEFAULT 'PENDING',
 
@@ -238,6 +251,10 @@ CREATE TABLE IF NOT EXISTS events (
 
 COMMIT;
 ```
+
+Este script já cria `devices.active` com `CHECK (active IN (0,1))`. Bancos criados por versões antigas não têm esse `CHECK`; neles, a aplicação cria na inicialização os triggers `trg_devices_active_insert` e `trg_devices_active_update`, que rejeitam outros valores com a mesma mensagem `CHECK constraint failed`. A aplicação também cria os índices `idx_devices_api_key` e `idx_telemetry_last_repeat_message_id` e adiciona as colunas `seal_status`, `device_attempt_count` e `last_repeat_message_id` (telemetria) e `device_attempt_count` (eventos) quando estão ausentes.
+
+Em `telemetry_queue` e `events`, `status` e `attempt_count` controlam a sincronização feita pelo Worker; `device_attempt_count` guarda as tentativas de envio informadas pelo ESP32.
 
 O campo da API `event_type` é gravado pela aplicação na coluna `events.message_type`. O endpoint valida `seal_status` para aceitar `LOCKED`, `UNLOCKED` ou `BROKEN`; essa lista é validada na aplicação, não por um `CHECK` na tabela.
 
@@ -267,4 +284,8 @@ PRAGMA table_info(commands);
 PRAGMA table_info(alerts);
 PRAGMA table_info(events);
 PRAGMA table_info(telemetry_queue);
+PRAGMA index_list(telemetry_queue);
+PRAGMA index_list(devices);
+
+SELECT name FROM sqlite_master WHERE type = 'trigger';
 ```

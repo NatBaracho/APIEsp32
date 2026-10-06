@@ -19,6 +19,7 @@ export class TelemetryQueueRepository {
     telemetry: TelemetryQueue
   ): void {
 
+    // status e attempt_count são controlados pelo servidor, nunca pelo cliente
     db.prepare(`
       INSERT INTO telemetry_queue (
         message_id,
@@ -32,10 +33,14 @@ export class TelemetryQueueRepository {
         gsm_signal,
         payload_json,
         last_seen_at,
+        seal_status,
+        device_attempt_count,
         status,
         attempt_count
       )
       VALUES (
+        ?,
+        ?,
         ?,
         ?,
         ?,
@@ -55,15 +60,17 @@ export class TelemetryQueueRepository {
       telemetry.device_id,
       telemetry.lacre_id ?? null,
       telemetry.cilindro_id ?? null,
-      telemetry.latitude,
-      telemetry.longitude,
-      telemetry.speed_kmh,
-      telemetry.battery_percent,
-      telemetry.gsm_signal,
+      telemetry.latitude ?? null,
+      telemetry.longitude ?? null,
+      telemetry.speed_kmh ?? null,
+      telemetry.battery_percent ?? null,
+      telemetry.gsm_signal ?? null,
       telemetry.payload_json ?? JSON.stringify(telemetry),
       telemetry.last_seen_at ?? null,
-      telemetry.status ?? "PENDING",
-      telemetry.attempt_count ?? 0
+      telemetry.seal_status ?? null,
+      telemetry.device_attempt_count ?? null,
+      "PENDING",
+      0
     );
 
   }
@@ -79,6 +86,24 @@ export class TelemetryQueueRepository {
         WHERE message_id = ?
       `)
       .get(messageId) as TelemetryQueue | undefined;
+
+  }
+
+  // Considera também o message_id da última posição repetida, que não tem linha própria
+  messageIdExists(
+    messageId: string
+  ): boolean {
+
+    return Boolean(
+      db
+        .prepare(`
+          SELECT 1
+          FROM telemetry_queue
+          WHERE message_id = ?
+            OR last_repeat_message_id = ?
+        `)
+        .get(messageId, messageId)
+    );
 
   }
 
@@ -123,14 +148,20 @@ export class TelemetryQueueRepository {
   }
 
   updateLastSeen(
-    id: number
+    id: number,
+    repeatMessageId: string
   ): void {
 
     db.prepare(`
       UPDATE telemetry_queue
-      SET last_seen_at = CURRENT_TIMESTAMP
+      SET
+        last_seen_at = CURRENT_TIMESTAMP,
+        last_repeat_message_id = ?
       WHERE id = ?
-    `).run(id);
+    `).run(
+      repeatMessageId,
+      id
+    );
 
   }
 
