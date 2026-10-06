@@ -146,6 +146,10 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ Casos de sucesso e erro cobertos pela suíte de integração (`50/50` em 06/10/2026).
 - ✅ Plano de Teste e Roteiro de Teste para IA documentados em `Doc/Doc_tese/`.
 - ✅ Validação por entrega registrada em `Doc/Doc_tese/Relatorio-de-Teste-*.md` (IA + questionário do responsável); entrega de 06/10/2026 aprovada por Natã da Silva Baracho.
+- ✅ Teste completo da API e do banco Oxide no `oxide.db` real, com backup e restauração (06/10/2026).
+- ✅ Dependência não usada `sqlite3` removida.
+- [ ] Atualizar o `nodemon` quando houver versão sem a vulnerabilidade do `braces` (3 alertas altos no `npm audit`, só em desenvolvimento).
+- [ ] Verificar a estrutura do FluxID (PostgreSQL) numa rodada de teste antes de iniciar o Worker.
 - [ ] Reexecutar compilação e suíte após concluir as próximas funcionalidades.
 
 **Status:** funcionalidades atuais do MVP validadas; a suíte deve ser repetida a cada nova etapa.

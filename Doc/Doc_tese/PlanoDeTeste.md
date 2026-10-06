@@ -435,7 +435,7 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | --- | --- |
 | Suíte automatizada (`npm test`) | 50 casos (49 testes e 1 de teardown), 50 aprovados em 06/10/2026 |
 | Compilação (`npx tsc --noEmit`) | Aprovada em 06/10/2026 |
-| Último relatório | [Relatorio-de-Teste-2026-10-06.md](Relatorio-de-Teste-2026-10-06.md): validação da IA e do responsável, **aprovada por Natã da Silva Baracho** |
+| Relatórios | [Relatorio-de-Teste-2026-10-06.md](Relatorio-de-Teste-2026-10-06.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-2.md](Relatorio-de-Teste-2026-10-06-2.md): teste completo da API e do banco no `oxide.db` real. Ambos **aprovados por Natã da Silva Baracho** |
 | Cobertura da suíte | Dispositivos, autenticação, telemetria, eventos, comandos e alertas (fluxo principal e erros mais comuns) |
 | Lacunas prioritárias | AUT-08/09, SEG-01 a SEG-05, TEL-19, ALT-07/08/12, EVT-05, BD-04/11/16 |
 | Entregas futuras | Todos os casos da seção 10 pendentes (funcionalidades ainda não implementadas) |

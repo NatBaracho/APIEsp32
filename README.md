@@ -13,6 +13,8 @@ npm start
 
 O servidor inicia na porta `3000`.
 
+O npm 11 avisa que os scripts de instalação do `better-sqlite3` ainda não estão autorizados (`allowScripts`); hoje é só um aviso e o módulo instala normalmente. Se uma versão futura do npm bloquear o script e a API não conseguir abrir o banco, rode `npm install-scripts approve better-sqlite3` e depois `npm install`.
+
 ## Testes
 
 ```bash
