@@ -94,6 +94,31 @@ export class TelemetryController {
         return;
       }
 
+      // Posição vem completa ou não vem (o FluxID exige as duas coordenadas)
+      if ((telemetry.latitude == null) !== (telemetry.longitude == null)) {
+        res.status(400).json({
+          success: false,
+          message: "latitude e longitude devem ser enviadas juntas"
+        });
+
+        return;
+      }
+
+      if (
+        telemetry.latitude != null &&
+        (telemetry.latitude < -90 ||
+          telemetry.latitude > 90 ||
+          telemetry.longitude < -180 ||
+          telemetry.longitude > 180)
+      ) {
+        res.status(400).json({
+          success: false,
+          message: "latitude deve estar entre -90 e 90 e longitude entre -180 e 180"
+        });
+
+        return;
+      }
+
       if (
         telemetry.seal_status != null &&
         !sealStatuses.includes(telemetry.seal_status)

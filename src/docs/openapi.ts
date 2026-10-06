@@ -77,8 +77,8 @@ const openApiSpec = {
             type: "string",
             enum: ["SEAL_BROKEN", "GEOFENCE_EXIT", "LOW_BATTERY", "DEVICE_ERROR", "COMMAND_FAILURE", "COMMUNICATION_LOST"]
           },
-          status_id: { type: "integer", example: 1 },
-          severity_id: { type: "integer", example: 2 },
+          severity: { type: "string", enum: ["BAIXA", "MEDIA", "ALTA", "CRITICA"], example: "CRITICA" },
+          status: { type: "string", enum: ["ABERTO", "EM_ANALISE", "ENCERRADO"], example: "ABERTO" },
           title: { type: "string", example: "Lacre rompido" },
           description: { type: "string", nullable: true },
           created_at: { type: "string", format: "date-time" },
@@ -215,8 +215,8 @@ const openApiSpec = {
                 properties: {
                   message_id: { type: "string", example: "MSG-000001" },
                   device_id: { type: "string", example: "DSP-000001" },
-                  latitude: { type: "number", example: -23.5505 },
-                  longitude: { type: "number", example: -46.6333 },
+                  latitude: { type: "number", minimum: -90, maximum: 90, description: "Enviar junto com longitude", example: -23.5505 },
+                  longitude: { type: "number", minimum: -180, maximum: 180, description: "Enviar junto com latitude", example: -46.6333 },
                   speed_kmh: { type: "number", example: 42 },
                   battery_percent: { type: "number", example: 88 },
                   gsm_signal: { type: "number", example: 31 },
@@ -397,7 +397,7 @@ const openApiSpec = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["alert_id", "device_id", "alert_type", "status_id", "severity_id", "title"],
+                required: ["alert_id", "device_id", "alert_type", "title"],
                 properties: {
                   alert_id: { type: "string", example: "ALT-000001" },
                   device_id: { type: "string", example: "DSP-000001" },
@@ -405,8 +405,12 @@ const openApiSpec = {
                     type: "string",
                     enum: ["SEAL_BROKEN", "GEOFENCE_EXIT", "LOW_BATTERY", "DEVICE_ERROR", "COMMAND_FAILURE", "COMMUNICATION_LOST"]
                   },
-                  status_id: { type: "integer", example: 1 },
-                  severity_id: { type: "integer", example: 2 },
+                  severity: {
+                    type: "string",
+                    enum: ["BAIXA", "MEDIA", "ALTA", "CRITICA"],
+                    description: "Opcional. Padrão por tipo: SEAL_BROKEN CRITICA; GEOFENCE_EXIT e COMMAND_FAILURE ALTA; DEVICE_ERROR e COMMUNICATION_LOST MEDIA; LOW_BATTERY BAIXA. O status nasce sempre ABERTO",
+                    example: "CRITICA"
+                  },
                   title: { type: "string", example: "Lacre rompido" },
                   description: { type: "string", nullable: true }
                 }
@@ -429,7 +433,7 @@ const openApiSpec = {
               }
             }
           },
-          "400": { description: "Campos, tipo ou IDs de status inválidos" },
+          "400": { description: "Campos obrigatórios, alert_type ou severity inválidos" },
           "401": { description: "API Key ausente ou inválida" },
           "403": { description: "API Key não pertence ao dispositivo" },
           "404": { description: "Dispositivo não encontrado" },
