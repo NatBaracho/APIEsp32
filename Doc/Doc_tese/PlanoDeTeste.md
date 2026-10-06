@@ -1,11 +1,11 @@
 # Plano de Teste — FluxID / Oxide IoT
 
-**Versão:** 1.1
+**Versão:** 1.2
 **Data:** 06/10/2026
 **Escopo:** API Oxide (Node.js + TypeScript + Express + SQLite), sincronização com o PostgreSQL FluxID e API FluxID (NestJS) planejada
 **Validação humana:** Natã da Silva Baracho
 
-> Este plano consolida o que já foi implementado e testado (suíte `tests/api.test.ts`, 46 casos) e o que ainda precisa ser testado conforme o `Checklist-Projeto.md`, o `Banco_FluxID.md` (v3.0) e o `Regras-de-Negocio-e-Banco-Oxide.md`. Cada caso indica sua situação: **Automatizado**, **Manual executado** ou **Pendente**.
+> Este plano consolida o que já foi implementado e testado (suíte `tests/api.test.ts`, 50 casos) e o que ainda precisa ser testado conforme o `Checklist-Projeto.md`, o `Banco_FluxID.md` (v3.0) e o `Regras-de-Negocio-e-Banco-Oxide.md`. Cada caso indica sua situação: **Automatizado**, **Manual executado** ou **Pendente**.
 
 ---
 
@@ -93,7 +93,7 @@ Pré-condição para toda execução: banco com schema criado pelo script do `Ox
 **Saída (aprovação)**
 - 100% dos casos de severidade Alta aprovados.
 - Nenhum defeito crítico ou alto aberto.
-- Suíte automatizada sem falhas (hoje 46/46).
+- Suíte automatizada sem falhas (hoje 50/50).
 - Banco limpo após o teardown (zero registros `DSP-TEST%`).
 
 **Suspensão**
@@ -156,7 +156,7 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 | TEL-01 | Sem `message_id`/`device_id` | `400 message_id e device_id são obrigatórios` | Alta | A |
 | TEL-02 | Payload válido completo | `202 Telemetria recebida`, linha em `telemetry_queue` com `status = PENDING` | Alta | A |
 | TEL-03 | `message_id` duplicado | `409 Mensagem duplicada`, uma única linha | Alta | A |
-| TEL-04 | Mesma lat/long da última telemetria, `message_id` novo | `202`, sem nova linha, `last_seen_at` atualizado | Alta | A |
+| TEL-04 | Mesma lat/long e mesmo `seal_status` da última telemetria, `message_id` novo | `200 Posição já registrada; data e hora atualizadas`, sem nova linha, `last_seen_at` atualizado | Alta | A |
 | TEL-05 | Posição diferente | `202`, nova linha | Alta | A |
 | TEL-06 | Duas telemetrias sem coordenadas | Ambas inseridas | Alta | M |
 | TEL-07 | JSON malformado | `400 Requisição inválida` | Alta | A |
@@ -172,9 +172,12 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 | TEL-17 | Corpo ausente em `POST` | `400` (corpo tratado como objeto vazio) | Média | P |
 | TEL-18 | Campos extras desconhecidos | Ignorados sem erro | Baixa | P |
 | TEL-19 | Mesmo `message_id` em duas requisições concorrentes | Uma `202`, outra `409`; uma linha (violação `UNIQUE` também é convertida em `409`) | Alta | P |
-| TEL-20 | Reenvio do `message_id` de uma telemetria de posição repetida (TEL-04) | `409 Mensagem duplicada`; `message_id` registrado em `telemetry_position_repeats` | Alta | A |
-| TEL-21 | Cliente envia `status: "SYNCED"` e `attempt_count: 99` | `202`; gravado `status = PENDING` e `attempt_count = 0` | Alta | A |
+| TEL-20 | Reenvio do `message_id` de uma telemetria de posição repetida (TEL-04) | `409 Mensagem duplicada`; `message_id` guardado em `telemetry_queue.last_repeat_message_id` (só a repetição mais recente de cada linha) | Alta | A |
+| TEL-21 | ESP32 envia `status: "SYNCED"` e `attempt_count: 99` | `202`; `status = PENDING` e `attempt_count = 0` (colunas do Worker); `device_attempt_count = 99` | Alta | A |
 | TEL-22 | Campo numérico com tipo não numérico (`latitude: true`) ou `payload_json` como objeto | `400 Campo <nome> com tipo inválido` (antes: `500`) | Média | A (latitude) |
+| TEL-23 | `seal_status` fora de `LOCKED`/`UNLOCKED`/`BROKEN` | `400 seal_status deve ser LOCKED, UNLOCKED ou BROKEN` | Alta | A |
+| TEL-24 | Mesma posição com `seal_status` diferente (ex.: `LOCKED` → `BROKEN`) | `202` e nova linha; a mudança do lacre não é tratada como repetição | Alta | A |
+| TEL-25 | `attempt_count` negativo ou não inteiro | `400 attempt_count deve ser um inteiro maior ou igual a 0` | Média | A |
 
 ### 6.5 Eventos
 
@@ -190,8 +193,9 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 | EVT-08 | `message_id` duplicado | `409`, sem nova linha | Alta | A |
 | EVT-09 | `event_type` gravado em `events.message_type` | Valor conferido via SQL | Média | P |
 | EVT-10 | Cliente tenta enviar `status` no payload | Ignorado; servidor define `PENDING` | Média | P |
-| EVT-11 | `attempt_count` inicial, inclusive quando o cliente envia outro valor | `0` | Baixa | P |
+| EVT-11 | ESP32 envia `attempt_count` | `202`; `attempt_count = 0` (coluna do Worker) e valor enviado em `device_attempt_count` | Média | A |
 | EVT-12 | Evento sem `seal_status` | `202`, `seal_status = NULL` | Baixa | P |
+| EVT-13 | `attempt_count` negativo ou não inteiro | `400`, nenhuma linha | Média | P |
 
 ### 6.6 Comandos
 
@@ -236,7 +240,7 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 
 | ID | Caso | Verificação | Prior. | Sit. |
 | --- | --- | --- | --- | --- |
-| BD-01 | Tabelas existentes | `SELECT name FROM sqlite_master` retorna `devices`, `status`, `telemetry_queue`, `telemetry_position_repeats`, `events`, `commands`, `alerts` | Alta | M |
+| BD-01 | Tabelas existentes | `SELECT name FROM sqlite_master` retorna `devices`, `status`, `telemetry_queue`, `events`, `commands`, `alerts` | Alta | M |
 | BD-02 | Tabelas `sync_logs`/`sync_items` | Inexistentes até a entrega do Worker | Média | M |
 | BD-03 | Unicidade | `device_id`, `message_id` (eventos e telemetrias), `command_id`, `alert_id`, `status.code` rejeitam duplicatas | Alta | M |
 | BD-04 | FKs ativas | `PRAGMA foreign_keys` = 1; inserir evento/telemetria/alerta com `device_id` inexistente falha | Alta | P |
@@ -252,7 +256,7 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 | BD-14 | Criação do banco pelo script do `Oxidedb.md` em arquivo vazio | Schema equivalente ao criado pela aplicação | Média | P |
 | BD-15 | Teardown | Zero registros `DSP-TEST%` após a suíte | Alta | A |
 | BD-16 | Índice único `idx_devices_api_key` | Existe quando não há chaves duplicadas; inserir chave repetida falha. Com duplicatas pré-existentes, a aplicação sobe e registra aviso | Alta | P |
-| BD-17 | `telemetry_position_repeats` com `ON DELETE CASCADE` | Apagar a telemetria de referência remove os registros de repetição | Média | P |
+| BD-17 | Colunas novas | `telemetry_queue` com `last_repeat_message_id`, `seal_status` e `device_attempt_count` e índice `idx_telemetry_last_repeat_message_id`; `events` com `device_attempt_count` | Média | M |
 
 ---
 
@@ -409,7 +413,7 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | --- | --- |
 | RN03, RN14 (unicidade, `message_id`) | DEV-06, DEV-10, TEL-03, TEL-19, TEL-20, EVT-08, ALT-06, BD-03, BD-16, SYN-02 |
 | RN04, RN05 (um vínculo ativo) | ASC-02 a ASC-04, FLX-11 |
-| RN08, RN09 (lacre e abertura) | EVT-04, EVT-05, ALT-05, ESP-07 |
+| RN08, RN09 (lacre e abertura) | EVT-04, EVT-05, TEL-23, TEL-24, ALT-05, ESP-07 |
 | RN10, RN11 (geofence e alerta) | GEO-01 a GEO-09, ALT-07 |
 | RN12, RN13 (velocidade e telemetria) | TEL-02, TEL-14, ESP-01 |
 | RN17 (valores controlados) | EVT-03, EVT-06, ALT-03, CMD-04, SYN-11 |
@@ -417,8 +421,8 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | RN22 (multiempresa) | FLX-04 |
 | RN23 (alertas rastreáveis) | ALT-05, ALT-12, SYN-09 |
 | RF04, RF16 (CRUD e API) | DEV-01 a DEV-12, FLX-02 |
-| RF08 (telemetria) | TEL-01 a TEL-22 |
-| RF09, RF10 (eventos e alertas) | EVT-01 a EVT-12, ALT-01 a ALT-12 |
+| RF08 (telemetria) | TEL-01 a TEL-25 |
+| RF09, RF10 (eventos e alertas) | EVT-01 a EVT-13, ALT-01 a ALT-12 |
 | RNF08 (telemetria indexada) | OPE-04 |
 | RNF10 (erros padronizados) | SEG-07, FLX-03, FLX-09 |
 | Autenticação por API Key (MVP) | AUT-01 a AUT-10, SEG-01 a SEG-04 |
@@ -429,8 +433,9 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 
 | Indicador | Valor |
 | --- | --- |
-| Suíte automatizada (`npm test`) | 46 casos (45 testes e 1 de teardown), 46 aprovados em 06/10/2026 |
+| Suíte automatizada (`npm test`) | 50 casos (49 testes e 1 de teardown), 50 aprovados em 06/10/2026 |
 | Compilação (`npx tsc --noEmit`) | Aprovada em 06/10/2026 |
+| Último relatório | [Relatorio-de-Teste-2026-10-06.md](Relatorio-de-Teste-2026-10-06.md): validação da IA e do responsável, **aprovada por Natã da Silva Baracho** |
 | Cobertura da suíte | Dispositivos, autenticação, telemetria, eventos, comandos e alertas (fluxo principal e erros mais comuns) |
 | Lacunas prioritárias | AUT-08/09, SEG-01 a SEG-05, TEL-19, ALT-07/08/12, EVT-05, BD-04/11/16 |
 | Entregas futuras | Todos os casos da seção 10 pendentes (funcionalidades ainda não implementadas) |
@@ -482,3 +487,4 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | --- | --- | --- |
 | 1.0 | 05/10/2026 | Criação do plano com base nos documentos do projeto e na suíte de 40 testes |
 | 1.1 | 06/10/2026 | Correções na API: idempotência de posição repetida, `status`/`attempt_count` controlados pelo servidor, `api_key` única, validação de `active` e de tipos da telemetria, `404` para dispositivo inexistente. Novos casos DEV-10 a DEV-12, TEL-20 a TEL-22, BD-16 e BD-17; TEL-12, TEL-15 e BD-08 revisados; suíte com 46 casos |
+| 1.2 | 06/10/2026 | Ajustes definidos por Natã da Silva Baracho: `last_repeat_message_id` no lugar da tabela `telemetry_position_repeats`; posição repetida responde `200`; `seal_status` na telemetria e repetição só com posição e lacre iguais; `attempt_count` do ESP32 em `device_attempt_count`. Novos casos TEL-23 a TEL-25 e EVT-13; TEL-04, TEL-20, TEL-21, EVT-11, BD-01 e BD-17 revisados; suíte com 50 casos |

@@ -1,6 +1,6 @@
 # Roteiro de Teste para IA — API Oxide (FluxID / Oxide IoT)
 
-**Versão:** 1.1
+**Versão:** 1.2
 **Data:** 06/10/2026
 **Uso:** instruções executáveis para uma IA (ou pessoa) testar a API Oxide e produzir um relatório padronizado.
 **Base:** `Doc/Doc_tese/PlanoDeTeste.md` (IDs dos casos entre colchetes, ex.: `[TEL-03]`).
@@ -29,9 +29,10 @@ Você é um executor de testes. Siga este roteiro na ordem, sem pular etapas.
 - Autenticação: header `X-API-Key` (chave exclusiva por dispositivo).
 - Dispositivo semente: `DSP-000001`, chave `auto-DSP-000001`.
 - Idempotência por `message_id` (telemetria e eventos), `alert_id`, `command_id`, `device_id` e `api_key`.
-- Telemetria com posição igual à anterior não cria linha; o `message_id` vai para `telemetry_position_repeats`.
+- Telemetria com posição **e** estado do lacre (`seal_status`) iguais aos da anterior não cria linha: a API responde `200 "Posição já registrada; data e hora atualizadas"`, atualiza `last_seen_at` e guarda o `message_id` em `last_repeat_message_id`.
+- Na telemetria, `seal_status` aceita `LOCKED`, `UNLOCKED` ou `BROKEN`.
 - Campos numéricos da telemetria precisam ser números; tipo inválido retorna `400` e dispositivo inexistente retorna `404`.
-- `status` e `attempt_count` de telemetrias e eventos são definidos pelo servidor (`PENDING` e `0`).
+- O `attempt_count` enviado pelo ESP32 (tentativas de envio, inteiro ≥ 0) é gravado em `device_attempt_count`. As colunas `status` e `attempt_count` da fila pertencem ao Worker e o servidor sempre grava `PENDING` e `0`.
 - Não existe endpoint HTTP para criar comandos; comandos de teste são inseridos direto no SQLite.
 - Tipos de alerta aceitos: `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE`, `COMMUNICATION_LOST`.
 - `seal_status` aceita: `LOCKED`, `UNLOCKED`, `BROKEN`.
@@ -123,7 +124,7 @@ curl -s -o /dev/null -w "porta 3000: %{http_code}\n" "$BASE/"   # esperado: 000 
 npm test
 ```
 
-Registre: total, aprovados, reprovados. **Esperado:** 46 casos, 46 aprovados, saída com código `0`.
+Registre: total, aprovados, reprovados. **Esperado:** 50 casos, 50 aprovados, saída com código `0`.
 Se houver reprovação, copie o nome de cada teste que falhou para o relatório.
 
 > A suíte limpa registros `DSP-TEST%` no início e no fim. Os casos manuais abaixo usam `DSP-TEST-RT`, que **também** será limpo na seção 8.
@@ -200,7 +201,7 @@ post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-001","device_id":"DSP-TEST-R
 # [TEL-03] mesmo comando. Esperado: 409 "Mensagem duplicada"
 post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-001","device_id":"DSP-TEST-RT","latitude":-8.05,"longitude":-34.88,"speed_kmh":10,"battery_percent":90,"gsm_signal":-60}'
 
-# [TEL-04] mesma posição, message_id novo. Esperado: 202 e nenhuma linha nova (conferir na seção 6)
+# [TEL-04] mesma posição, message_id novo. Esperado: 200 "Posição já registrada; data e hora atualizadas" e nenhuma linha nova (seção 6)
 post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-002","device_id":"DSP-TEST-RT","latitude":-8.05,"longitude":-34.88}'
 
 # [TEL-20] reenvio da posição repetida. Esperado: 409 "Mensagem duplicada"
@@ -228,12 +229,23 @@ post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-009","device_id":"DSP-TEST-R
 # [TEL-15] dispositivo inexistente. Esperado: 404 "Dispositivo não encontrado"
 post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-010","device_id":"DSP-NAO-EXISTE"}'
 
-# [TEL-21] status e attempt_count do cliente. Esperado: 202; na seção 6, PENDING e 0
+# [TEL-21] status e attempt_count do ESP32. Esperado: 202; na seção 6, status PENDING, attempt_count 0 e device_attempt_count 99
 post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-012","device_id":"DSP-TEST-RT","latitude":-8.50,"longitude":-34.50,"status":"SYNCED","attempt_count":99}'
 
 # [TEL-22] tipos inválidos. Esperado: 400 nos dois
 post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-013","device_id":"DSP-TEST-RT","latitude":true,"longitude":-34.50}'
 post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-014","device_id":"DSP-TEST-RT","payload_json":{"a":1}}'
+
+# [TEL-23] seal_status inválido. Esperado: 400 "seal_status deve ser LOCKED, UNLOCKED ou BROKEN"
+post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-015","device_id":"DSP-TEST-RT","latitude":-8.60,"longitude":-34.40,"seal_status":"OPEN"}'
+
+# [TEL-24] mesma posição com o lacre mudando. Esperado: 202, 202 (lacre mudou: nova linha) e 200 (repetição)
+post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-016","device_id":"DSP-TEST-RT","latitude":-8.70,"longitude":-34.30,"seal_status":"LOCKED"}'
+post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-017","device_id":"DSP-TEST-RT","latitude":-8.70,"longitude":-34.30,"seal_status":"BROKEN"}'
+post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-018","device_id":"DSP-TEST-RT","latitude":-8.70,"longitude":-34.30,"seal_status":"BROKEN"}'
+
+# [TEL-25] attempt_count negativo. Esperado: 400 "attempt_count deve ser um inteiro maior ou igual a 0"
+post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-019","device_id":"DSP-TEST-RT","attempt_count":-1}'
 
 # [TEL-07] JSON malformado. Esperado: 400 "Requisição inválida"
 post /iot/telemetries "$KEY" '{ invalid json'
@@ -270,8 +282,11 @@ post /iot/events "$KEY" '{"message_id":"EVT-RT-004","device_id":"DSP-TEST-RT","e
 # [EVT-12] sem seal_status. Esperado: 202; seal_status nulo
 post /iot/events "$KEY" '{"message_id":"EVT-RT-005","device_id":"DSP-TEST-RT","event_type":"startup"}'
 
-# [EVT-11] attempt_count enviado pelo cliente. Esperado: 202; na seção 6, attempt_count 0
+# [EVT-11] attempt_count do ESP32. Esperado: 202; na seção 6, attempt_count 0 e device_attempt_count 7
 post /iot/events "$KEY" '{"message_id":"EVT-RT-006","device_id":"DSP-TEST-RT","event_type":"startup","attempt_count":7}'
+
+# [EVT-13] attempt_count negativo. Esperado: 400; nenhuma linha
+post /iot/events "$KEY" '{"message_id":"EVT-RT-007","device_id":"DSP-TEST-RT","event_type":"startup","attempt_count":-1}'
 
 # [EVT-08] repetir EVT-RT-001. Esperado: 409
 post /iot/events "$KEY" '{"message_id":"EVT-RT-001","device_id":"DSP-TEST-RT","event_type":"seal_changed","seal_status":"UNLOCKED"}'
@@ -380,7 +395,7 @@ Execute após as seções 4 e 5, com a API ainda no ar.
 source ./roteiro-env.sh
 
 # [BD-01, BD-02] Esperado: alerts, commands, devices, events, sqlite_sequence, status,
-# telemetry_position_repeats, telemetry_queue; SEM sync_logs e sync_items
+# telemetry_queue; SEM sync_logs e sync_items
 sql "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
 
 # [BD-05, BD-06] Esperado: alerts com 3 FKs (devices, status, status);
@@ -388,30 +403,28 @@ sql "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
 sql "SELECT \"table\", \"from\", on_update, on_delete FROM pragma_foreign_key_list('alerts')"
 sql "SELECT \"table\", \"from\", on_update, on_delete FROM pragma_foreign_key_list('commands')"
 
-# [TEL-04/05/06/08/11/19/21] telemetrias do dispositivo de teste
-sql "SELECT message_id, latitude, longitude, last_seen_at, status, attempt_count FROM telemetry_queue WHERE device_id='DSP-TEST-RT' ORDER BY id"
-
-# [TEL-04, TEL-20] posições repetidas
-sql "SELECT r.message_id, t.message_id AS referencia FROM telemetry_position_repeats r JOIN telemetry_queue t ON t.id = r.telemetry_id WHERE r.device_id='DSP-TEST-RT'"
+# [TEL-04/05/06/08/11/19/20/21/24] telemetrias do dispositivo de teste
+sql "SELECT message_id, latitude, longitude, seal_status, last_seen_at, last_repeat_message_id, status, attempt_count, device_attempt_count FROM telemetry_queue WHERE device_id='DSP-TEST-RT' ORDER BY id"
 ```
 
 **Esperado nas telemetrias:**
-- Presentes: `MSG-RT-A08`, `001`, `003`, `004`, `005`, `006`, `007`, `009`, `011` (uma única vez) e `012`.
-- Ausentes: `MSG-RT-002`, `008`, `010`, `013` e `014`.
+- Presentes: `MSG-RT-A08`, `001`, `003`, `004`, `005`, `006`, `007`, `009`, `011` (uma única vez), `012`, `016` e `017`.
+- Ausentes: `MSG-RT-002`, `008`, `010`, `013`, `014`, `015`, `018` e `019`.
 - `MSG-RT-001` com `last_seen_at` preenchido pelo servidor, no formato `AAAA-MM-DD HH:MM:SS` [TEL-10].
 - `MSG-RT-006` com `last_seen_at = 2026-10-04T15:30:00.000Z`.
 - `MSG-RT-004` e `MSG-RT-005` com coordenadas nulas.
-- Todas, inclusive `MSG-RT-012`, com `status = PENDING` e `attempt_count = 0`.
-- A consulta de posições repetidas retorna `MSG-RT-002` com referência `MSG-RT-001`.
+- Todas, inclusive `MSG-RT-012`, com `status = PENDING` e `attempt_count = 0`; `MSG-RT-012` com `device_attempt_count = 99`.
+- `MSG-RT-001` com `last_repeat_message_id = MSG-RT-002` [TEL-04, TEL-20].
+- `MSG-RT-016` com `seal_status = LOCKED`; `MSG-RT-017` com `seal_status = BROKEN` e `last_repeat_message_id = MSG-RT-018` [TEL-24].
 
 ```bash
 source ./roteiro-env.sh
 
 # [EVT-09, EVT-10, EVT-11]
-sql "SELECT message_id, message_type, seal_status, status, attempt_count FROM events WHERE device_id LIKE 'DSP-TEST%' ORDER BY id"
+sql "SELECT message_id, message_type, seal_status, status, attempt_count, device_attempt_count FROM events WHERE device_id LIKE 'DSP-TEST%' ORDER BY id"
 ```
 
-**Esperado:** `event_type` gravado em `message_type`; `status = PENDING` e `attempt_count = 0` em todos (inclusive `EVT-RT-004` e `EVT-RT-006`); `EVT-RT-003` ausente.
+**Esperado:** `event_type` gravado em `message_type`; `status = PENDING` e `attempt_count = 0` em todos (inclusive `EVT-RT-004` e `EVT-RT-006`); `EVT-RT-006` com `device_attempt_count = 7`; `EVT-RT-003` e `EVT-RT-007` ausentes.
 
 ```bash
 source ./roteiro-env.sh
@@ -442,10 +455,11 @@ sqlexec "INSERT INTO devices (device_id, api_key) VALUES ('DSP-TEST-UK','key-rt-
 sql "SELECT id, code FROM status"
 sql "SELECT name FROM pragma_table_info('devices')"
 
-# [BD-17] cascata. Execute por último: apaga a telemetria de referência.
-# Esperado: a contagem final é 0
-sqlexec "DELETE FROM telemetry_queue WHERE message_id = 'MSG-RT-001';"
-sql "SELECT COUNT(*) AS repeticoes FROM telemetry_position_repeats WHERE message_id = 'MSG-RT-002'"
+# [BD-17] colunas novas e índice. Esperado: last_repeat_message_id, seal_status e device_attempt_count
+# em telemetry_queue; device_attempt_count em events; índice idx_telemetry_last_repeat_message_id
+sql "SELECT name FROM pragma_table_info('telemetry_queue') WHERE name IN ('last_repeat_message_id','seal_status','device_attempt_count')"
+sql "SELECT name FROM pragma_table_info('events') WHERE name = 'device_attempt_count'"
+sql "SELECT name FROM pragma_index_list('telemetry_queue')"
 ```
 
 ### 6.1 Inicialização idempotente [BD-11]
@@ -486,7 +500,6 @@ api_stop
 
 # Remover resíduos (útil mesmo antes de restaurar, para conferir BD-15)
 sqlexec "
-DELETE FROM telemetry_position_repeats WHERE device_id LIKE 'DSP-TEST%';
 DELETE FROM alerts WHERE device_id LIKE 'DSP-TEST%';
 DELETE FROM commands WHERE device_id LIKE 'DSP-TEST%';
 DELETE FROM telemetry_queue WHERE device_id LIKE 'DSP-TEST%';
@@ -547,7 +560,7 @@ Gere o arquivo `Relatorio-de-Teste-AAAA-MM-DD.md` em `Doc/Doc_tese/` com a estru
 | Indicador | Valor |
 | --- | --- |
 | Compilação | PASSOU/FALHOU |
-| Suíte automatizada | X/46 |
+| Suíte automatizada | X/50 |
 | Casos manuais executados | N |
 | PASSOU | N |
 | FALHOU | N |
@@ -597,3 +610,4 @@ marque NÃO EXECUTADO com o motivo.
 | --- | --- | --- |
 | 1.0 | 05/10/2026 | Criação do roteiro |
 | 1.1 | 06/10/2026 | Nomes de arquivo corrigidos; consultas via `better-sqlite3` (sem depender do `sqlite3`); arquivo `roteiro-env.sh` para shells sem estado; API parada durante o `npm test`; IDs e coordenadas exclusivos por caso; casos DEV-10 a DEV-12, TEL-20 a TEL-22, EVT-11, BD-16 e BD-17; expectativas alinhadas às correções da API |
+| 1.2 | 06/10/2026 | Ajustes definidos por Natã da Silva Baracho: `last_repeat_message_id` no lugar de `telemetry_position_repeats`, resposta `200` para posição repetida, `seal_status` na telemetria e `device_attempt_count`; casos TEL-23 a TEL-25 e EVT-13; BD-17 passa a verificar as colunas novas |

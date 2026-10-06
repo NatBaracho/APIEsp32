@@ -40,7 +40,7 @@ O projeto consiste em uma API REST em Node.js + TypeScript, desenvolvida para re
 - Migração idempotente adiciona `device_status_id`, `valve_status_id` e `seal_status_id` à tabela `devices` sem recriá-la nem remover registros.
 - Cria a tabela `alerts` idempotentemente, com FKs para dispositivos e status; o endpoint POST usa repository e service para registrar alertas.
 - Cria a tabela `commands` idempotentemente para armazenar comandos destinados aos dispositivos; as rotas de consulta e confirmação usam `CommandRepository`, mas não há endpoint de criação.
-- Cria a tabela `telemetry_position_repeats`, os triggers `trg_devices_active_insert`/`_update` e o índice único `idx_devices_api_key` (este só quando não há chaves duplicadas).
+- Adiciona `last_repeat_message_id`, `seal_status` e `device_attempt_count` a `telemetry_queue` e `device_attempt_count` a `events`; cria os triggers `trg_devices_active_insert`/`_update`, o índice `idx_telemetry_last_repeat_message_id` e o índice único `idx_devices_api_key` (este só quando não há chaves duplicadas).
 - Uso de `better-sqlite3` para leitura e gravação.
 
 ### 3.3 Prefixo padronizado da API
@@ -64,10 +64,11 @@ O projeto consiste em uma API REST em Node.js + TypeScript, desenvolvida para re
 - Campos numéricos (`latitude`, `longitude`, `speed_kmh`, `battery_percent`, `gsm_signal`) precisam ser números e `lacre_id`, `cilindro_id`, `payload_json` e `last_seen_at` precisam ser texto; tipo inválido retorna `400 Campo <nome> com tipo inválido`.
 - Telemetria para `device_id` não cadastrado retorna `404 Dispositivo não encontrado`.
 - Corpo ausente é tratado como objeto vazio para que a validação retorne `400`, em vez de provocar erro ao acessar propriedades.
-- O service consulta a fila e a tabela `telemetry_position_repeats` por `message_id`; mensagem repetida retorna `409 Conflict` com `{"success":false,"message":"Mensagem duplicada"}` e não é inserida novamente.
-- Telemetria nova é persistida em `telemetry_queue` com `status = PENDING` e `attempt_count = 0`, ignorando valores enviados pelo cliente, e retorna `202 Accepted`.
+- O service consulta a fila por `message_id` e por `last_repeat_message_id`; mensagem repetida retorna `409 Conflict` com `{"success":false,"message":"Mensagem duplicada"}` e não é inserida novamente.
+- `seal_status` (estado do lacre) aceita `LOCKED`, `UNLOCKED` ou `BROKEN`; `attempt_count` do ESP32 precisa ser inteiro ≥ 0 e é gravado em `device_attempt_count`. Valores inválidos retornam `400`.
+- Telemetria nova é persistida em `telemetry_queue` com `status = PENDING` e `attempt_count = 0` (colunas do Worker) e retorna `202 Accepted`.
 - A fila contém `last_seen_at DATETIME`; o campo é opcional, aceito em formato ISO 8601 e salvo como `NULL` quando não informado.
-- Se a última telemetria do dispositivo tiver as mesmas latitude e longitude, o service atualiza somente `last_seen_at`, não cria uma nova linha e registra o `message_id` em `telemetry_position_repeats`.
+- Se a última telemetria do dispositivo tiver as mesmas latitude, longitude e `seal_status`, o service atualiza somente `last_seen_at`, grava o `message_id` em `last_repeat_message_id`, não cria uma nova linha e a API responde `200` com `Posição já registrada; data e hora atualizadas`. Mudança de estado do lacre no mesmo lugar gera nova linha.
 - `GET /api/v1/iot/telemetries` lista todas as telemetrias em ordem decrescente de `id` e exige `X-API-Key`.
 
 ### 3.5 Rota de eventos
@@ -79,13 +80,13 @@ O projeto consiste em uma API REST em Node.js + TypeScript, desenvolvida para re
 - `events.status` permanece reservado ao processamento da fila (`PENDING`, `PROCESSING`, `SYNCED`, `ERROR`) e é definido pelo servidor. `ACTIVE`/`INACTIVE` correspondem ao estado numérico `devices.active` (`1`/`0`).
 - Validação de duplicidade por `message_id`.
 - Evento repetido retorna `409 Conflict` com `{"success":false,"message":"Mensagem duplicada"}` e não é persistido novamente.
-- Persistência do evento no banco, sempre com `attempt_count = 0`.
+- Persistência do evento no banco, sempre com `attempt_count = 0`; o `attempt_count` do ESP32 vai para `device_attempt_count`.
 - Criação automática de dispositivo caso ele ainda não exista.
 
 ### 3.6 Repositórios
 - `DeviceRepository`: busca (inclusive por `api_key`, usada pelo middleware), criação, atualização, desativação e verificação de existência do dispositivo.
 - `EventRepository`: grava eventos, consulta por message_id, lista pendentes e marca status.
-- `TelemetryQueueRepository`: métodos de criação, busca por `message_id`, verificação de `message_id` também entre as posições repetidas (`messageIdExists`), registro de repetição (`registerPositionRepeat`), busca da última telemetria por `device_id` (`findLastByDeviceId`), atualização de `last_seen_at` (`updateLastSeen`), processamento, sincronização e erro.
+- `TelemetryQueueRepository`: métodos de criação, busca por `message_id`, verificação de `message_id` também em `last_repeat_message_id` (`messageIdExists`), busca da última telemetria por `device_id` (`findLastByDeviceId`), atualização de `last_seen_at` e de `last_repeat_message_id` (`updateLastSeen`), processamento, sincronização e erro.
 - `CommandRepository`: lista comandos pendentes por dispositivo e confirma execução/erro.
 - `AlertRepository`: verifica `alert_id` e IDs do catálogo e persiste alertas.
 - `device_id` e `api_key` identificam unicamente dispositivos; `message_id` identifica unicamente eventos e telemetrias. As tabelas possuem restrição `UNIQUE` (ou índice único) no SQLite como proteção adicional.
@@ -359,13 +360,26 @@ A análise do código contra o Plano de Teste encontrou falhas reproduzidas em u
 
 | Problema | Correção | Resultado |
 | --- | --- | --- |
-| Reenvio do `message_id` de uma posição repetida respondia `202`, quebrando a idempotência (RN14). | Nova tabela `telemetry_position_repeats` (FK para `telemetry_queue.id` com `ON DELETE CASCADE`); `messageIdExists` consulta as duas tabelas. | Reenvio retorna `409 Mensagem duplicada`. |
+| Reenvio do `message_id` de uma posição repetida respondia `202`, quebrando a idempotência (RN14). | Primeira versão com a tabela `telemetry_position_repeats`; substituída em 7.12 pela coluna `last_repeat_message_id`. | Reenvio retorna `409 Mensagem duplicada`. |
 | O cliente definia `status` e `attempt_count` da telemetria (ex.: `SYNCED`), o que faria o Worker ignorar a linha. O mesmo valia para `attempt_count` de eventos. | Repositories gravam sempre `PENDING` e `0`; o campo `status` saiu do exemplo do Swagger. | Valores do cliente ignorados. |
 | `POST /devices` aceitava `api_key` já usada por outro dispositivo. | `DeviceService` verifica a chave (`409 API Key já está em uso`) e a inicialização cria `idx_devices_api_key`. O middleware passou a buscar por `findByApiKey` em vez de listar todos os dispositivos. | Chave duplicada rejeitada. |
 | `active` aceitava qualquer valor; o `oxide.db` real não tinha o `CHECK` do script. | Validação no controller (`400`) e triggers que reproduzem o `CHECK`. | `active` fora de `0`/`1` rejeitado na API e no banco. |
 | Tipos inválidos (`latitude: true`, `payload_json` objeto) e `device_id` inexistente geravam `500`. | Validação de tipos no controller e verificação do dispositivo no service; violação `UNIQUE` convertida em `409`. | `400` para tipo inválido e `404` para dispositivo inexistente. |
 
 Compilação aprovada e suíte com 46/46 (seis casos novos).
+
+### 7.12 Ajustes definidos na validação (06/10/2026)
+Na validação da 7.11, Natã da Silva Baracho recusou a tabela `telemetry_position_repeats` e explicou o papel do ESP32: ele fica no lacre do cilindro, informa se o lacre está fechado, aberto ou rompido e conta as próprias tentativas de envio. Ajustes aprovados:
+
+| Decisão | Implementação |
+| --- | --- |
+| Guardar o `message_id` da posição repetida sem tabela nova | Coluna `telemetry_queue.last_repeat_message_id` com índice; guarda só a repetição mais recente de cada linha. |
+| Avisar o ESP32 que a posição já existe | Resposta `200 Posição já registrada; data e hora atualizadas` (dado novo continua `202`). |
+| Estado do lacre na telemetria | Campo `seal_status` (`LOCKED`, `UNLOCKED`, `BROKEN`), validado (`400`) e gravado em coluna própria. |
+| Rompimento no mesmo lugar não pode se perder | Só é repetição quando posição **e** `seal_status` são iguais; mudança de estado gera nova linha. |
+| Tentativas de envio do ESP32 | `attempt_count` do payload vai para `device_attempt_count` (telemetria e eventos), inteiro ≥ 0; `attempt_count` da fila continua sendo do Worker. |
+
+Compilação aprovada, suíte com 50/50 (quatro casos novos) e Roteiro de Teste v1.2 executado de ponta a ponta. Validação registrada em [Relatorio-de-Teste-2026-10-06.md](Doc_tese/Relatorio-de-Teste-2026-10-06.md), **aprovada por Natã da Silva Baracho**.
 
 ## 8. Status atual
 
@@ -381,6 +395,7 @@ Status geral: em funcionamento e validado com testes reais de integração.
 - `POST /api/v1/iot/alerts` com `SEAL_BROKEN` -> validado (`201 Created`)
 - `POST /api/v1/devices` com duplicidade -> `409 Dispositivo duplicado`
 - `POST /api/v1/devices` com `api_key` já usada -> `409 API Key já está em uso`
+- `POST /api/v1/iot/telemetries` com posição e lacre iguais à última -> `200 Posição já registrada; data e hora atualizadas`
 - `POST /api/v1/iot/telemetries` com duplicidade, inclusive de posição repetida -> `409 Mensagem duplicada`
 - `POST /api/v1/iot/events` com duplicidade -> `409 Mensagem duplicada`
 - validação de payload obrigatório -> funcionando
@@ -417,12 +432,12 @@ A API está organizada com o prefixo padrão `/api/v1`, e a estrutura atual é:
 
 ## 9. Suíte de testes automatizados (`npm test`)
 
-Foi criada uma suíte completa de testes automatizados de ponta a ponta em `tests/api.test.ts` (executável com `npm test`), cobrindo 46 casos de teste:
+Foi criada uma suíte completa de testes automatizados de ponta a ponta em `tests/api.test.ts` (executável com `npm test`), cobrindo 50 casos de teste:
 1. **Geral & Documentação**: rota raiz `/`, interface `/api-docs/` e especificação `/api-docs/swagger-ui-init.js`.
 2. **Dispositivos (`/api/v1/devices`)**: listagem, busca por ID, tratamento de 404, validação 400, criação com sucesso 201, conflito de duplicidade 409, `api_key` já usada (409) e `active` inválido (400).
 3. **Autenticação (`X-API-Key`)**: 401 sem header, 401 com chave inválida, 403 para dispositivo inativo e 200 com chave válida.
-4. **Telemetria (`/api/v1/iot/telemetries`)**: validação de campos obrigatórios (400), payload válido (202), duplicidade de `message_id` (409), regra de mesma posição GPS atualizando apenas `last_seen_at` sem duplicar linha, posição nova criando linha, reenvio de posição repetida (409), `status`/`attempt_count` do cliente ignorados, tipo inválido (400), dispositivo inexistente (404) e tratamento de JSON malformado (400).
-5. **Eventos (`/api/v1/iot/events`)**: autenticação (401), validação de campos obrigatórios (400), validação do catálogo `seal_status` (400), evento válido (202), auto-criação de dispositivo inexistente (202) e prevenção de duplicidade (409).
+4. **Telemetria (`/api/v1/iot/telemetries`)**: validação de campos obrigatórios (400), payload válido (202), duplicidade de `message_id` (409), regra de mesma posição GPS respondendo 200 e atualizando apenas `last_seen_at` sem duplicar linha, posição nova criando linha, reenvio de posição repetida (409), `attempt_count` do ESP32 gravado em `device_attempt_count`, tipo inválido (400), dispositivo inexistente (404), `seal_status` inválido (400), mudança do lacre na mesma posição criando linha, `attempt_count` negativo (400) e tratamento de JSON malformado (400).
+5. **Eventos (`/api/v1/iot/events`)**: autenticação (401), validação de campos obrigatórios (400), validação do catálogo `seal_status` (400), evento válido (202), `attempt_count` do ESP32 gravado em `device_attempt_count`, auto-criação de dispositivo inexistente (202) e prevenção de duplicidade (409).
 6. **Comandos (`/api/v1/iot/commands`)**: listagem de comandos pendentes, restrição de acesso por dispositivo (403), confirmação como EXECUTADO (200), bloqueio de reconfirmação (409) e exclusão da lista de pendentes.
 7. **Alertas (`/api/v1/iot/alerts`)**: autenticação (401), checagem de chave por dispositivo (403), validação de `alert_type` (400), integridade de `status_id`/`severity_id` (400), criação de alerta (201) e duplicidade de `alert_id` (409).
 8. **Teardown e Integridade**: limpeza automática dos registros temporários gerados durante os testes, garantindo banco limpo após a execução.
@@ -438,4 +453,4 @@ Foi criada uma suíte completa de testes automatizados de ponta a ponta em `test
 - adicionar validação automática aos DTOs (ex.: class-validator ou Zod).
 
 ## 11. Conclusão
-A API está estruturada em camadas, conectada ao SQLite, com o schema corrigido e validada em 46 testes automatizados de integração cobrindo fluxos felizes e exceções. O projeto está estável e pronto para a evolução dos workers de sincronização.
+A API está estruturada em camadas, conectada ao SQLite, com o schema corrigido e validada em 50 testes automatizados de integração cobrindo fluxos felizes e exceções. O projeto está estável e pronto para a evolução dos workers de sincronização.

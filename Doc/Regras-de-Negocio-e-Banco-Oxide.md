@@ -21,7 +21,7 @@ Este documento descreve as regras implementadas na API, o schema do SQLite Oxide
 | `GET /api/v1/devices/:deviceId` | Consulta um dispositivo pelo identificador. | `200`; `404` se não existir |
 | `POST /api/v1/devices` | Cadastra dispositivo. | `201`; `400` sem os campos básicos ou com `active` inválido; `409` com `device_id` ou `api_key` já cadastrados |
 | `GET /api/v1/iot/telemetries` | Lista telemetrias por `id` decrescente. | `200` |
-| `POST /api/v1/iot/telemetries` | Recebe telemetria. | `202`; `400` sem IDs ou com tipo inválido; `404` dispositivo inexistente; `409` com mensagem repetida |
+| `POST /api/v1/iot/telemetries` | Recebe telemetria. | `202` dado novo; `200` posição repetida; `400` sem IDs ou com valor inválido; `404` dispositivo inexistente; `409` com mensagem repetida |
 | `POST /api/v1/iot/events` | Recebe evento. | `202`; `400` inválido; `409` repetido |
 | `GET /api/v1/iot/commands/:deviceId` | Lista comandos pendentes do dispositivo. | `200` |
 | `POST /api/v1/iot/commands/confirm` | Confirma execução ou erro de comando. | `200`; `400`, `404` ou `409` conforme a falha |
@@ -68,11 +68,16 @@ Respostas do middleware: `401` para chave ausente ou inválida; `403` para dispo
 
 - `POST /api/v1/iot/telemetries` exige `message_id` e `device_id` como texto não vazio; os demais valores são opcionais no schema.
 - `latitude`, `longitude`, `speed_kmh`, `battery_percent` e `gsm_signal`, quando informados, precisam ser números; `lacre_id`, `cilindro_id`, `payload_json` e `last_seen_at` precisam ser texto. Tipo inválido retorna `400 Campo <nome> com tipo inválido`.
+- `seal_status` informa o estado do lacre e, quando enviado, só aceita `LOCKED` (fechado), `UNLOCKED` (aberto) ou `BROKEN` (rompido).
+- `attempt_count` enviado pelo ESP32 representa as tentativas de envio do dispositivo; precisa ser inteiro ≥ 0 e é gravado em `device_attempt_count`.
 - O `device_id` precisa existir em `devices`; caso contrário a API retorna `404 Dispositivo não encontrado`.
-- `message_id` identifica unicamente cada telemetria. Se já existir (inclusive como posição repetida), a API retorna `409 Mensagem duplicada`.
-- A tabela persiste os campos de GPS, velocidade, bateria, GSM, lacre, cilindro e payload quando informados. `status` (`PENDING`) e `attempt_count` (`0`) são definidos pelo servidor; valores enviados pelo cliente são ignorados.
+- `message_id` identifica unicamente cada telemetria. Se já existir em `message_id` ou em `last_repeat_message_id`, a API retorna `409 Mensagem duplicada`.
+- A tabela persiste os campos de GPS, velocidade, bateria, GSM, lacre, cilindro e payload quando informados. As colunas `status` (`PENDING`) e `attempt_count` (`0`) pertencem ao Worker e são definidas pelo servidor; o `status` enviado pelo cliente é ignorado (fica só em `payload_json`).
 - O campo `payload_json` recebe o valor enviado ou, quando omitido, uma serialização do objeto recebido.
-- Se a última telemetria do dispositivo tiver latitude e longitude iguais às recebidas, e ambas forem números, a API atualiza `last_seen_at` da linha existente e responde `202`, sem inserir outra linha. O `message_id` recebido é registrado em `telemetry_position_repeats`, de modo que um reenvio dele retorna `409`.
+- Se a última telemetria do dispositivo tiver latitude, longitude e `seal_status` iguais aos recebidos, com coordenadas numéricas, a API atualiza `last_seen_at` da linha existente, grava o `message_id` recebido em `last_repeat_message_id` e responde `200 Posição já registrada; data e hora atualizadas`, sem inserir outra linha. Um reenvio desse `message_id` retorna `409`.
+- Só a repetição mais recente de cada linha é guardada: o reenvio de uma repetição mais antiga é tratado como nova repetição (`200`), sem gerar linha duplicada.
+- Mudança do estado do lacre na mesma posição (ex.: `LOCKED` → `BROKEN`) não é repetição: gera nova linha (`202`).
+- Como a linha original é mantida, só o registro mais antigo de uma sequência de posições repetidas segue para o banco principal.
 - Quando a posição se repete, o timestamp enviado não é usado nessa atualização; o banco grava `CURRENT_TIMESTAMP`.
 - Posições diferentes e telemetrias sem coordenadas são inseridas normalmente. A consulta retorna `id` decrescente e não tem paginação.
 - A rota exige uma API Key ativa, mas atualmente não valida o ownership do dispositivo indicado no payload.
@@ -83,7 +88,7 @@ Respostas do middleware: `401` para chave ausente ou inválida; `403` para dispo
 - `event_type` é gravado na coluna `events.message_type`; a API exige que seja informado, mas não restringe o valor a um catálogo fechado.
 - `seal_status`, quando informado, só aceita `LOCKED`, `UNLOCKED` ou `BROKEN`.
 - `message_id` é único; repetição retorna `409 Mensagem duplicada`.
-- Evento novo é salvo com `status = PENDING` e `attempt_count = 0`, mesmo que o cliente envie outros valores.
+- Evento novo é salvo com `status = PENDING` e `attempt_count = 0`, mesmo que o cliente envie outros valores. O `attempt_count` do ESP32 (inteiro ≥ 0) é gravado em `device_attempt_count`.
 - O campo `events.status` representa processamento da fila, não o estado do dispositivo ou do lacre.
 - O service garante a existência do dispositivo criando-o automaticamente quando necessário.
 - A rota exige uma API Key ativa, mas não valida que ela pertence ao `device_id` do evento.
@@ -148,21 +153,12 @@ A inicialização insere, se estiverem ausentes, os códigos `ACTIVE`, `INACTIVE
 | `gsm_signal` | `INTEGER`, opcional. |
 | `payload_json` | `TEXT`, opcional. |
 | `last_seen_at` | `DATETIME`, opcional. |
+| `seal_status` | `TEXT`, opcional; `LOCKED`, `UNLOCKED` ou `BROKEN`, validado pela API. |
+| `device_attempt_count` | `INTEGER`, opcional; tentativas de envio informadas pelo ESP32. |
+| `last_repeat_message_id` | `TEXT`, opcional; `message_id` da última posição repetida, com índice `idx_telemetry_last_repeat_message_id`. |
 | `status` | `TEXT NOT NULL DEFAULT 'PENDING'`. |
 | `attempt_count` | `INTEGER NOT NULL DEFAULT 0`. |
 | `last_error` | `TEXT`, opcional. |
-
-### `telemetry_position_repeats`
-
-| Coluna | Regra |
-| --- | --- |
-| `id` | Chave primária autoincremental. |
-| `message_id` | `TEXT NOT NULL UNIQUE`; `message_id` de telemetria com posição repetida. |
-| `device_id` | `TEXT NOT NULL`, sem FK (a integridade vem da telemetria de referência). |
-| `telemetry_id` | `INTEGER NOT NULL`, FK para `telemetry_queue.id` com `ON DELETE CASCADE`. |
-| `received_at` | `DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP`. |
-
-A tabela existe só para idempotência: não é sincronizada com o FluxID, porque a posição já está na linha de `telemetry_queue` referenciada.
 
 ### `events`
 
@@ -175,7 +171,8 @@ A tabela existe só para idempotência: não é sincronizada com o FluxID, porqu
 | `seal_status` | `TEXT`, opcional; domínio validado pela API. |
 | `payload_json` | `TEXT`, opcional. |
 | `status` | `TEXT DEFAULT 'PENDING'`; estado de processamento. |
-| `attempt_count` | `INTEGER DEFAULT 0`. |
+| `attempt_count` | `INTEGER DEFAULT 0`; tentativas de sincronização do Worker. |
+| `device_attempt_count` | `INTEGER`, opcional; tentativas de envio informadas pelo ESP32. |
 | `last_error` | `TEXT`, opcional. |
 
 ### `commands`
@@ -212,7 +209,6 @@ A tabela existe só para idempotência: não é sincronizada com o FluxID, porqu
 - `device_status_id`, `valve_status_id` e `seal_status_id` não possuem FKs no schema atual.
 - `lacre_id` e `cilindro_id` na telemetria são texto livre opcional; não representam ainda as associações do roadmap.
 - `message_id`, `device_id`, `api_key`, `command_id`, `alert_id` e `status.code` têm restrições de unicidade conforme descrito nas tabelas.
-- `telemetry_position_repeats.telemetry_id` referencia `telemetry_queue.id` com `ON DELETE CASCADE`.
 - As FKs de eventos, telemetrias e alertas usam o comportamento padrão do SQLite; comandos usam `ON UPDATE CASCADE` e `ON DELETE RESTRICT`.
 
 ## 6. Inicialização e migrações
@@ -222,7 +218,7 @@ A tabela existe só para idempotência: não é sincronizada com o FluxID, porqu
 - Normaliza nomes legados de colunas.
 - Se a tabela `telemetry_queue` tiver colunas ou nulabilidade legadas, recria a tabela de forma transacional e copia os registros, preenchendo defaults para campos novos.
 - Adiciona `last_seen_at` quando a coluna não existir.
-- Cria `telemetry_position_repeats` quando ausente.
+- Adiciona `last_repeat_message_id`, `seal_status` e `device_attempt_count` a `telemetry_queue`, e `device_attempt_count` a `events`, quando faltarem, além do índice `idx_telemetry_last_repeat_message_id`.
 - Cria os triggers que restringem `devices.active` a `0`/`1`; bancos antigos não têm o `CHECK` e o SQLite não permite adicioná-lo sem recriar a tabela.
 - Cria o índice único `idx_devices_api_key` quando não há chaves duplicadas; se houver, a aplicação sobe normalmente e registra um aviso no console.
 - `sync_logs` e `sync_items` não fazem parte do schema atual da `oxide.db`.

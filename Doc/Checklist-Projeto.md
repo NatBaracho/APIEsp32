@@ -58,8 +58,10 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ Validação dos campos obrigatórios e de `message_id` duplicado (`409`).
 - ✅ Repetição do mesmo `message_id` não cria novo registro.
 - ✅ Atualização de `last_seen_at` quando a posição GPS se repete.
-- ✅ Reenvio do `message_id` de posição repetida retorna `409` (tabela `telemetry_position_repeats`).
-- ✅ `status` e `attempt_count` definidos pelo servidor, ignorando valores do cliente.
+- ✅ Posição e lacre iguais à última telemetria respondem `200 Posição já registrada; data e hora atualizadas`.
+- ✅ Reenvio do `message_id` de posição repetida retorna `409` (coluna `last_repeat_message_id`).
+- ✅ Estado do lacre (`seal_status`) na telemetria; mudança de estado na mesma posição gera nova linha.
+- ✅ `status` e `attempt_count` da fila definidos pelo servidor; tentativas de envio do ESP32 em `device_attempt_count`.
 - ✅ Validação de tipos dos campos (`400`) e dispositivo inexistente (`404`).
 - ✅ Telemetrias sem GPS aceitas e persistidas.
 - ✅ Consulta ordenada por `id` decrescente (mais recentes primeiro).
@@ -114,7 +116,6 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ `events`
 - ✅ `commands`
 - ✅ `alerts`
-- ✅ `telemetry_position_repeats`
 - [ ] `sync_logs` e `sync_items` como tabelas operacionais no banco atual.
 
 ### Relacionamentos e integridade
@@ -142,8 +143,9 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ Eventos testados, incluindo autenticação e validação de lacre.
 - ✅ Comandos testados, incluindo confirmação, ownership e reconfirmação.
 - ✅ Alertas testados, incluindo autenticação, validação, duplicidade e criação de `SEAL_BROKEN`.
-- ✅ Casos de sucesso e erro cobertos pela suíte de integração (`46/46` em 06/10/2026).
+- ✅ Casos de sucesso e erro cobertos pela suíte de integração (`50/50` em 06/10/2026).
 - ✅ Plano de Teste e Roteiro de Teste para IA documentados em `Doc/Doc_tese/`.
+- ✅ Validação por entrega registrada em `Doc/Doc_tese/Relatorio-de-Teste-*.md` (IA + questionário do responsável); entrega de 06/10/2026 aprovada por Natã da Silva Baracho.
 - [ ] Reexecutar compilação e suíte após concluir as próximas funcionalidades.
 
 **Status:** funcionalidades atuais do MVP validadas; a suíte deve ser repetida a cada nova etapa.

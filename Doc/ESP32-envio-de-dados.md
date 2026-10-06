@@ -124,6 +124,8 @@ Para a telemetria, o payload deve ter, pelo menos:
 - `battery_percent`: percentual da bateria.
 - `gsm_signal`: intensidade do sinal de celular.
 - `last_seen_at`: data/hora da última leitura, opcional e no formato ISO 8601; se omitido, fica `NULL` no SQLite.
+- `seal_status`: estado do lacre do cilindro: `LOCKED` (fechado), `UNLOCKED` (aberto) ou `BROKEN` (rompido).
+- `attempt_count`: quantas vezes o ESP32 já tentou enviar esta mensagem (inteiro ≥ 0); gravado em `device_attempt_count`.
 
 > Em termos do banco, `message_id` e `device_id` são informações centrais para relacionar cada envio ao equipamento correto e ao evento/telemetria correspondente.
 
@@ -138,7 +140,9 @@ Para a telemetria, o payload deve ter, pelo menos:
   "speed_kmh": 21.98,
   "battery_percent": 57.33,
   "gsm_signal": -64,
-  "last_seen_at": "2026-10-04T15:30:00.000Z"
+  "last_seen_at": "2026-10-04T15:30:00.000Z",
+  "seal_status": "LOCKED",
+  "attempt_count": 1
 }
 ```
 
@@ -150,10 +154,13 @@ Para a telemetria, o payload deve ter, pelo menos:
 - `device_id` deve corresponder a um dispositivo cadastrado; caso contrário a API responde `404` com `{"success":false,"message":"Dispositivo não encontrado"}`
 - campos como `latitude`, `longitude`, `speed_kmh`, `battery_percent` e `gsm_signal` são opcionais, mas devem ser enviados quando houver dados úteis
 - esses campos precisam ser números JSON (ex.: `-7.2091939`), não texto (`"-7.2091939"`); tipo inválido retorna `400` com `Campo <nome> com tipo inválido`
-- não envie `status` nem `attempt_count`: são controlados pelo servidor e ignorados se vierem no payload
+- `seal_status`, quando enviado, deve ser `LOCKED`, `UNLOCKED` ou `BROKEN`; outro valor retorna `400`
+- `attempt_count`, quando enviado, deve ser inteiro ≥ 0; outro valor retorna `400`
+- não envie `status`: o estado da fila (`PENDING`, `SYNCED`...) é controlado pelo servidor; o estado do lacre vai em `seal_status`
 - `last_seen_at` é opcional e aceita data/hora em ISO 8601; a coluna SQLite tem tipo `DATETIME`
 - uma mensagem aceita é salva em `telemetry_queue`
-- se latitude e longitude forem iguais às da última telemetria do dispositivo, a API retorna `202` e atualiza `last_seen_at` sem criar outra linha
+- se latitude, longitude e `seal_status` forem iguais aos da última telemetria do dispositivo, a API retorna `200` com `{"success":true,"message":"Posição já registrada; data e hora atualizadas"}` e atualiza só `last_seen_at`, sem criar outra linha
+- se o lacre mudar de estado no mesmo lugar (ex.: `LOCKED` → `BROKEN`), a API grava uma nova linha e retorna `202`
 - se o mesmo `message_id` for enviado novamente, inclusive o de uma posição repetida, a API responde `409 Conflict` com `{"success":false,"message":"Mensagem duplicada"}` e não grava outra linha
 
 ### Resposta esperada quando tudo estiver correto
@@ -162,6 +169,17 @@ Para a telemetria, o payload deve ter, pelo menos:
 {
   "success": true,
   "message": "Telemetria recebida"
+}
+```
+
+### Resposta quando a posição já existe
+
+Status HTTP: `200 OK`.
+
+```json
+{
+  "success": true,
+  "message": "Posição já registrada; data e hora atualizadas"
 }
 ```
 
@@ -241,6 +259,7 @@ O evento deve incluir `message_id`, `device_id` e `event_type`:
 - `device_id` é obrigatório
 - `event_type` é obrigatório
 - quando informado, `seal_status` deve ser `LOCKED`, `UNLOCKED` ou `BROKEN`; o campo é gravado em `events.seal_status`
+- quando informado, `attempt_count` (tentativas de envio do ESP32) deve ser inteiro ≥ 0 e é gravado em `events.device_attempt_count`
 - `message_id` duplicado é rejeitado pela API
 - um evento repetido retorna `409 Conflict` e não cria outra linha em `events`
 
@@ -415,6 +434,8 @@ void loop() {
     doc["speed_kmh"] = 21.98;
     doc["battery_percent"] = 57.33;
     doc["gsm_signal"] = -64;
+    doc["seal_status"] = "LOCKED";  // LOCKED, UNLOCKED ou BROKEN, conforme o sensor do lacre
+    doc["attempt_count"] = 1;       // incrementar a cada reenvio da mesma mensagem
 
     String payload;
     serializeJson(doc, payload);
@@ -426,7 +447,11 @@ void loop() {
 
     int httpCode = http.POST(payload);
 
-    if (httpCode == 409) {
+    if (httpCode == 202) {
+      Serial.println("Telemetria gravada");
+    } else if (httpCode == 200) {
+      Serial.println("Posição já registrada; data e hora atualizadas");
+    } else if (httpCode == 409) {
       Serial.println("Mensagem duplicada; não foi gravada novamente");
     } else if (httpCode == 400 || httpCode == 404) {
       // Erro no payload ou dispositivo não cadastrado: reenviar não resolve
