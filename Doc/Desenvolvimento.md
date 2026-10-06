@@ -10,6 +10,7 @@ Documentos relacionados:
 - [ESP32-envio-de-dados.md](ESP32-envio-de-dados.md): payloads de exemplo e código C++ para o firmware.
 - [Regras-de-Negocio-e-Banco-Oxide.md](Regras-de-Negocio-e-Banco-Oxide.md): regras detalhadas e schema do SQLite.
 - [Oxidedb.md](Oxidedb.md): script de criação do banco.
+- [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md): como cada dado da Oxide vira um registro do FluxID.
 - [Doc_tese/PlanoDeTeste.md](Doc_tese/PlanoDeTeste.md) e [Doc_tese/RoteiroDeTeste.md](Doc_tese/RoteiroDeTeste.md): como a API é testada.
 - Swagger, com a API rodando: `http://<IP_DA_API>:3000/api-docs`.
 
@@ -220,7 +221,7 @@ Rotas de apoio para a equipe: `GET /iot/telemetries` (lista as telemetrias de to
 ## 1.10 Estado atual
 
 - API em funcionamento, validada pela suíte automatizada (`npm test`, 55/55) e pelo Roteiro de Teste completo no `oxide.db` real.
-- Próximas entregas, nesta ordem: ajustes do banco FluxID e plano de integração → catálogo de comandos → associação dispositivo/lacre/cilindro → Worker.
+- Próximas entregas, nesta ordem: catálogo de comandos → associação dispositivo/lacre/cilindro → Worker (depois das decisões P1 a P8 do plano de integração).
 - Pendências conhecidas: firmware do ESP32 precisa enviar `seal_status` e `attempt_count` e tratar as respostas da seção 1.5; `nodemon` com vulnerabilidade apenas em desenvolvimento.
 
 ---
@@ -432,6 +433,13 @@ Decisões de Natã da Silva Baracho:
 | TEL-13: coordenadas fora da faixa aceitas | Rejeitar | `400` para latitude fora de -90 a 90, longitude fora de -180 a 180 ou só uma das duas; `0,0` continua aceito |
 
 Compilação aprovada, suíte com 55/55 (três casos novos e um substituído), migração testada com alertas antigos gravados e Roteiro de Teste v1.5 executado por completo no `oxide.db` real, com checksum idêntico antes e depois. Validação registrada em [Relatorio-de-Teste-2026-10-06-19h28.md](Doc_tese/Relatorio-de-Teste-2026-10-06-19h28.md), **aprovada por Natã da Silva Baracho**.
+
+### 7.16 Entrega E — banco FluxID e plano de integração (06/10/2026)
+- Análise do dump `FluxID.sql` e do `Banco_FluxID.md`: estrutura coerente com as regras de negócio, documento desatualizado em contagens, valores aceitos e índices, e massa de testes com incoerências de negócio e nomes de empresas reais.
+- Decisões de Natã da Silva Baracho: scripts versionados em `sql/fluxid/` (001 estrutura, 002 massa), chave do dispositivo guardada como hash no FluxID, nomes fictícios Alfa e Beta Gases, correção dos cilindros reprovados e dos lacres violados, ativos livres para a Beta e matriz de perfis e permissões.
+- Validação: servidor PostgreSQL 18.6 temporário, separado do banco principal (o Docker ficou para depois, por exigir habilitar a virtualização na BIOS). Dump restaurado sem erros; scripts executados duas vezes (a segunda sem alterações); coerência e regras novas conferidas; servidor apagado ao final.
+- Documentos: `Banco_FluxID.md` v3.1 e novo `Integracao-Oxide-FluxID.md`, com as tabelas de conversão e as decisões pendentes P1 a P8 para o Worker.
+- Validação registrada em [Relatorio-de-Teste-2026-10-06-20h00.md](Doc_tese/Relatorio-de-Teste-2026-10-06-20h00.md), **aprovada por Natã da Silva Baracho**.
 
 ## 9. Suíte de testes automatizados (`npm test`)
 
