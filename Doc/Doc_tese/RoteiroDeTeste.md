@@ -1,6 +1,6 @@
 # Roteiro de Teste para IA — API Oxide (FluxID / Oxide IoT)
 
-**Versão:** 1.3
+**Versão:** 1.4
 **Data:** 06/10/2026
 **Uso:** instruções executáveis para uma IA (ou pessoa) testar a API Oxide e produzir um relatório padronizado.
 **Base:** `Doc/Doc_tese/PlanoDeTeste.md` (IDs dos casos entre colchetes, ex.: `[TEL-03]`).
@@ -26,7 +26,9 @@ Você é um executor de testes. Siga este roteiro na ordem, sem pular etapas.
 
 - API REST em Node.js + TypeScript + Express, prefixo `/api/v1`, porta padrão `3000`.
 - Banco SQLite `oxide.db` no diretório de trabalho do processo (`process.cwd()`), com chaves estrangeiras ativas.
-- Autenticação: header `X-API-Key` (chave exclusiva por dispositivo).
+- Autenticação: header `X-API-Key` (chave exclusiva por dispositivo). Telemetria, eventos, comandos e alertas só aceitam a chave do próprio `device_id` (`403` se for de outro).
+- Dispositivo precisa estar cadastrado (`POST /devices`, provisório até o Worker trazer o cadastro do FluxID); não há criação automática pelo evento (`404`).
+- `GET /devices` e `GET /devices/:id` são abertos, mas não mostram a `api_key`. A listagem `GET /iot/telemetries` continua geral (decisão SEG-03).
 - Dispositivo semente: `DSP-000001`, chave `auto-DSP-000001`.
 - Idempotência por `message_id` (telemetria e eventos), `alert_id`, `command_id`, `device_id` e `api_key`.
 - Telemetria com posição **e** estado do lacre (`seal_status`) iguais aos da anterior não cria linha: a API responde `200 "Posição já registrada; data e hora atualizadas"`, atualiza `last_seen_at` e guarda o `message_id` em `last_repeat_message_id`.
@@ -124,7 +126,7 @@ curl -s -o /dev/null -w "porta 3000: %{http_code}\n" "$BASE/"   # esperado: 000 
 npm test
 ```
 
-Registre: total, aprovados, reprovados. **Esperado:** 50 casos, 50 aprovados, saída com código `0`.
+Registre: total, aprovados, reprovados. **Esperado:** 52 casos, 52 aprovados, saída com código `0`.
 Se houver reprovação, copie o nome de cada teste que falhou para o relatório.
 
 > A suíte limpa registros `DSP-TEST%` no início e no fim. Os casos manuais abaixo usam `DSP-TEST-RT`, que **também** será limpo na seção 8.
@@ -168,7 +170,7 @@ post /devices '' '{"device_id":"DSP-TEST-RT4","api_key":"key-rt-4","active":7}'
 # [DEV-12] esperado: 400 "firmware_version deve ser texto"
 post /devices '' '{"device_id":"DSP-TEST-RT5","api_key":"key-rt-5","firmware_version":123}'
 
-# [SEG-01] sem header. Se o corpo contiver "api_key", registrar ACHADO (risco R4)
+# [SEG-01] sem header. Esperado: 200 e o corpo NÃO contém "api_key"
 get /devices/DSP-TEST-RT
 ```
 
@@ -180,10 +182,10 @@ source ./roteiro-env.sh
 # [AUT-07] esperado: 404 "Dispositivo não encontrado"
 get /iot/commands/DSP-NAO-EXISTE "$KEY"
 
-# [AUT-08] chave de outro dispositivo. Hoje: 202 -> registrar ACHADO (risco R5)
+# [AUT-08] chave de outro dispositivo. Esperado: 403 "API Key não pertence ao dispositivo"; nenhuma linha
 post /iot/telemetries "$OTHER_KEY" '{"message_id":"MSG-RT-A08","device_id":"DSP-TEST-RT","latitude":-8.30,"longitude":-34.70}'
 
-# [AUT-09] chave de outro dispositivo. Hoje: 202 -> registrar ACHADO (risco R5)
+# [AUT-09] chave de outro dispositivo. Esperado: 403 "API Key não pertence ao dispositivo"; nenhuma linha
 post /iot/events "$OTHER_KEY" '{"message_id":"EVT-RT-A09","device_id":"DSP-TEST-RT","event_type":"auth_check"}'
 
 # [AUT-10] header em minúsculas. Esperado: 200
@@ -363,7 +365,7 @@ post /iot/alerts "$KEY" "{\"alert_id\":\"ALT-RT-001\",\"device_id\":\"DSP-TEST-R
 ```bash
 source ./roteiro-env.sh
 
-# [SEG-04] evento cria DSP-TEST-AUTOCREATE com chave previsível. Esperado: 202 e depois 200 -> registrar ACHADO
+# [SEG-04] evento para dispositivo não cadastrado. Esperado: 404 (sem criação) e depois 401 com a chave auto-<device_id>
 post /iot/events "$KEY" '{"message_id":"EVT-RT-AUTO","device_id":"DSP-TEST-AUTOCREATE","event_type":"startup"}'
 curl -s -o /dev/null -w "HTTP:%{http_code}\n" "$API/iot/telemetries" -H "X-API-Key: auto-DSP-TEST-AUTOCREATE"
 
@@ -408,8 +410,8 @@ sql "SELECT message_id, latitude, longitude, seal_status, last_seen_at, last_rep
 ```
 
 **Esperado nas telemetrias:**
-- Presentes: `MSG-RT-A08`, `001`, `003`, `004`, `005`, `006`, `007`, `009`, `011` (uma única vez), `012`, `016` e `017`.
-- Ausentes: `MSG-RT-002`, `008`, `010`, `013`, `014`, `015`, `018` e `019`.
+- Presentes: `MSG-RT-001`, `003`, `004`, `005`, `006`, `007`, `009`, `011` (uma única vez), `012`, `016` e `017`.
+- Ausentes: `MSG-RT-A08` [AUT-08], `MSG-RT-002`, `008`, `010`, `013`, `014`, `015`, `018` e `019`.
 - `MSG-RT-001` com `last_seen_at` preenchido pelo servidor, no formato `AAAA-MM-DD HH:MM:SS` [TEL-10].
 - `MSG-RT-006` com `last_seen_at = 2026-10-04T15:30:00.000Z`.
 - `MSG-RT-004` e `MSG-RT-005` com coordenadas nulas.
@@ -424,7 +426,7 @@ source ./roteiro-env.sh
 sql "SELECT message_id, message_type, seal_status, status, attempt_count, device_attempt_count FROM events WHERE device_id LIKE 'DSP-TEST%' ORDER BY id"
 ```
 
-**Esperado:** `event_type` gravado em `message_type`; `status = PENDING` e `attempt_count = 0` em todos (inclusive `EVT-RT-004` e `EVT-RT-006`); `EVT-RT-006` com `device_attempt_count = 7`; `EVT-RT-003` e `EVT-RT-007` ausentes.
+**Esperado:** `event_type` gravado em `message_type`; `status = PENDING` e `attempt_count = 0` em todos (inclusive `EVT-RT-004` e `EVT-RT-006`); `EVT-RT-006` com `device_attempt_count = 7`; `EVT-RT-003`, `EVT-RT-007`, `EVT-RT-A09` [AUT-09] e `EVT-RT-AUTO` [SEG-04] ausentes.
 
 ```bash
 source ./roteiro-env.sh
@@ -537,7 +539,7 @@ Para os demais casos, registre `FALHOU` e continue.
 | --- | --- |
 | **PASSOU** | Obtido igual ao esperado |
 | **FALHOU** | Obtido diferente do esperado e o esperado já era regra implementada |
-| **ACHADO** | Comportamento divergente do plano, mas já listado como risco ou decisão pendente (R4, R5, R6, TEL-13, SEG-04) |
+| **ACHADO** | Comportamento divergente do plano, mas já listado como risco ou decisão pendente (R6, TEL-13) |
 | **NÃO EXECUTADO** | Impossível executar; informar motivo |
 
 Severidade dos defeitos: **Crítica** (perda de dados, exposição de segredo), **Alta** (regra de negócio quebrada), **Média** (mensagem ou status incorreto), **Baixa** (cosmético ou documentação).
@@ -560,7 +562,7 @@ Gere o arquivo `Relatorio-de-Teste-AAAA-MM-DD-HHhMM.md` em `Doc/Doc_tese/` (ex.:
 | Indicador | Valor |
 | --- | --- |
 | Compilação | PASSOU/FALHOU |
-| Suíte automatizada | X/50 |
+| Suíte automatizada | X/52 |
 | Casos manuais executados | N |
 | PASSOU | N |
 | FALHOU | N |
@@ -612,3 +614,4 @@ marque NÃO EXECUTADO com o motivo.
 | 1.1 | 06/10/2026 | Nomes de arquivo corrigidos; consultas via `better-sqlite3` (sem depender do `sqlite3`); arquivo `roteiro-env.sh` para shells sem estado; API parada durante o `npm test`; IDs e coordenadas exclusivos por caso; casos DEV-10 a DEV-12, TEL-20 a TEL-22, EVT-11, BD-16 e BD-17; expectativas alinhadas às correções da API |
 | 1.2 | 06/10/2026 | Ajustes definidos por Natã da Silva Baracho: `last_repeat_message_id` no lugar de `telemetry_position_repeats`, resposta `200` para posição repetida, `seal_status` na telemetria e `device_attempt_count`; casos TEL-23 a TEL-25 e EVT-13; BD-17 passa a verificar as colunas novas |
 | 1.3 | 06/10/2026 | Nome do relatório passa a incluir a hora da publicação (`AAAA-MM-DD-HHhMM`), a pedido de Natã da Silva Baracho |
+| 1.4 | 06/10/2026 | Entrega A (segurança): AUT-08, AUT-09 e SEG-04 passam a esperar `403`/`404` e SEG-01 a ausência de `api_key`; suíte com 52 casos |

@@ -1,14 +1,10 @@
 import { Event } from "../models/Event";
-import { DeviceRepository } from "../repositories/DeviceRepository";
 import { EventRepository } from "../repositories/EventRepository";
 
 export class EventService {
 
   private repository =
     new EventRepository();
-
-  private deviceRepository =
-    new DeviceRepository();
 
   create(
     event: Event
@@ -30,10 +26,8 @@ export class EventService {
 
     }
 
-    this.deviceRepository.ensureDeviceExists(
-      event.device_id
-    );
-
+    // O dispositivo precisa estar cadastrado: apiKeyDeviceMiddleware já
+    // respondeu 404 antes de chegar aqui (sem criação automática, SEG-04)
     this.repository.create(
       event
     );

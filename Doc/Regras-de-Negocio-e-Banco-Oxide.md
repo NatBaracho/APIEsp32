@@ -17,12 +17,12 @@ Este documento descreve as regras implementadas na API, o schema do SQLite Oxide
 | Método e rota | Regra principal | Sucesso |
 | --- | --- | --- |
 | `GET /` | Verifica se a API está ativa. | `200` |
-| `GET /api/v1/devices` | Lista os registros de dispositivos. | `200` |
-| `GET /api/v1/devices/:deviceId` | Consulta um dispositivo pelo identificador. | `200`; `404` se não existir |
-| `POST /api/v1/devices` | Cadastra dispositivo. | `201`; `400` sem os campos básicos ou com `active` inválido; `409` com `device_id` ou `api_key` já cadastrados |
+| `GET /api/v1/devices` | Lista os dispositivos, sem a `api_key`. | `200` |
+| `GET /api/v1/devices/:deviceId` | Consulta um dispositivo pelo identificador, sem a `api_key`. | `200`; `404` se não existir |
+| `POST /api/v1/devices` | Cadastra dispositivo (provisório até o Worker trazer o cadastro oficial do FluxID). | `201`; `400` sem os campos básicos ou com `active` inválido; `409` com `device_id` ou `api_key` já cadastrados |
 | `GET /api/v1/iot/telemetries` | Lista telemetrias por `id` decrescente. | `200` |
-| `POST /api/v1/iot/telemetries` | Recebe telemetria. | `202` dado novo; `200` posição repetida; `400` sem IDs ou com valor inválido; `404` dispositivo inexistente; `409` com mensagem repetida |
-| `POST /api/v1/iot/events` | Recebe evento. | `202`; `400` inválido; `409` repetido |
+| `POST /api/v1/iot/telemetries` | Recebe telemetria. | `202` dado novo; `200` posição repetida; `400` sem IDs ou com valor inválido; `403` chave de outro dispositivo; `404` dispositivo não cadastrado; `409` com mensagem repetida |
+| `POST /api/v1/iot/events` | Recebe evento. | `202`; `400` inválido; `403` chave de outro dispositivo; `404` dispositivo não cadastrado; `409` repetido |
 | `GET /api/v1/iot/commands/:deviceId` | Lista comandos pendentes do dispositivo. | `200` |
 | `POST /api/v1/iot/commands/confirm` | Confirma execução ou erro de comando. | `200`; `400`, `404` ou `409` conforme a falha |
 | `POST /api/v1/iot/alerts` | Registra alerta para o dispositivo. | `201`; `400` inválido; `409` duplicado |
@@ -35,9 +35,9 @@ O header usado é `X-API-Key`. O middleware genérico busca o dispositivo pela c
 
 | Rotas | Comportamento de autenticação implementado |
 | --- | --- |
-| `GET/POST /api/v1/devices` e `GET /api/v1/devices/:deviceId` | Não usam middleware de API Key. |
-| `GET/POST /api/v1/iot/telemetries` | Exigem uma API Key válida de dispositivo ativo, mas não comparam a chave com o `device_id` do registro. O GET retorna telemetrias de todos os dispositivos. |
-| `POST /api/v1/iot/events` | Exige uma API Key válida de dispositivo ativo, mas não compara a chave com o `device_id` do evento. |
+| `GET/POST /api/v1/devices` e `GET /api/v1/devices/:deviceId` | Abertas, sem API Key (decisão para a equipe e o montador do lacre testarem). As respostas não mostram a `api_key`. |
+| `POST /api/v1/iot/telemetries` e `POST /api/v1/iot/events` | Exigem API Key válida de dispositivo ativo e conferem se ela pertence ao `device_id` do payload. |
+| `GET /api/v1/iot/telemetries` | Exige uma API Key válida e retorna as telemetrias de todos os dispositivos (decisão aceita, para acompanhamento dos testes). |
 | Rotas de comandos | Exigem API Key válida e conferem se pertence ao `device_id` consultado ou informado na confirmação. |
 | `POST /api/v1/iot/alerts` | Exige API Key válida e confere se pertence ao `device_id` do alerta. |
 
@@ -45,8 +45,8 @@ Respostas do middleware: `401` para chave ausente ou inválida; `403` para dispo
 
 ### Observações de segurança
 
-- `GET /api/v1/devices` e `GET /api/v1/devices/:deviceId` retornam o resultado de `SELECT *`, que inclui `api_key`, sem autenticação. O acesso e a projeção desses endpoints precisam ser revistos antes de expor a API fora de um ambiente controlado.
-- Telemetria e evento aceitam uma chave ativa sem validar que ela pertence ao `device_id` do payload. Essa diferença em relação a comandos e alertas deve ser tratada como decisão de autorização pendente.
+- As rotas de dispositivos são abertas por decisão do responsável; para não expor credenciais, as respostas de `GET` não incluem `api_key` (entrega A, 06/10/2026).
+- `POST /api/v1/devices` não exige credencial administrativa e a listagem de telemetrias é geral; são decisões aceitas enquanto a API roda em ambiente de testes. Antes de produção, reavaliar.
 - As chaves são armazenadas como texto e comparadas diretamente. Não há hash, rotação, rate limiting ou trilha de auditoria implementados.
 
 ## 4. Regras de negócio por recurso
@@ -60,8 +60,8 @@ Respostas do middleware: `401` para chave ausente ou inválida; `403` para dispo
 - `api_key` é exclusiva por dispositivo: uma chave já usada retorna `409 API Key já está em uso`. O banco reforça a regra com o índice único `idx_devices_api_key`.
 - `active`, quando informado, deve ser `0` ou `1`; outro valor retorna `400`. `firmware_version`, quando informado, deve ser texto.
 - A criação de dispositivo não exige API Key.
-- Ao receber evento para um `device_id` ainda inexistente, o service cria um dispositivo ativo com API Key `auto-<device_id>` e firmware `unknown`, antes de persistir o evento.
-- A criação automática acontece no fluxo de eventos; telemetria não cria dispositivo automaticamente.
+- O cadastro oficial de dispositivo, lacre e cilindro fica no FluxID. Até o Worker trazer esse cadastro, o dispositivo é cadastrado na Oxide por `POST /api/v1/devices` (provisório).
+- Não há criação automática: telemetria ou evento de um `device_id` não cadastrado retorna `404 Dispositivo não encontrado`.
 - `device_status_id`, `valve_status_id` e `seal_status_id` existem como colunas opcionais, mas não têm FK para `status` nem são preenchidas automaticamente pelo evento.
 
 ### 4.2 Telemetrias
@@ -80,7 +80,7 @@ Respostas do middleware: `401` para chave ausente ou inválida; `403` para dispo
 - Como a linha original é mantida, só o registro mais antigo de uma sequência de posições repetidas segue para o banco principal.
 - Quando a posição se repete, o timestamp enviado não é usado nessa atualização; o banco grava `CURRENT_TIMESTAMP`.
 - Posições diferentes e telemetrias sem coordenadas são inseridas normalmente. A consulta retorna `id` decrescente e não tem paginação.
-- A rota exige uma API Key ativa, mas atualmente não valida o ownership do dispositivo indicado no payload.
+- A rota exige a API Key do próprio dispositivo indicado no payload; chave de outro dispositivo retorna `403`.
 
 ### 4.3 Eventos
 
@@ -90,8 +90,8 @@ Respostas do middleware: `401` para chave ausente ou inválida; `403` para dispo
 - `message_id` é único; repetição retorna `409 Mensagem duplicada`.
 - Evento novo é salvo com `status = PENDING` e `attempt_count = 0`, mesmo que o cliente envie outros valores. O `attempt_count` do ESP32 (inteiro ≥ 0) é gravado em `device_attempt_count`.
 - O campo `events.status` representa processamento da fila, não o estado do dispositivo ou do lacre.
-- O service garante a existência do dispositivo criando-o automaticamente quando necessário.
-- A rota exige uma API Key ativa, mas não valida que ela pertence ao `device_id` do evento.
+- O dispositivo precisa estar cadastrado; caso contrário a API retorna `404` (sem criação automática).
+- A rota exige a API Key do próprio `device_id` do evento; chave de outro dispositivo retorna `403`.
 
 ### 4.4 Comandos
 

@@ -1,6 +1,9 @@
 import { Router } from "express";
 import { TelemetryController } from "../controllers/TelemetryController";
-import { apiKeyMiddleware } from "../Middleware/apiKeyMiddleware";
+import {
+  apiKeyDeviceMiddleware,
+  apiKeyMiddleware
+} from "../Middleware/apiKeyMiddleware";
 
 const router = Router();
 
@@ -13,9 +16,12 @@ router.get(
   controller.findAll.bind(controller)
 );
 
+// A listagem continua geral para a equipe acompanhar os testes (SEG-03);
+// o envio só é aceito com a chave do próprio dispositivo
 router.post(
   "/telemetries",
   apiKeyMiddleware,
+  apiKeyDeviceMiddleware,
   controller.create.bind(controller)
 );
 

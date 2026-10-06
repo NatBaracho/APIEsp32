@@ -20,8 +20,9 @@ Este documento registra o que já foi implementado e validado e o que falta para
 
 - ✅ API Key associada a dispositivo.
 - ✅ Middleware valida chave ausente (`401`), inválida (`401`) e dispositivo inativo (`403`).
-- ✅ Rotas de comandos e alertas validam se a chave pertence ao dispositivo informado (`403`).
-- [ ] Decidir e aplicar a mesma validação de ownership em telemetria e eventos (casos AUT-08 e AUT-09 do plano de teste).
+- ✅ Telemetria, eventos, comandos e alertas validam se a chave pertence ao dispositivo informado (`403`).
+- ✅ `GET /devices` não expõe `api_key`; rotas de dispositivos abertas por decisão do responsável.
+- ✅ Sem criação automática de dispositivo (chave previsível `auto-<device_id>` eliminada).
 - ✅ API Key exclusiva por dispositivo (`409` na duplicidade e índice único no banco).
 - ✅ Autenticação aplicada aos fluxos de telemetria, comandos e alertas.
 
@@ -44,7 +45,7 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ Colunas opcionais `device_status_id`, `valve_status_id` e `seal_status_id`.
 - ✅ Prevenção de cadastro duplicado (`409`).
 - ✅ `active` restrito a `0`/`1` na API (`400`) e no banco (triggers em bancos antigos).
-- ✅ Criação automática de dispositivo no fluxo de eventos quando ainda não existe.
+- ✅ Dispositivo precisa estar cadastrado (`404` em telemetria e eventos); cadastro na Oxide é provisório até o Worker trazer o cadastro oficial do FluxID.
 - ✅ Catálogo `status` para estados de dispositivo e lacre.
 - ✅ Validação de `seal_status` em eventos (`LOCKED`, `UNLOCKED` ou `BROKEN`).
 
@@ -77,7 +78,7 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ `event_type` obrigatório.
 - ✅ Validação de `seal_status` quando informado.
 - ✅ Estados de processamento definidos: `PENDING`, `PROCESSING`, `SYNCED` e `ERROR`.
-- ✅ Criação automática de dispositivo inexistente no fluxo de eventos.
+- ✅ Evento de dispositivo não cadastrado retorna `404` (criação automática removida na entrega A).
 
 **Status:** ingestão e validações implementadas. `event_type` é validado como obrigatório; não há catálogo fechado de tipos de evento.
 

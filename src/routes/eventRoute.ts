@@ -1,6 +1,9 @@
 import { Router } from "express";
 import { EventController } from "../controllers/EventController";
-import { apiKeyMiddleware } from "../Middleware/apiKeyMiddleware";
+import {
+  apiKeyDeviceMiddleware,
+  apiKeyMiddleware
+} from "../Middleware/apiKeyMiddleware";
 
 const router = Router();
 
@@ -10,6 +13,7 @@ const controller =
 router.post(
   "/events",
   apiKeyMiddleware,
+  apiKeyDeviceMiddleware,
   controller.create.bind(controller)
 );
 

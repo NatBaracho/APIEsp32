@@ -85,15 +85,19 @@ async function main() {
   await runTest("GET /api/v1/devices (Listar dispositivos)", async () => {
     const res = await fetch(`${BASE_URL}/api/v1/devices`);
     const json: any = await res.json();
-    const passed = res.status === 200 && Array.isArray(json) && json.some((d: any) => d.device_id === "DSP-000001");
-    return { passed, status: res.status, expectedStatus: 200, details: `Retornou ${json.length} dispositivos` };
+    const passed =
+      res.status === 200 &&
+      Array.isArray(json) &&
+      json.some((d: any) => d.device_id === "DSP-000001") &&
+      json.every((d: any) => !("api_key" in d));
+    return { passed, status: res.status, expectedStatus: 200, details: `Retornou ${json.length} dispositivos, sem api_key` };
   });
 
   await runTest("GET /api/v1/devices/:deviceId (Buscar dispositivo existente)", async () => {
     const res = await fetch(`${BASE_URL}/api/v1/devices/DSP-000001`);
     const json: any = await res.json();
-    const passed = res.status === 200 && json.device_id === "DSP-000001";
-    return { passed, status: res.status, expectedStatus: 200, details: `Device ID: ${json.device_id}` };
+    const passed = res.status === 200 && json.device_id === "DSP-000001" && !("api_key" in json);
+    return { passed, status: res.status, expectedStatus: 200, details: `Device ID: ${json.device_id}, sem api_key` };
   });
 
   await runTest("GET /api/v1/devices/:deviceId (Dispositivo inexistente -> 404)", async () => {
@@ -396,6 +400,26 @@ async function main() {
     return { passed, status: res.status, expectedStatus: 404, details: json.message };
   });
 
+  await runTest("POST /api/v1/iot/telemetries com chave de outro dispositivo -> 403", async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": "auto-DSP-000001"
+      },
+      body: JSON.stringify({
+        message_id: "MSG-TEST-OTHER-KEY",
+        device_id: TEST_DEVICE_ID,
+        latitude: -8.35,
+        longitude: -34.98
+      })
+    });
+    const json: any = await res.json();
+    const row = db.prepare("SELECT 1 FROM telemetry_queue WHERE message_id = ?").get("MSG-TEST-OTHER-KEY");
+    const passed = res.status === 403 && json.message === "API Key não pertence ao dispositivo" && !row;
+    return { passed, status: res.status, expectedStatus: 403, details: json.message };
+  });
+
   await runTest("POST /api/v1/iot/telemetries com seal_status inválido -> 400", async () => {
     const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
       method: "POST",
@@ -563,7 +587,7 @@ async function main() {
     return { passed, status: res.status, expectedStatus: 202, details: json.message };
   });
 
-  await runTest("POST /api/v1/iot/events auto-criação de dispositivo inexistente -> 202", async () => {
+  await runTest("POST /api/v1/iot/events para dispositivo não cadastrado -> 404, sem criação automática", async () => {
     const res = await fetch(`${BASE_URL}/api/v1/iot/events`, {
       method: "POST",
       headers: {
@@ -578,8 +602,27 @@ async function main() {
     });
     const json: any = await res.json();
     const dev = db.prepare("SELECT * FROM devices WHERE device_id = ?").get(AUTOCREATE_DEVICE_ID);
-    const passed = res.status === 202 && Boolean(dev);
-    return { passed, status: res.status, expectedStatus: 202, details: `Dispositivo criado automaticamente: ${AUTOCREATE_DEVICE_ID}` };
+    const passed = res.status === 404 && json.message === "Dispositivo não encontrado" && !dev;
+    return { passed, status: res.status, expectedStatus: 404, details: `${json.message}; dispositivo criado: ${Boolean(dev)}` };
+  });
+
+  await runTest("POST /api/v1/iot/events com chave de outro dispositivo -> 403", async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/iot/events`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": "auto-DSP-000001"
+      },
+      body: JSON.stringify({
+        message_id: "EVT-TEST-OTHER-KEY",
+        device_id: TEST_DEVICE_ID,
+        event_type: "startup"
+      })
+    });
+    const json: any = await res.json();
+    const row = db.prepare("SELECT 1 FROM events WHERE message_id = ?").get("EVT-TEST-OTHER-KEY");
+    const passed = res.status === 403 && json.message === "API Key não pertence ao dispositivo" && !row;
+    return { passed, status: res.status, expectedStatus: 403, details: json.message };
   });
 
   await runTest("POST /api/v1/iot/events com message_id duplicado -> 409", async () => {

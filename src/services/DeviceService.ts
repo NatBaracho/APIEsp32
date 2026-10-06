@@ -6,22 +6,32 @@ export type CreateDeviceResult =
   | "duplicate_device"
   | "duplicate_api_key";
 
+// Dispositivo como exposto pela API: a api_key nunca sai nas respostas (SEG-01)
+export type PublicDevice = Omit<Device, "api_key">;
+
+function toPublicDevice(device: Device): PublicDevice {
+  const { api_key: _apiKey, ...publicDevice } = device;
+  return publicDevice;
+}
+
 export class DeviceService {
 
   private repository =
     new DeviceRepository();
 
-  findAll(): Device[] {
-    return this.repository.findAll();
+  findAll(): PublicDevice[] {
+    return this.repository.findAll().map(toPublicDevice);
   }
 
   findByDeviceId(
     deviceId: string
-  ): Device | undefined {
+  ): PublicDevice | undefined {
 
-    return this.repository.findByDeviceId(
+    const device = this.repository.findByDeviceId(
       deviceId
     );
+
+    return device && toPublicDevice(device);
 
   }
 

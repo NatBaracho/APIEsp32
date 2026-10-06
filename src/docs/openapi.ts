@@ -25,7 +25,6 @@ const openApiSpec = {
         properties: {
           id: { type: "integer", example: 1 },
           device_id: { type: "string", example: "DSP-000001" },
-          api_key: { type: "string", example: "abc123" },
           firmware_version: { type: "string", example: "1.0.0" },
           active: { type: "integer", enum: [0, 1], example: 1 },
           device_status_id: { type: "integer", nullable: true, example: 1 },
@@ -265,7 +264,7 @@ const openApiSpec = {
               }
             }
           },
-          "403": { description: "Dispositivo desativado" }
+          "403": { description: "Dispositivo desativado ou API Key de outro dispositivo" }
         }
       }
     },
@@ -321,7 +320,8 @@ const openApiSpec = {
             }
           },
           "401": { description: "API Key ausente ou inválida" },
-          "403": { description: "Dispositivo desativado" }
+          "403": { description: "Dispositivo desativado ou API Key de outro dispositivo" },
+          "404": { description: "Dispositivo não cadastrado (não há criação automática)" }
         }
       }
     },
