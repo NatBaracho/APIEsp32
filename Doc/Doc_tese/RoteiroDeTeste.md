@@ -1,6 +1,6 @@
 # Roteiro de Teste para IA — API Oxide (FluxID / Oxide IoT)
 
-**Versão:** 1.4
+**Versão:** 1.5
 **Data:** 06/10/2026
 **Uso:** instruções executáveis para uma IA (ou pessoa) testar a API Oxide e produzir um relatório padronizado.
 **Base:** `Doc/Doc_tese/PlanoDeTeste.md` (IDs dos casos entre colchetes, ex.: `[TEL-03]`).
@@ -37,6 +37,8 @@ Você é um executor de testes. Siga este roteiro na ordem, sem pular etapas.
 - O `attempt_count` enviado pelo ESP32 (tentativas de envio, inteiro ≥ 0) é gravado em `device_attempt_count`. As colunas `status` e `attempt_count` da fila pertencem ao Worker e o servidor sempre grava `PENDING` e `0`.
 - Não existe endpoint HTTP para criar comandos; comandos de teste são inseridos direto no SQLite.
 - Tipos de alerta aceitos: `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE`, `COMMUNICATION_LOST`.
+- Alerta: `severity` opcional (`BAIXA`, `MEDIA`, `ALTA`, `CRITICA`, padrão pelo tipo) e `status` sempre `ABERTO` na criação, nos valores do FluxID. Campos antigos `status_id`/`severity_id` são ignorados.
+- Telemetria: latitude e longitude vêm juntas, com latitude entre -90 e 90 e longitude entre -180 e 180 (`400` fora disso).
 - `seal_status` aceita: `LOCKED`, `UNLOCKED`, `BROKEN`.
 - Estados de comando na confirmação: `EXECUTADO`, `ERRO` (comando novo nasce `PENDENTE`).
 
@@ -126,7 +128,7 @@ curl -s -o /dev/null -w "porta 3000: %{http_code}\n" "$BASE/"   # esperado: 000 
 npm test
 ```
 
-Registre: total, aprovados, reprovados. **Esperado:** 52 casos, 52 aprovados, saída com código `0`.
+Registre: total, aprovados, reprovados. **Esperado:** 55 casos, 55 aprovados, saída com código `0`.
 Se houver reprovação, copie o nome de cada teste que falhou para o relatório.
 
 > A suíte limpa registros `DSP-TEST%` no início e no fim. Os casos manuais abaixo usam `DSP-TEST-RT`, que **também** será limpo na seção 8.
@@ -219,13 +221,13 @@ post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-005","device_id":"DSP-TEST-R
 # [TEL-08] last_seen_at em ISO 8601. Esperado: 202; valor gravado igual ao enviado
 post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-006","device_id":"DSP-TEST-RT","latitude":-8.15,"longitude":-34.91,"last_seen_at":"2026-10-04T15:30:00.000Z"}'
 
-# [TEL-11] só latitude. Esperado: 202 e nova linha
+# [TEL-11] só latitude. Esperado: 400 "latitude e longitude devem ser enviadas juntas"; nenhuma linha
 post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-007","device_id":"DSP-TEST-RT","latitude":-8.16}'
 
 # [TEL-12] coordenadas como texto. Esperado: 400 "Campo latitude com tipo inválido"
 post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-008","device_id":"DSP-TEST-RT","latitude":"-8.17","longitude":"-34.92"}'
 
-# [TEL-13] fora de faixa. Hoje não há validação: se 202, registrar ACHADO
+# [TEL-13] fora de faixa. Esperado: 400 "latitude deve estar entre -90 e 90 e longitude entre -180 e 180"; nenhuma linha
 post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-009","device_id":"DSP-TEST-RT","latitude":999,"longitude":999}'
 
 # [TEL-15] dispositivo inexistente. Esperado: 404 "Dispositivo não encontrado"
@@ -328,37 +330,34 @@ post /iot/commands "$KEY" '{}'
 ```bash
 source ./roteiro-env.sh
 
-# Descobrir os IDs do catálogo, sem assumir valores fixos
-sql "SELECT id, code FROM status"
-SID=$(sql "SELECT MIN(id) AS id FROM status" | sed 's/[^0-9]//g')
-VID=$SID
-
-# [ALT-07] um alerta por tipo. Esperado: 201 nos seis
+# [ALT-07] um alerta por tipo, sem severity. Esperado: 201 nos seis (severidade padrão do tipo)
 i=1
 for T in SEAL_BROKEN GEOFENCE_EXIT LOW_BATTERY DEVICE_ERROR COMMAND_FAILURE COMMUNICATION_LOST; do
-  post /iot/alerts "$KEY" "{\"alert_id\":\"ALT-RT-00$i\",\"device_id\":\"DSP-TEST-RT\",\"alert_type\":\"$T\",\"status_id\":$SID,\"severity_id\":$VID,\"title\":\"Teste $T\"}"
+  post /iot/alerts "$KEY" "{\"alert_id\":\"ALT-RT-00$i\",\"device_id\":\"DSP-TEST-RT\",\"alert_type\":\"$T\",\"title\":\"Teste $T\"}"
   i=$((i+1))
 done
 
-# [ALT-08] severity_id inexistente. Esperado: 400
-post /iot/alerts "$KEY" "{\"alert_id\":\"ALT-RT-008\",\"device_id\":\"DSP-TEST-RT\",\"alert_type\":\"LOW_BATTERY\",\"status_id\":$SID,\"severity_id\":9999,\"title\":\"x\"}"
+# [ALT-08] severity fora da lista. Esperado: 400 "severity deve ser BAIXA, MEDIA, ALTA ou CRITICA"
+post /iot/alerts "$KEY" '{"alert_id":"ALT-RT-008","device_id":"DSP-TEST-RT","alert_type":"LOW_BATTERY","severity":"URGENTE","title":"x"}'
 
-# [ALT-09] status_id como texto, zero e negativo. Esperado: 400 nos três
-post /iot/alerts "$KEY" "{\"alert_id\":\"ALT-RT-008\",\"device_id\":\"DSP-TEST-RT\",\"alert_type\":\"LOW_BATTERY\",\"status_id\":\"1\",\"severity_id\":$VID,\"title\":\"x\"}"
-post /iot/alerts "$KEY" "{\"alert_id\":\"ALT-RT-008\",\"device_id\":\"DSP-TEST-RT\",\"alert_type\":\"LOW_BATTERY\",\"status_id\":0,\"severity_id\":$VID,\"title\":\"x\"}"
-post /iot/alerts "$KEY" "{\"alert_id\":\"ALT-RT-008\",\"device_id\":\"DSP-TEST-RT\",\"alert_type\":\"LOW_BATTERY\",\"status_id\":-1,\"severity_id\":$VID,\"title\":\"x\"}"
+# [ALT-09] severity informada + campos antigos (status_id, severity_id, status). Esperado: 201;
+# severity ALTA, status ABERTO e sem status_id/severity_id na resposta
+post /iot/alerts "$KEY" '{"alert_id":"ALT-RT-009","device_id":"DSP-TEST-RT","alert_type":"LOW_BATTERY","severity":"ALTA","status":"ENCERRADO","status_id":9999,"severity_id":9999,"title":"Bateria baixa"}'
 
 # [ALT-10] sem title. Esperado: 400
-post /iot/alerts "$KEY" "{\"alert_id\":\"ALT-RT-008\",\"device_id\":\"DSP-TEST-RT\",\"alert_type\":\"LOW_BATTERY\",\"status_id\":$SID,\"severity_id\":$VID}"
+post /iot/alerts "$KEY" '{"alert_id":"ALT-RT-010","device_id":"DSP-TEST-RT","alert_type":"LOW_BATTERY"}'
 
 # [ALT-11] sem description. Esperado: 201
-post /iot/alerts "$KEY" "{\"alert_id\":\"ALT-RT-007\",\"device_id\":\"DSP-TEST-RT\",\"alert_type\":\"LOW_BATTERY\",\"status_id\":$SID,\"severity_id\":$VID,\"title\":\"Sem descricao\"}"
+post /iot/alerts "$KEY" '{"alert_id":"ALT-RT-007","device_id":"DSP-TEST-RT","alert_type":"LOW_BATTERY","title":"Sem descricao"}'
 
 # [ALT-06] repetir ALT-RT-001. Esperado: 409 "Alerta duplicado"
-post /iot/alerts "$KEY" "{\"alert_id\":\"ALT-RT-001\",\"device_id\":\"DSP-TEST-RT\",\"alert_type\":\"SEAL_BROKEN\",\"status_id\":$SID,\"severity_id\":$VID,\"title\":\"Teste SEAL_BROKEN\"}"
+post /iot/alerts "$KEY" '{"alert_id":"ALT-RT-001","device_id":"DSP-TEST-RT","alert_type":"SEAL_BROKEN","title":"Teste SEAL_BROKEN"}'
+
+# [ALT-12] severidade e status gravados
+sql "SELECT alert_id, alert_type, severity, status FROM alerts WHERE device_id = 'DSP-TEST-RT' ORDER BY alert_id"
 ```
 
-**[ALT-12]** Na saída de `SELECT id, code FROM status`, se não houver nenhum código de severidade (ex.: `BAIXA`, `ALTA`), registrar ACHADO "taxonomia de severidade pendente".
+**Esperado [ALT-12]:** `ALT-RT-001` `SEAL_BROKEN` → `CRITICA`; `002` `GEOFENCE_EXIT` → `ALTA`; `003` `LOW_BATTERY` → `BAIXA`; `004` `DEVICE_ERROR` → `MEDIA`; `005` `COMMAND_FAILURE` → `ALTA`; `006` `COMMUNICATION_LOST` → `MEDIA`; `007` → `BAIXA`; `009` → `ALTA`. Todos com `status = ABERTO`. `ALT-RT-008` e `ALT-RT-010` ausentes.
 
 ### 5.8 Segurança
 
@@ -370,9 +369,8 @@ post /iot/events "$KEY" '{"message_id":"EVT-RT-AUTO","device_id":"DSP-TEST-AUTOC
 curl -s -o /dev/null -w "HTTP:%{http_code}\n" "$API/iot/telemetries" -H "X-API-Key: auto-DSP-TEST-AUTOCREATE"
 
 # [SEG-05] injeção SQL. Esperado: 404 na telemetria e 201 no alerta (texto gravado literalmente)
-SID=$(sql "SELECT MIN(id) AS id FROM status" | sed 's/[^0-9]//g')
 post /iot/telemetries "$KEY" "{\"message_id\":\"MSG-RT-SQL\",\"device_id\":\"x' OR '1'='1\"}"
-post /iot/alerts "$KEY" "{\"alert_id\":\"ALT-RT-SQL\",\"device_id\":\"DSP-TEST-RT\",\"alert_type\":\"DEVICE_ERROR\",\"status_id\":$SID,\"severity_id\":$SID,\"title\":\"'); DROP TABLE alerts;--\"}"
+post /iot/alerts "$KEY" "{\"alert_id\":\"ALT-RT-SQL\",\"device_id\":\"DSP-TEST-RT\",\"alert_type\":\"DEVICE_ERROR\",\"title\":\"'); DROP TABLE alerts;--\"}"
 sql "SELECT COUNT(*) AS alerts_intacta FROM alerts"
 
 # [SEG-06] corpo de ~10 MB. Esperado: 413 e a API continua respondendo 200
@@ -400,7 +398,7 @@ source ./roteiro-env.sh
 # telemetry_queue; SEM sync_logs e sync_items
 sql "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
 
-# [BD-05, BD-06] Esperado: alerts com 3 FKs (devices, status, status);
+# [BD-05, BD-06] Esperado: alerts com 1 FK (devices; severidade e status são texto com CHECK);
 # commands com on_update CASCADE e on_delete RESTRICT
 sql "SELECT \"table\", \"from\", on_update, on_delete FROM pragma_foreign_key_list('alerts')"
 sql "SELECT \"table\", \"from\", on_update, on_delete FROM pragma_foreign_key_list('commands')"
@@ -410,8 +408,8 @@ sql "SELECT message_id, latitude, longitude, seal_status, last_seen_at, last_rep
 ```
 
 **Esperado nas telemetrias:**
-- Presentes: `MSG-RT-001`, `003`, `004`, `005`, `006`, `007`, `009`, `011` (uma única vez), `012`, `016` e `017`.
-- Ausentes: `MSG-RT-A08` [AUT-08], `MSG-RT-002`, `008`, `010`, `013`, `014`, `015`, `018` e `019`.
+- Presentes: `MSG-RT-001`, `003`, `004`, `005`, `006`, `011` (uma única vez), `012`, `016` e `017`.
+- Ausentes: `MSG-RT-A08` [AUT-08], `MSG-RT-002`, `007` [TEL-11], `008`, `009` [TEL-13], `010`, `013`, `014`, `015`, `018` e `019`.
 - `MSG-RT-001` com `last_seen_at` preenchido pelo servidor, no formato `AAAA-MM-DD HH:MM:SS` [TEL-10].
 - `MSG-RT-006` com `last_seen_at = 2026-10-04T15:30:00.000Z`.
 - `MSG-RT-004` e `MSG-RT-005` com coordenadas nulas.
@@ -539,7 +537,7 @@ Para os demais casos, registre `FALHOU` e continue.
 | --- | --- |
 | **PASSOU** | Obtido igual ao esperado |
 | **FALHOU** | Obtido diferente do esperado e o esperado já era regra implementada |
-| **ACHADO** | Comportamento divergente do plano, mas já listado como risco ou decisão pendente (R6, TEL-13) |
+| **ACHADO** | Comportamento divergente do plano, mas já listado como risco ou decisão pendente (nenhum previsto nesta versão) |
 | **NÃO EXECUTADO** | Impossível executar; informar motivo |
 
 Severidade dos defeitos: **Crítica** (perda de dados, exposição de segredo), **Alta** (regra de negócio quebrada), **Média** (mensagem ou status incorreto), **Baixa** (cosmético ou documentação).
@@ -562,7 +560,7 @@ Gere o arquivo `Relatorio-de-Teste-AAAA-MM-DD-HHhMM.md` em `Doc/Doc_tese/` (ex.:
 | Indicador | Valor |
 | --- | --- |
 | Compilação | PASSOU/FALHOU |
-| Suíte automatizada | X/52 |
+| Suíte automatizada | X/55 |
 | Casos manuais executados | N |
 | PASSOU | N |
 | FALHOU | N |
@@ -615,3 +613,4 @@ marque NÃO EXECUTADO com o motivo.
 | 1.2 | 06/10/2026 | Ajustes definidos por Natã da Silva Baracho: `last_repeat_message_id` no lugar de `telemetry_position_repeats`, resposta `200` para posição repetida, `seal_status` na telemetria e `device_attempt_count`; casos TEL-23 a TEL-25 e EVT-13; BD-17 passa a verificar as colunas novas |
 | 1.3 | 06/10/2026 | Nome do relatório passa a incluir a hora da publicação (`AAAA-MM-DD-HHhMM`), a pedido de Natã da Silva Baracho |
 | 1.4 | 06/10/2026 | Entrega A (segurança): AUT-08, AUT-09 e SEG-04 passam a esperar `403`/`404` e SEG-01 a ausência de `api_key`; suíte com 52 casos |
+| 1.5 | 06/10/2026 | Entrega C: alertas com `severity`/`status` em texto (valores do FluxID) e severidade padrão por tipo; ALT-08, ALT-09 e ALT-12 reescritos; TEL-11 e TEL-13 passam a esperar `400`; BD-06 com 1 FK; suíte com 55 casos |

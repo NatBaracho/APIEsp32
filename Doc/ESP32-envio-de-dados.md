@@ -152,6 +152,7 @@ Para a telemetria, o payload deve ter, pelo menos:
 - `device_id` deve corresponder a um dispositivo cadastrado; caso contrário a API responde `404` com `{"success":false,"message":"Dispositivo não encontrado"}`
 - campos como `latitude`, `longitude`, `speed_kmh`, `battery_percent` e `gsm_signal` são opcionais, mas devem ser enviados quando houver dados úteis
 - esses campos precisam ser números JSON (ex.: `-7.2091939`), não texto (`"-7.2091939"`); tipo inválido retorna `400` com `Campo <nome> com tipo inválido`
+- `latitude` e `longitude` vão **juntas** (ou nenhuma, quando o GPS ainda não tem posição), com latitude entre -90 e 90 e longitude entre -180 e 180; fora disso a API responde `400`
 - `seal_status`, quando enviado, deve ser `LOCKED`, `UNLOCKED` ou `BROKEN`; outro valor retorna `400`
 - `attempt_count`, quando enviado, deve ser inteiro ≥ 0; outro valor retorna `400`
 - não envie `status`: o estado da fila (`PENDING`, `SYNCED`...) é controlado pelo servidor; o estado do lacre vai em `seal_status`
@@ -300,14 +301,13 @@ Content-Type: application/json
   "alert_id": "ALT-000001",
   "device_id": "DSP-000001",
   "alert_type": "SEAL_BROKEN",
-  "status_id": 1,
-  "severity_id": 2,
+  "severity": "CRITICA",
   "title": "Lacre rompido",
   "description": "Alerta enviado pelo dispositivo"
 }
 ```
 
-Os tipos aceitos são `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` e `COMMUNICATION_LOST`. `status_id` e `severity_id` precisam existir na tabela `status`; os códigos de severidade ainda precisam ser definidos.
+Os tipos aceitos são `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` e `COMMUNICATION_LOST`. `severity` é opcional e aceita `BAIXA`, `MEDIA`, `ALTA` ou `CRITICA`; sem ela, vale o padrão do tipo (`SEAL_BROKEN` → `CRITICA`; `GEOFENCE_EXIT` e `COMMAND_FAILURE` → `ALTA`; `DEVICE_ERROR` e `COMMUNICATION_LOST` → `MEDIA`; `LOW_BATTERY` → `BAIXA`). O alerta nasce sempre com `status` `ABERTO`. Firmwares antigos que ainda enviam `status_id` e `severity_id` continuam funcionando: esses campos são ignorados.
 
 Em caso de sucesso, a API retorna `201 Created` com o alerta criado:
 
@@ -319,8 +319,8 @@ Em caso de sucesso, a API retorna `201 Created` com o alerta criado:
     "alert_id": "ALT-000001",
     "device_id": "DSP-000001",
     "alert_type": "SEAL_BROKEN",
-    "status_id": 1,
-    "severity_id": 2,
+    "severity": "CRITICA",
+    "status": "ABERTO",
     "title": "Lacre rompido",
     "description": "Alerta enviado pelo dispositivo",
     "created_at": "2026-10-05 00:00:00",

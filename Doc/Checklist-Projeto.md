@@ -99,13 +99,14 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ Schema e persistência SQLite.
 - ✅ Endpoint autenticado de criação `POST /api/v1/iot/alerts`.
 - ✅ Validação dos tipos `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` e `COMMUNICATION_LOST`.
-- ✅ Validação de existência de `status_id` e `severity_id` no catálogo `status`.
+- ✅ Severidade (`BAIXA`, `MEDIA`, `ALTA`, `CRITICA`) e status (`ABERTO`, `EM_ANALISE`, `ENCERRADO`) com os valores do FluxID; severidade padrão por tipo.
 - ✅ Prevenção de `alert_id` duplicado (`409`).
 - ✅ Validação da API Key e do vínculo da chave com o dispositivo.
 - ✅ Teste HTTP de `SEAL_BROKEN`: resposta `201` e persistência confirmada no SQLite.
-- [ ] Definir códigos e significado de severidade no catálogo; a validação atual confirma existência do ID, não sua semântica como severidade.
+- ✅ Migração automática da tabela `alerts` antiga (`status_id`/`severity_id`), preservando os alertas.
+- [ ] Rotas para analisar e encerrar alertas (`EM_ANALISE`, `ENCERRADO`).
 
-**Status:** endpoint básico concluído e validado; taxonomia de severidade pendente.
+**Status:** criação de alertas concluída e validada, com severidade alinhada ao FluxID (entrega C).
 
 ## Banco de dados local
 
@@ -128,7 +129,7 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ `devices` → `events` por `device_id`.
 - ✅ `devices` → `commands` por `device_id`.
 - ✅ `devices` → `alerts` por `device_id`.
-- ✅ `alerts.status_id` e `alerts.severity_id` referenciam `status.id`.
+- ✅ `alerts.severity` e `alerts.status` com `CHECK` nos valores do FluxID.
 - ✅ Chaves estrangeiras principais entre dispositivos, eventos, telemetrias, comandos e alertas.
 - ✅ Migrações e normalizações de schema preservam os dados existentes nos fluxos cobertos.
 
@@ -218,7 +219,7 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 | Segurança por API Key | Implementada para o MVP |
 | Dispositivos, estados, telemetria e eventos | Implementados e validados |
 | Comandos manuais | Implementados e validados |
-| Criação básica de alertas | Implementada e validada; severidade sem semântica definida |
+| Criação de alertas | Implementada e validada; severidade e status alinhados ao FluxID |
 | Associação dispositivo/lacre/cilindro | Pendente |
 | Histórico de associações | Pendente |
 | Geofence | Pendente |

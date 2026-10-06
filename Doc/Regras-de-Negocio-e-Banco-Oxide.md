@@ -106,13 +106,14 @@ Respostas do middleware: `401` para chave ausente ou inválida; `403` para dispo
 
 ### 4.5 Alertas
 
-- `POST /api/v1/iot/alerts` exige `alert_id`, `device_id`, `alert_type`, `status_id`, `severity_id` e `title`; `description` é opcional.
+- `POST /api/v1/iot/alerts` exige `alert_id`, `device_id`, `alert_type` e `title`; `severity` e `description` são opcionais.
 - Os tipos aceitos são `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` e `COMMUNICATION_LOST`.
-- `status_id` e `severity_id` precisam ser inteiros positivos existentes em `status.id`.
+- `severity` aceita `BAIXA`, `MEDIA`, `ALTA` ou `CRITICA`, os mesmos valores de `alertas.severidade` no FluxID; outro valor retorna `400`. Sem `severity`, vale o padrão do tipo: `SEAL_BROKEN` → `CRITICA`; `GEOFENCE_EXIT` e `COMMAND_FAILURE` → `ALTA`; `DEVICE_ERROR` e `COMMUNICATION_LOST` → `MEDIA`; `LOW_BATTERY` → `BAIXA`.
+- `status` do alerta usa os valores do FluxID (`ABERTO`, `EM_ANALISE`, `ENCERRADO`) e nasce sempre `ABERTO`, definido pelo servidor. Ainda não há rota para analisar ou encerrar.
+- Os campos antigos `status_id` e `severity_id`, se enviados, são ignorados.
 - `alert_id` é único; repetição retorna `409 Alerta duplicado`.
 - O alerta é associado ao dispositivo e retorna `201` quando criado. `created_at` usa `CURRENT_TIMESTAMP`; `resolved_at` permanece nulo na criação.
 - A rota valida que a API Key pertence ao `device_id` informado.
-- O catálogo atual `status` contém estados de dispositivo/lacre, não uma taxonomia de severidade. A regra atual valida existência do ID, mas não que ele represente uma severidade válida.
 - O tipo `GEOFENCE_EXIT` é aceito, mas não existe lógica de geofence que o gere automaticamente.
 
 ## 5. Modelo do banco SQLite
@@ -196,7 +197,8 @@ A inicialização insere, se estiverem ausentes, os códigos `ACTIVE`, `INACTIVE
 | `alert_id` | `TEXT NOT NULL UNIQUE`. |
 | `device_id` | `TEXT NOT NULL`, FK para `devices.device_id`. |
 | `alert_type` | `TEXT NOT NULL`; lista aceita é validada pela API, não por `CHECK` SQLite. |
-| `status_id`, `severity_id` | `INTEGER NOT NULL`, ambos FK para `status.id`. |
+| `severity` | `TEXT NOT NULL`, `CHECK` em `BAIXA`, `MEDIA`, `ALTA`, `CRITICA`. |
+| `status` | `TEXT NOT NULL DEFAULT 'ABERTO'`, `CHECK` em `ABERTO`, `EM_ANALISE`, `ENCERRADO`. |
 | `title` | `TEXT NOT NULL`. |
 | `description` | `TEXT`, opcional. |
 | `created_at` | `DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP`. |
@@ -205,7 +207,6 @@ A inicialização insere, se estiverem ausentes, os códigos `ACTIVE`, `INACTIVE
 ### Relacionamentos e integridade
 
 - `devices.device_id` é a referência das FKs de `telemetry_queue`, `events`, `commands` e `alerts`.
-- `alerts.status_id` e `alerts.severity_id` referenciam `status.id`.
 - `device_status_id`, `valve_status_id` e `seal_status_id` não possuem FKs no schema atual.
 - `lacre_id` e `cilindro_id` na telemetria são texto livre opcional; não representam ainda as associações do roadmap.
 - `message_id`, `device_id`, `api_key`, `command_id`, `alert_id` e `status.code` têm restrições de unicidade conforme descrito nas tabelas.
@@ -219,6 +220,7 @@ A inicialização insere, se estiverem ausentes, os códigos `ACTIVE`, `INACTIVE
 - Se a tabela `telemetry_queue` tiver colunas ou nulabilidade legadas, recria a tabela de forma transacional e copia os registros, preenchendo defaults para campos novos.
 - Adiciona `last_seen_at` quando a coluna não existir.
 - Adiciona `last_repeat_message_id`, `seal_status` e `device_attempt_count` a `telemetry_queue`, e `device_attempt_count` a `events`, quando faltarem, além do índice `idx_telemetry_last_repeat_message_id`.
+- Se a tabela `alerts` ainda tiver `status_id`/`severity_id`, recria a tabela de forma transacional com `severity` e `status` em texto, preservando os alertas (severidade pelo tipo; alerta já resolvido vira `ENCERRADO`).
 - Cria os triggers que restringem `devices.active` a `0`/`1`; bancos antigos não têm o `CHECK` e o SQLite não permite adicioná-lo sem recriar a tabela.
 - Cria o índice único `idx_devices_api_key` quando não há chaves duplicadas; se houver, a aplicação sobe normalmente e registra um aviso no console.
 - `sync_logs` e `sync_items` não fazem parte do schema atual da `oxide.db`.
@@ -229,7 +231,6 @@ A inicialização insere, se estiverem ausentes, os códigos `ACTIVE`, `INACTIVE
 - Geofence: configuração de áreas e detecção de entrada/saída.
 - Geração automática de comandos.
 - Worker de sincronização, tabelas operacionais de sync e integração com PostgreSQL.
-- Política de severidade de alertas.
 
 ## 8. Banco principal PostgreSQL FluxID
 
@@ -260,7 +261,7 @@ O dump não contém tabela `commands`. As tabelas principais usam IDs UUID sem d
 | `devices` | `dispositivos` | `device_id` texto pode corresponder a `codigo` ou `identificador_hardware`; definir a regra. FluxID exige `organizacao_id`, ausente no SQLite. |
 | `telemetry_queue` | `telemetrias` | Mapear `device_id` para `dispositivo_id` UUID. FluxID exige `data_coleta`, latitude e longitude não nulas; Oxide aceita coordenadas ausentes e não tem timestamp de coleta equivalente garantido. Definir rejeição, quarentena ou ajuste de schema/política antes de sincronizar essas linhas. |
 | `events` | `eventos_lacre` | Só há correspondência direta para eventos de lacre; FluxID exige `lacre_id`, usa outro catálogo de tipos e não tem `message_id` nessa tabela. Definir resolução do lacre e uma chave de idempotência no destino. |
-| `alerts` | `alertas` | FluxID exige organização, código, UUID, data de abertura e valores textuais de tipo/severidade/status; Oxide usa IDs inteiros para status/severidade e tipos com nomes diferentes. Definir todos os mapeamentos antes de inserir. |
+| `alerts` | `alertas` | FluxID exige organização, código, UUID, data de abertura e valores textuais de tipo/severidade/status; severidade e status já usam os mesmos valores nas duas bases; os tipos têm nomes diferentes. Definir todos os mapeamentos antes de inserir. |
 | `commands` | Sem tabela no dump | Decidir se comandos permanecem locais ou se será criada uma entidade correspondente no PostgreSQL. |
 | `telemetry_queue.lacre_id` / `cilindro_id` | Vínculos FluxID | No SQLite esses campos são texto opcional sem FK; não são suficientes para reconstruir os vínculos históricos do FluxID. Usar as tabelas `vinculos_*` com regras temporais próprias. |
 

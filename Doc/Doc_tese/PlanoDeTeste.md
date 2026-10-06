@@ -1,11 +1,11 @@
 # Plano de Teste — FluxID / Oxide IoT
 
-**Versão:** 1.3
+**Versão:** 1.4
 **Data:** 06/10/2026
 **Escopo:** API Oxide (Node.js + TypeScript + Express + SQLite), sincronização com o PostgreSQL FluxID e API FluxID (NestJS) planejada
 **Validação humana:** Natã da Silva Baracho
 
-> Este plano consolida o que já foi implementado e testado (suíte `tests/api.test.ts`, 52 casos) e o que ainda precisa ser testado conforme o `Checklist-Projeto.md`, o `Banco_FluxID.md` (v3.0) e o `Regras-de-Negocio-e-Banco-Oxide.md`. Cada caso indica sua situação: **Automatizado**, **Manual executado** ou **Pendente**.
+> Este plano consolida o que já foi implementado e testado (suíte `tests/api.test.ts`, 55 casos) e o que ainda precisa ser testado conforme o `Checklist-Projeto.md`, o `Banco_FluxID.md` (v3.0) e o `Regras-de-Negocio-e-Banco-Oxide.md`. Cada caso indica sua situação: **Automatizado**, **Manual executado** ou **Pendente**.
 
 ---
 
@@ -93,7 +93,7 @@ Pré-condição para toda execução: banco com schema criado pelo script do `Ox
 **Saída (aprovação)**
 - 100% dos casos de severidade Alta aprovados.
 - Nenhum defeito crítico ou alto aberto.
-- Suíte automatizada sem falhas (hoje 52/52).
+- Suíte automatizada sem falhas (hoje 55/55).
 - Banco limpo após o teardown (zero registros `DSP-TEST%`).
 
 **Suspensão**
@@ -163,9 +163,9 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 | TEL-08 | `last_seen_at` em ISO 8601 | Persistido como enviado | Média | M |
 | TEL-09 | `last_seen_at` omitido | Persistido como `NULL` | Média | M |
 | TEL-10 | Na repetição de posição, `last_seen_at` usa `CURRENT_TIMESTAMP` (não o enviado) | Conferir valor gravado | Média | P |
-| TEL-11 | Apenas latitude informada (sem longitude) | Inserida como nova linha (não é posição repetida) | Média | P |
+| TEL-11 | Apenas latitude informada (sem longitude) | `400 latitude e longitude devem ser enviadas juntas`, nenhuma linha | Média | A |
 | TEL-12 | Coordenadas como string | `400 Campo latitude com tipo inválido`, nenhuma linha | Média | P |
-| TEL-13 | Latitude fora de faixa (`> 90`) e longitude fora de faixa (`> 180`) | Definir regra (rejeitar `400`?) e testar; hoje não há validação | Média | P |
+| TEL-13 | Latitude fora de -90 a 90 ou longitude fora de -180 a 180 | `400 latitude deve estar entre -90 e 90 e longitude entre -180 e 180`, nenhuma linha | Média | A |
 | TEL-14 | `payload_json` omitido | Grava serialização do objeto recebido | Baixa | P |
 | TEL-15 | Telemetria para `device_id` inexistente | `404 Dispositivo não encontrado`, nenhuma linha | Alta | A |
 | TEL-16 | `GET /telemetries` ordem decrescente por `id` | `200`, `id` 10 antes do 9 | Média | M |
@@ -222,17 +222,17 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 | ALT-01 | Sem chave | `401` | Alta | A |
 | ALT-02 | Chave de outro dispositivo | `403` | Alta | A |
 | ALT-03 | `alert_type` inválido | `400` | Alta | A |
-| ALT-04 | `status_id` inexistente | `400 devem existir na tabela status` | Alta | A |
-| ALT-05 | Alerta `SEAL_BROKEN` válido | `201`, objeto retornado, `resolved_at = null` | Alta | A |
+| ALT-04 | `severity` fora de `BAIXA`/`MEDIA`/`ALTA`/`CRITICA` | `400 severity deve ser BAIXA, MEDIA, ALTA ou CRITICA` | Alta | A |
+| ALT-05 | Alerta `SEAL_BROKEN` válido, sem `severity` | `201`, `severity = CRITICA` (padrão do tipo), `status = ABERTO`, `resolved_at = null` | Alta | A |
 | ALT-06 | `alert_id` duplicado | `409 Alerta duplicado` | Alta | A |
-| ALT-07 | Cada um dos 6 tipos aceitos | `201` para `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE`, `COMMUNICATION_LOST` | Alta | P (só `SEAL_BROKEN`) |
-| ALT-08 | `severity_id` inexistente | `400` | Alta | P |
-| ALT-09 | `status_id`/`severity_id` não inteiro ou ≤ 0 | `400` | Média | P |
+| ALT-07 | Cada um dos 6 tipos aceitos | `201` para `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE`, `COMMUNICATION_LOST` | Alta | M |
+| ALT-08 | Severidade padrão por tipo | `SEAL_BROKEN` `CRITICA`; `GEOFENCE_EXIT` e `COMMAND_FAILURE` `ALTA`; `DEVICE_ERROR` e `COMMUNICATION_LOST` `MEDIA`; `LOW_BATTERY` `BAIXA` | Alta | M |
+| ALT-09 | Firmware antigo envia `status_id`/`severity_id`/`status` | Campos ignorados: `201`, `severity` informada ou padrão, `status = ABERTO` | Média | A |
 | ALT-10 | Falta `title` | `400` | Média | P |
 | ALT-11 | `description` omitida | `201` | Baixa | P |
-| ALT-12 | Severidade com semântica | Após definir códigos de severidade no catálogo, validar que `severity_id` só aceita níveis de severidade | Alta | P (bloqueado) |
+| ALT-12 | Severidade e status com os valores do FluxID | Colunas `severity` e `status` com `CHECK`; valores gravados conferidos via SQL | Alta | M |
 
-> Observação: os testes atuais usam `status_id = 1` e `severity_id = 2`, que hoje correspondem a `ACTIVE` e `INACTIVE`. Revisar esses valores quando a taxonomia de severidade for definida.
+> Observação: desde a entrega C, `status_id` e `severity_id` não existem mais em `alerts`. Severidade (`BAIXA`, `MEDIA`, `ALTA`, `CRITICA`) e status (`ABERTO`, `EM_ANALISE`, `ENCERRADO`) são texto, nos valores do FluxID.
 
 ---
 
@@ -245,7 +245,7 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 | BD-03 | Unicidade | `device_id`, `message_id` (eventos e telemetrias), `command_id`, `alert_id`, `status.code` rejeitam duplicatas | Alta | M |
 | BD-04 | FKs ativas | `PRAGMA foreign_keys` = 1; inserir evento/telemetria/alerta com `device_id` inexistente falha | Alta | P |
 | BD-05 | `commands` FK | `ON UPDATE CASCADE`, `ON DELETE RESTRICT`; apagar dispositivo com comandos falha | Alta | M |
-| BD-06 | `alerts` FKs | Três FKs (dispositivo, `status_id`, `severity_id`) | Alta | M |
+| BD-06 | `alerts` FKs e CHECKs | Uma FK (dispositivo); `CHECK` de `severity` e `status`. Bancos antigos são migrados preservando os alertas | Alta | M |
 | BD-07 | Defaults | `devices.active = 1`, `commands.status = 'PENDENTE'`, `alerts.created_at = CURRENT_TIMESTAMP`, `telemetry_queue.status = 'PENDING'`, `attempt_count = 0` | Média | M |
 | BD-08 | Regra `active IN (0,1)` | Inserir ou atualizar `active = 2` falha com `CHECK constraint failed`. Em bancos antigos sem `CHECK`, a regra vem dos triggers `trg_devices_active_insert`/`_update` | Média | M |
 | BD-09 | Migração de colunas legadas | `messge_tyoe`, `seel_status`, `firmware_versin ` renomeadas sem perda de dados | Alta | M |
@@ -433,11 +433,11 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 
 | Indicador | Valor |
 | --- | --- |
-| Suíte automatizada (`npm test`) | 52 casos (51 testes e 1 de teardown), 52 aprovados em 06/10/2026 |
+| Suíte automatizada (`npm test`) | 55 casos (54 testes e 1 de teardown), 55 aprovados em 06/10/2026 |
 | Compilação (`npx tsc --noEmit`) | Aprovada em 06/10/2026 |
-| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança). Todos **aprovados por Natã da Silva Baracho** |
+| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas). Todos **aprovados por Natã da Silva Baracho** |
 | Cobertura da suíte | Dispositivos, autenticação, telemetria, eventos, comandos e alertas (fluxo principal e erros mais comuns) |
-| Lacunas prioritárias | SEG-05, TEL-19, ALT-07/08/12, EVT-05, BD-04/11/16 (fora da suíte; cobertos pelo Roteiro) |
+| Lacunas prioritárias | SEG-05, TEL-19, ALT-07/08/12, EVT-05, BD-04/06/11/16 (fora da suíte; cobertos pelo Roteiro) |
 | Entregas futuras | Todos os casos da seção 10 pendentes (funcionalidades ainda não implementadas) |
 
 ---
@@ -448,10 +448,10 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | --- | --- | --- |
 | R1 | A suíte atual grava na `oxide.db` real (limpa por `DELETE ... LIKE 'DSP-TEST%'` no início e no fim); falha no meio pode deixar resíduos ou afetar dados | Usar banco de teste dedicado (`DB_PATH` por variável de ambiente) ou cópia temporária |
 | R2 | Testes dependem do dispositivo semente `DSP-000001` e da chave `auto-DSP-000001` | Criar a semente no setup da suíte |
-| R3 | Testes assumem `status_id = 1` e `severity_id = 2`; IDs do catálogo podem variar entre bancos | Buscar os IDs por `code` no setup |
+| R3 | Testes assumiam `status_id = 1` e `severity_id = 2` | **Resolvido** na entrega C: alertas não usam mais IDs do catálogo |
 | R4 | Exposição de `api_key` nos `GET /devices` | **Mitigado** na entrega A: respostas sem `api_key` (SEG-01) |
 | R5 | Ownership não validado em telemetria e eventos | **Mitigado** na entrega A: `403` para chave de outro dispositivo (AUT-08/09) |
-| R6 | Severidade sem semântica | ALT-12; definir catálogo |
+| R6 | Severidade sem semântica | **Resolvido** na entrega C: severidade em texto com os valores do FluxID (ALT-12) |
 | R7 | Divergência de modelos (Oxide × FluxID) pode causar rejeição em massa no Worker | Casos SYN-06 a SYN-13 antes de implementar a sincronização |
 | R8 | Testes concorrentes não cobertos (SQLite com `better-sqlite3` é síncrono, mas há risco entre processos). Telemetria e alertas convertem violação `UNIQUE` em `409`; eventos e dispositivos ainda responderiam `500` | TEL-19 |
 | R9 | Ausência de `CHECK` para `alert_type` e `seal_status` no SQLite (validação só na aplicação) | Testes de API compensam; avaliar constraint |
@@ -489,3 +489,4 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | 1.1 | 06/10/2026 | Correções na API: idempotência de posição repetida, `status`/`attempt_count` controlados pelo servidor, `api_key` única, validação de `active` e de tipos da telemetria, `404` para dispositivo inexistente. Novos casos DEV-10 a DEV-12, TEL-20 a TEL-22, BD-16 e BD-17; TEL-12, TEL-15 e BD-08 revisados; suíte com 46 casos |
 | 1.2 | 06/10/2026 | Ajustes definidos por Natã da Silva Baracho: `last_repeat_message_id` no lugar da tabela `telemetry_position_repeats`; posição repetida responde `200`; `seal_status` na telemetria e repetição só com posição e lacre iguais; `attempt_count` do ESP32 em `device_attempt_count`. Novos casos TEL-23 a TEL-25 e EVT-13; TEL-04, TEL-20, TEL-21, EVT-11, BD-01 e BD-17 revisados; suíte com 50 casos |
 | 1.3 | 06/10/2026 | Entrega A (segurança), decisões de Natã da Silva Baracho: `api_key` fora das respostas de `/devices` (SEG-01), chave do próprio dispositivo em telemetria e eventos (AUT-08/09), sem criação automática de dispositivo (EVT-07, SEG-04); SEG-02 e SEG-03 registrados como decisões aceitas; R4 e R5 mitigados; suíte com 52 casos |
+| 1.4 | 06/10/2026 | Entrega C, decisões de Natã da Silva Baracho: severidade e status do alerta em texto com os valores do FluxID, severidade padrão por tipo, campos antigos ignorados; latitude e longitude juntas e dentro da faixa. ALT-04, ALT-05, ALT-07 a ALT-09, ALT-12, TEL-11, TEL-13 e BD-06 revisados; R3 e R6 resolvidos; suíte com 55 casos |
