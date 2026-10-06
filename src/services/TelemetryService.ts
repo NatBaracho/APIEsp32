@@ -1,10 +1,20 @@
 import { Telemetry } from "../models/Telemetry";
+import { DeviceRepository } from "../repositories/DeviceRepository";
 import { TelemetryQueueRepository } from "../repositories/TelemetryQueueRepository";
+
+export type CreateTelemetryResult =
+  | "created"
+  | "position_repeated"
+  | "duplicate"
+  | "device_not_found";
 
 export class TelemetryService {
 
   private repository =
     new TelemetryQueueRepository();
+
+  private deviceRepository =
+    new DeviceRepository();
 
   findAll(): Telemetry[] {
     return this.repository.findAll();
@@ -12,22 +22,29 @@ export class TelemetryService {
 
   create(
     telemetry: Telemetry
-  ): boolean {
+  ): CreateTelemetryResult {
 
-    const existing =
-      this.repository.findByMessageId(
+    if (
+      this.repository.messageIdExists(
         telemetry.message_id
-      );
-
-    if (existing) {
+      )
+    ) {
 
       console.log(
         "Mensagem duplicada:",
         telemetry.message_id
       );
 
-      return false;
+      return "duplicate";
 
+    }
+
+    if (
+      !this.deviceRepository.findByDeviceId(
+        telemetry.device_id
+      )
+    ) {
+      return "device_not_found";
     }
 
     const lastTelemetry =
@@ -47,11 +64,17 @@ export class TelemetryService {
         lastTelemetry.id!
       );
 
+      this.repository.registerPositionRepeat(
+        telemetry.message_id,
+        telemetry.device_id,
+        lastTelemetry.id!
+      );
+
       console.log(
         "📍 Posição repetida. Apenas atualizando horário."
       );
 
-      return true;
+      return "position_repeated";
 
     }
 
@@ -64,7 +87,7 @@ export class TelemetryService {
       telemetry.message_id
     );
 
-    return true;
+    return "created";
 
   }
 

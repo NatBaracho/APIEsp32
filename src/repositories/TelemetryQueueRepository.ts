@@ -19,6 +19,7 @@ export class TelemetryQueueRepository {
     telemetry: TelemetryQueue
   ): void {
 
+    // status e attempt_count são controlados pelo servidor, nunca pelo cliente
     db.prepare(`
       INSERT INTO telemetry_queue (
         message_id,
@@ -55,15 +56,15 @@ export class TelemetryQueueRepository {
       telemetry.device_id,
       telemetry.lacre_id ?? null,
       telemetry.cilindro_id ?? null,
-      telemetry.latitude,
-      telemetry.longitude,
-      telemetry.speed_kmh,
-      telemetry.battery_percent,
-      telemetry.gsm_signal,
+      telemetry.latitude ?? null,
+      telemetry.longitude ?? null,
+      telemetry.speed_kmh ?? null,
+      telemetry.battery_percent ?? null,
+      telemetry.gsm_signal ?? null,
       telemetry.payload_json ?? JSON.stringify(telemetry),
       telemetry.last_seen_at ?? null,
-      telemetry.status ?? "PENDING",
-      telemetry.attempt_count ?? 0
+      "PENDING",
+      0
     );
 
   }
@@ -79,6 +80,44 @@ export class TelemetryQueueRepository {
         WHERE message_id = ?
       `)
       .get(messageId) as TelemetryQueue | undefined;
+
+  }
+
+  // Considera também os message_id de posições repetidas, que não têm linha própria
+  messageIdExists(
+    messageId: string
+  ): boolean {
+
+    return Boolean(
+      db
+        .prepare(`
+          SELECT 1 FROM telemetry_queue WHERE message_id = ?
+          UNION ALL
+          SELECT 1 FROM telemetry_position_repeats WHERE message_id = ?
+        `)
+        .get(messageId, messageId)
+    );
+
+  }
+
+  registerPositionRepeat(
+    messageId: string,
+    deviceId: string,
+    telemetryId: number
+  ): void {
+
+    db.prepare(`
+      INSERT INTO telemetry_position_repeats (
+        message_id,
+        device_id,
+        telemetry_id
+      )
+      VALUES (?, ?, ?)
+    `).run(
+      messageId,
+      deviceId,
+      telemetryId
+    );
 
   }
 

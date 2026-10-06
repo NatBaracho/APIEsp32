@@ -25,6 +25,19 @@ export class DeviceRepository {
       .get(deviceId) as Device | undefined;
   }
 
+  findByApiKey(
+    apiKey: string
+  ): Device | undefined {
+
+    return db
+      .prepare(`
+        SELECT *
+        FROM devices
+        WHERE api_key = ?
+      `)
+      .get(apiKey) as Device | undefined;
+  }
+
   findById(id: number): Device | undefined {
 
     return db

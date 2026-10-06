@@ -131,7 +131,7 @@ const openApiSpec = {
         responses: {
           "201": { description: "Dispositivo criado" },
           "409": {
-            description: "Dispositivo duplicado pelo device_id",
+            description: "Dispositivo duplicado pelo device_id ou API Key já em uso",
             content: {
               "application/json": {
                 schema: { $ref: "#/components/schemas/Error" },
@@ -140,7 +140,7 @@ const openApiSpec = {
             }
           },
           "400": {
-            description: "Campos obrigatórios ausentes",
+            description: "Campos obrigatórios ausentes ou active diferente de 0/1",
             content: {
               "application/json": {
                 schema: { $ref: "#/components/schemas/Error" }
@@ -226,8 +226,7 @@ const openApiSpec = {
                     type: "string",
                     format: "date-time",
                     example: "2026-10-04T15:30:00.000Z"
-                  },
-                  status: { type: "string", example: "pending" }
+                  }
                 }
               }
             }
@@ -235,9 +234,10 @@ const openApiSpec = {
         },
         responses: {
           "202": { description: "Telemetria recebida" },
-          "400": { description: "message_id e device_id são obrigatórios" },
+          "400": { description: "message_id e device_id são obrigatórios ou campo com tipo inválido" },
+          "404": { description: "Dispositivo não encontrado" },
           "409": {
-            description: "Mensagem duplicada pelo message_id",
+            description: "Mensagem duplicada pelo message_id (inclusive de posição repetida)",
             content: {
               "application/json": {
                 schema: { $ref: "#/components/schemas/Error" },

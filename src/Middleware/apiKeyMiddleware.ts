@@ -23,13 +23,8 @@ export function apiKeyMiddleware(
     return;
   }
 
-  const devices =
-    deviceRepository.findAll();
-
   const device =
-    devices.find(
-      item => item.api_key === apiKey
-    );
+    deviceRepository.findByApiKey(apiKey);
 
   if (!device) {
 

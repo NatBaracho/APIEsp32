@@ -264,6 +264,61 @@ if (
   db.exec("ALTER TABLE telemetry_queue ADD COLUMN last_seen_at DATETIME");
 }
 
+// Registra o message_id das telemetrias com posição repetida, que não geram
+// nova linha em telemetry_queue, para que um reenvio seja detectado (409)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS telemetry_position_repeats (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id TEXT NOT NULL UNIQUE,
+    device_id TEXT NOT NULL,
+    telemetry_id INTEGER NOT NULL,
+    received_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (telemetry_id)
+      REFERENCES telemetry_queue(id)
+      ON DELETE CASCADE
+  )
+`);
+
+// Bancos antigos não têm CHECK em devices.active; SQLite não permite
+// adicionar CHECK sem recriar a tabela, então a regra é aplicada por trigger
+db.exec(`
+  CREATE TRIGGER IF NOT EXISTS trg_devices_active_insert
+  BEFORE INSERT ON devices
+  WHEN NEW.active NOT IN (0, 1)
+  BEGIN
+    SELECT RAISE(ABORT, 'CHECK constraint failed: active IN (0,1)');
+  END
+`);
+db.exec(`
+  CREATE TRIGGER IF NOT EXISTS trg_devices_active_update
+  BEFORE UPDATE OF active ON devices
+  WHEN NEW.active NOT IN (0, 1)
+  BEGIN
+    SELECT RAISE(ABORT, 'CHECK constraint failed: active IN (0,1)');
+  END
+`);
+
+// Cada dispositivo precisa de uma API Key exclusiva
+const duplicatedApiKeys = db
+  .prepare(`
+    SELECT api_key
+    FROM devices
+    GROUP BY api_key
+    HAVING COUNT(*) > 1
+  `)
+  .all();
+
+if (duplicatedApiKeys.length === 0) {
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_api_key ON devices(api_key)"
+  );
+} else {
+  console.warn(
+    "⚠️ Existem API Keys duplicadas em devices; índice único não criado:",
+    duplicatedApiKeys
+  );
+}
+
 // Verificação inicial
 console.log("✅ SQLite conectado:", databasePath);
 

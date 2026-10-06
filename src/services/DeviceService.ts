@@ -1,6 +1,11 @@
 import { Device } from "../models/Device";
 import { DeviceRepository } from "../repositories/DeviceRepository";
 
+export type CreateDeviceResult =
+  | "created"
+  | "duplicate_device"
+  | "duplicate_api_key";
+
 export class DeviceService {
 
   private repository =
@@ -22,7 +27,7 @@ export class DeviceService {
 
   create(
     device: Device
-  ): boolean {
+  ): CreateDeviceResult {
 
     const existing =
       this.repository.findByDeviceId(
@@ -36,7 +41,17 @@ export class DeviceService {
         device.device_id
       );
 
-      return false;
+      return "duplicate_device";
+
+    }
+
+    if (this.repository.findByApiKey(device.api_key)) {
+
+      console.log(
+        "⚠️ API Key já usada por outro dispositivo"
+      );
+
+      return "duplicate_api_key";
 
     }
 
@@ -49,7 +64,7 @@ export class DeviceService {
       device.device_id
     );
 
-    return true;
+    return "created";
 
   }
 

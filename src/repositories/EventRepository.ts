@@ -37,7 +37,7 @@ export class EventRepository {
       event.seal_status ?? null,
       payloadJson,
       "PENDING",
-      event.attempt_count ?? 0
+      0
     );
 
   }
