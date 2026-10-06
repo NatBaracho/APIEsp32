@@ -2,7 +2,7 @@
 # FluxID  
 ### Especificação Atualizada do MVP e do Banco de Dados  
 **Segurança • Rastreabilidade • Controle Operacional**  
-**Versão 3.0 — consolidada após modelagem, criação e população do banco**  
+**Versão 3.1 — revisada em 06/10/2026 (entrega E): análise do dump, ajustes de estrutura e correção da massa de testes**  
 Documento substitutivo da versão 1 anexada
 
 ---
@@ -17,6 +17,7 @@ Esta versão atualiza integralmente o documento *FluxID_Especificacao_MVP_v1.doc
 | Telemetria atual | Latitude e longitude em colunas NUMERIC |
 | PostGIS | Planejado para evolução de geocercas; ainda não refletido na tabela atual de telemetria |
 | Views e triggers | Adiados para depois dos testes CRUD da API |
+| Ajustes da entrega E | Scripts versionados em `sql/fluxid/` (seção 17), validados em servidor PostgreSQL temporário; aguardando aplicação no banco e novo dump |
 | Próxima fase | API NestJS + TypeScript conectada ao PostgreSQL |
 
 ---
@@ -199,36 +200,46 @@ auditoria
 
 ## 10. Estados e códigos utilizados
 
+Valores conferidos nos `CHECK` do dump:
+
 | Entidade | Padrão / estados |
 |----------|------------------|
+| Organização | ORG-000001; ATIVA, INATIVA, SUSPENSA |
+| Contato da organização | tipo COMERCIAL, FINANCEIRO, LOGISTICA, SUPORTE, EMERGENCIA, OUTRO |
 | Cilindro | CIL-000001; DISPONIVEL, EM_TRANSITO, COM_CLIENTE, MANUTENCAO, EXTRAVIADO, INATIVO |
 | Lacre | LCR-000001; EM_ESTOQUE, INSTALADO, SUSPEITA_VIOLACAO, ROMPIDO, REMOVIDO, DANIFICADO, INUTILIZADO |
-| Dispositivo | DSP-000001; ativo/inativo |
+| Dispositivo | DSP-000001; ativo/inativo (booleano). O código é o mesmo `device_id` usado pela API Oxide |
 | Entrega | ENT-000001; PENDENTE, EM_ANDAMENTO, CONCLUIDA, CANCELADA |
 | Movimentação | MOV-000001; CARGA, DESCARGA, ENTREGA, RECOLHIMENTO, TRANSFERENCIA, INVENTARIO |
-| Alerta | ALT-000001; ABERTO, EM_ANALISE, ENCERRADO; severidade BAIXA, MEDIA, ALTA, CRITICA |
+| Evento do lacre | ABERTURA_AUTORIZADA, ABERTURA_NAO_AUTORIZADA, FECHAMENTO, VIOLACAO, INSTALACAO, REMOCAO, TROCA |
+| Alerta | ALT-000001; tipo VIOLACAO_LACRE, ABERTURA_NAO_AUTORIZADA, SAIDA_GEOCERCA, MOVIMENTACAO_SUSPEITA, BATERIA_BAIXA, SEM_COMUNICACAO, TESTE_HIDROSTATICO, REVISAO_LACRE; status ABERTO, EM_ANALISE, ENCERRADO; severidade BAIXA, MEDIA, ALTA, CRITICA |
+| Teste hidrostático | APROVADO, REPROVADO |
+| Inspeção do lacre | APROVADO, APROVADO_COM_RESTRICAO, REPROVADO, INUTILIZADO |
+| Auditoria | INSERT, UPDATE, DELETE, LOGIN, LOGOUT, AUTORIZACAO |
 
 ---
 
 ## 11. Massa de testes confirmada
 
-| Tabela | Registros |
-|--------|-----------|
-| organizacoes | 3 |
-| usuarios | 3 |
-| destinatarios | 20 |
-| locais_entrega | 20 |
-| cilindros | 50 |
-| lacres | 50 |
-| dispositivos | 50 |
-| telemetrias | 200 |
-| eventos_lacre | 10 |
-| alertas | 10 |
-| testes_hidrostaticos | 50 |
-| inspecoes_lacre | 50 |
-| auditoria | 3 |
+Contagens conferidas no dump de 23/09/2026 (todas as tabelas):
 
-A massa é sintética e destinada exclusivamente a desenvolvimento e testes.
+| Tabela | Registros | Tabela | Registros |
+|--------|-----------|--------|-----------|
+| organizacoes | 3 | telemetrias | 200 |
+| organizacao_contatos | 3 | eventos_lacre | 10 |
+| usuarios | 3 | alertas | 10 |
+| perfis | 6 | testes_hidrostaticos | 50 |
+| permissoes | 10 | inspecoes_lacre | 50 |
+| perfil_permissoes | 0 (34 após o script 002) | vinculos_cilindro_lacre | 30 (todos ativos) |
+| usuario_perfis | 0 (3 após o script 002) | vinculos_dispositivo_lacre | 30 (todos ativos) |
+| destinatarios | 20 | entregas | 10 (todas CONCLUIDA) |
+| locais_entrega | 20 | entrega_itens | 30 |
+| cilindros | 50 | custodias | 30 (todas ativas) |
+| lacres | 50 | movimentacoes | 0 |
+| dispositivos | 50 | movimentacao_itens | 0 |
+| auditoria | 3 | | |
+
+A massa é sintética e destinada exclusivamente a desenvolvimento e testes. As incoerências encontradas e a correção estão na seção 17.2.
 
 ---
 
@@ -238,7 +249,9 @@ A massa é sintética e destinada exclusivamente a desenvolvimento e testes.
 - A tabela telemetrias atual usa latitude e longitude NUMERIC; migração para PostGIS é necessária antes da geocerca de produção.  
 - Views de dashboard e última posição serão criadas depois dos testes CRUD.  
 - Triggers de auditoria e atualização automática serão criadas depois da API inicial.  
-- Índices únicos parciais para vínculos e custódia ativa devem ser confirmados no schema antes da produção.  
+- Índices únicos parciais confirmados no dump: `uq_cilindro_vinculo_ativo`, `uq_lacre_vinculo_ativo`, `uq_dispositivo_ativo`, `uq_lacre_dispositivo_ativo` e `uq_custodia_ativa` (RN04, RN05 e custódia ativa única).
+- A extensão PostGIS já está instalada no banco, embora ainda não usada pelas tabelas.
+- As tabelas não geravam UUID sozinhas (sem `DEFAULT`); corrigido pelo script 001.  
 - O banco possui apenas três usuários de teste; os demais serão criados pela API.  
 - Políticas de RLS, backup, retenção, LGPD e observabilidade devem ser fechadas antes da publicação.
 
@@ -308,3 +321,47 @@ NestJS + TypeScript + PostgreSQL + Prisma (ou TypeORM após decisão) + JWT + Sw
 
 ---
 
+---
+
+## 17. Revisão da entrega E (06/10/2026)
+
+Análise do dump `FluxID.sql` de 23/09/2026 e ajustes aprovados por **Natã da Silva Baracho**. Os scripts ficam em `sql/fluxid/`, podem ser executados mais de uma vez e rodam em transação. Foram validados num servidor PostgreSQL 18.6 temporário, separado do banco principal: restauração do dump sem erros, duas execuções seguidas (a segunda sem nenhuma alteração) e testes das regras novas.
+
+### 17.1 Ajustes de estrutura — `001_ajustes_estrutura.sql`
+
+| Ajuste | Motivo |
+| --- | --- |
+| `DEFAULT gen_random_uuid()` no `id` das 21 tabelas | O banco passa a gerar os UUIDs; a API não precisa |
+| Índice `idx_telemetria_dispositivo_data (dispositivo_id, data_coleta DESC)` | Última posição de cada dispositivo (RNF08) |
+| `eventos_lacre.message_id`, único quando informado | Idempotência dos eventos vindos da Oxide |
+| Remoção de `idx_dispositivos_hardware` | Redundante: o `UNIQUE` de `identificador_hardware` já cria índice |
+| `dispositivos.api_key_hash` (SHA-256 em hexadecimal), único quando informado | Chave do dispositivo guardada só como hash (RNF04) |
+| `CHECK` de faixa em `telemetrias` e `locais_entrega` (latitude -90 a 90, longitude -180 a 180) | Mesma regra da API Oxide |
+
+### 17.2 Correção da massa de testes — `002_correcao_massa_de_testes.sql`
+
+| Incoerência encontrada | Correção |
+| --- | --- |
+| Empresas reais (White Martins, Air Liquide) e seus domínios num repositório público | ORG-000002 → **Alfa Gases Industriais Ltda**; ORG-000003 → **Beta Gases Medicinais Ltda**; e-mails em `.teste`; usuários renomeados |
+| 5 cilindros reprovados no teste hidrostático circulando | 2 disponíveis → `MANUTENCAO`; nos 3 que estão com cliente, o teste passa a `APROVADO` (entregas e custódias preservadas) |
+| 10 lacres com violação e alerta crítico aberto ainda `INSTALADO` (RN08) | → `SUSPEITA_VIOLACAO` |
+| Todos os ativos na mesma organização (RN22 sem massa de teste) | 20 cilindros, 20 lacres e 20 dispositivos sem vínculo → Beta; os 30 conjuntos vinculados ficam na Alfa. Verificado: nenhuma mistura de organizações em vínculos, entregas, alertas ou custódias |
+| Usuários sem perfil e perfis sem permissão | Matriz aplicada: FLUXID_MASTER 10 permissões; ORG_ADMIN 9; SUPERVISOR 7; OPERADOR 5; AUDITOR 2; VISUALIZADOR 1. USR-000001 → FLUXID_MASTER; USR-000002 e USR-000003 → ORG_ADMIN |
+
+Observações que continuam valendo (sem correção nesta entrega):
+
+- 20 dispositivos sem vínculo têm telemetria (80 linhas); não se ligam a nenhum cilindro.
+- Nenhum evento do lacre está ligado a uma telemetria (`telemetria_id` vazio).
+- Movimentações vazias; vencimentos de testes (2030) e revisões (2031) idênticos em todos os registros.
+- Senhas `HASH_PROVISORIO` (sem segredo exposto) e e-mails de teste em `teste.com`.
+
+### 17.3 Como aplicar no banco
+
+1. Fazer backup do banco (pgAdmin > Backup).
+2. No `FluxID_db`, abrir o Query Tool e executar, nesta ordem, `sql/fluxid/001_ajustes_estrutura.sql` e `sql/fluxid/002_correcao_massa_de_testes.sql`.
+3. Gerar um novo dump no formato custom e substituir o `FluxID.sql` do projeto.
+4. Pedir a conferência do novo dump (contagens e verificações da seção 17.2).
+
+### 17.4 Integração com a Oxide
+
+O plano de como cada dado da Oxide vira um registro do FluxID, e as decisões ainda pendentes para o Worker, está em [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md).
