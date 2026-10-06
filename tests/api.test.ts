@@ -687,8 +687,41 @@ async function main() {
   // Seed a pending command
   db.prepare(`
     INSERT INTO commands (command_id, device_id, command_type, status, created_at)
-    VALUES (?, ?, 'LOCK_VALVE', 'PENDENTE', datetime('now'))
+    VALUES (?, ?, 'TRAVAR_VALVULA', 'PENDENTE', datetime('now'))
   `).run(TEST_CMD_ID, TEST_DEVICE_ID);
+
+  await runTest("Banco rejeita comando PENDENTE com tipo fora do catálogo", async () => {
+    let erro = "";
+    try {
+      db.prepare(`
+        INSERT INTO commands (command_id, device_id, command_type, status, created_at)
+        VALUES ('CMD-TEST-TIPO-INVALIDO', ?, 'LIGAR_SIRENE', 'PENDENTE', datetime('now'))
+      `).run(TEST_DEVICE_ID);
+    } catch (error: any) {
+      erro = error.message;
+    }
+    const passed = erro.includes("CHECK constraint failed");
+    return { passed, details: erro || "inserção aceita indevidamente" };
+  });
+
+  await runTest("Banco aceita histórico com tipo antigo e rejeita status desconhecido", async () => {
+    db.prepare(`
+      INSERT INTO commands (command_id, device_id, command_type, status, created_at, executed_at)
+      VALUES ('CMD-TEST-HISTORICO', ?, 'LOCK_VALVE', 'EXECUTADO', datetime('now'), datetime('now'))
+    `).run(TEST_DEVICE_ID);
+    let erro = "";
+    try {
+      db.prepare(`
+        INSERT INTO commands (command_id, device_id, command_type, status, created_at)
+        VALUES ('CMD-TEST-STATUS', ?, 'TRAVAR_VALVULA', 'FALHOU', datetime('now'))
+      `).run(TEST_DEVICE_ID);
+    } catch (error: any) {
+      erro = error.message;
+    }
+    const historico = db.prepare("SELECT 1 FROM commands WHERE command_id = 'CMD-TEST-HISTORICO'").get();
+    const passed = Boolean(historico) && erro.includes("CHECK constraint failed");
+    return { passed, details: `histórico aceito: ${Boolean(historico)}; status FALHOU: ${erro || "aceito indevidamente"}` };
+  });
 
   await runTest("GET /api/v1/iot/commands/:deviceId sem X-API-Key -> 401", async () => {
     const res = await fetch(`${BASE_URL}/api/v1/iot/commands/${TEST_DEVICE_ID}`);
