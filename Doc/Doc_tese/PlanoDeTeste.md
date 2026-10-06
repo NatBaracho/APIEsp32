@@ -1,6 +1,6 @@
 # Plano de Teste — FluxID / Oxide IoT
 
-**Versão:** 1.5
+**Versão:** 1.4
 **Data:** 06/10/2026
 **Escopo:** API Oxide (Node.js + TypeScript + Express + SQLite), sincronização com o PostgreSQL FluxID e API FluxID (NestJS) planejada
 **Validação humana:** Natã da Silva Baracho
@@ -382,18 +382,13 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | FLX-08 | Sem `DELETE` físico em histórico (RN21) | Desativação lógica |
 | FLX-09 | Violação de chave única/estrangeira | Convertida em erro HTTP legível (`409`/`400`) |
 | FLX-10 | Telemetria única por `message_id` (RN14) | Duplicata rejeitada |
-| FLX-11 | Um lacre ativo por cilindro e um dispositivo ativo por lacre (RN04, RN05) | Índices únicos parciais confirmados no schema (**confirmados no dump, entrega E**) |
-| FLX-12 | Custódia ativa única por cilindro | Índice único parcial confirmado (**confirmado no dump, entrega E**) |
+| FLX-11 | Um lacre ativo por cilindro e um dispositivo ativo por lacre (RN04, RN05) | Índices únicos parciais confirmados no schema |
+| FLX-12 | Custódia ativa única por cilindro | Índice único parcial confirmado |
 | FLX-13 | Busca por código, série, UID NFC e identificador de hardware (RF13, RNF14) | Resultados corretos sem expor UUID |
 | FLX-14 | Teste hidrostático e inspeção de lacre (RF11, RF12) | Registro e alerta de vencimento (RN15) |
 | FLX-15 | Auditoria de ações críticas (RN20) | Usuário, instante, entidade, valores anterior e novo |
 | FLX-16 | Contagem contra a massa de teste | Tabelas conferem com a seção 11 do documento FluxID |
 | FLX-17 | Migração para PostGIS (geocerca de produção) | Telemetrias migradas sem perda de coordenadas |
-| FLX-18 | Scripts `sql/fluxid/001` e `002` executados duas vezes seguidas | 1ª execução altera o previsto; 2ª execução sem nenhuma alteração e sem erro (**executado na entrega E**) |
-| FLX-19 | Inserção sem `id` em qualquer tabela | UUID gerado pelo banco (**executado na entrega E**) |
-| FLX-20 | `api_key_hash` repetido em dois dispositivos; latitude fora da faixa; `eventos_lacre.message_id` repetido | Os três rejeitados pelo banco; evento sem `message_id` aceito (**executado na entrega E**) |
-| FLX-21 | Isolamento da massa entre organizações (RN22) | Nenhuma mistura de organizações em vínculos, entregas, alertas e custódias (**executado na entrega E**) |
-| FLX-22 | Coerência de negócio da massa | Nenhum cilindro reprovado circulando; lacres com violação em `SUSPEITA_VIOLACAO`; perfis com permissões (**executado na entrega E**) |
 
 ---
 
@@ -440,7 +435,7 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | --- | --- |
 | Suíte automatizada (`npm test`) | 55 casos (54 testes e 1 de teardown), 55 aprovados em 06/10/2026 |
 | Compilação (`npx tsc --noEmit`) | Aprovada em 06/10/2026 |
-| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas); [Relatorio-de-Teste-2026-10-06-20h00.md](Relatorio-de-Teste-2026-10-06-20h00.md): entrega E (banco FluxID). Todos **aprovados por Natã da Silva Baracho** |
+| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas). Todos **aprovados por Natã da Silva Baracho** |
 | Cobertura da suíte | Dispositivos, autenticação, telemetria, eventos, comandos e alertas (fluxo principal e erros mais comuns) |
 | Lacunas prioritárias | SEG-05, TEL-19, ALT-07/08/12, EVT-05, BD-04/06/11/16 (fora da suíte; cobertos pelo Roteiro) |
 | Entregas futuras | Todos os casos da seção 10 pendentes (funcionalidades ainda não implementadas) |
@@ -495,4 +490,3 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | 1.2 | 06/10/2026 | Ajustes definidos por Natã da Silva Baracho: `last_repeat_message_id` no lugar da tabela `telemetry_position_repeats`; posição repetida responde `200`; `seal_status` na telemetria e repetição só com posição e lacre iguais; `attempt_count` do ESP32 em `device_attempt_count`. Novos casos TEL-23 a TEL-25 e EVT-13; TEL-04, TEL-20, TEL-21, EVT-11, BD-01 e BD-17 revisados; suíte com 50 casos |
 | 1.3 | 06/10/2026 | Entrega A (segurança), decisões de Natã da Silva Baracho: `api_key` fora das respostas de `/devices` (SEG-01), chave do próprio dispositivo em telemetria e eventos (AUT-08/09), sem criação automática de dispositivo (EVT-07, SEG-04); SEG-02 e SEG-03 registrados como decisões aceitas; R4 e R5 mitigados; suíte com 52 casos |
 | 1.4 | 06/10/2026 | Entrega C, decisões de Natã da Silva Baracho: severidade e status do alerta em texto com os valores do FluxID, severidade padrão por tipo, campos antigos ignorados; latitude e longitude juntas e dentro da faixa. ALT-04, ALT-05, ALT-07 a ALT-09, ALT-12, TEL-11, TEL-13 e BD-06 revisados; R3 e R6 resolvidos; suíte com 55 casos |
-| 1.5 | 06/10/2026 | Entrega E (FluxID): FLX-11 e FLX-12 confirmados no dump; novos casos FLX-18 a FLX-22 executados num servidor PostgreSQL temporário |
