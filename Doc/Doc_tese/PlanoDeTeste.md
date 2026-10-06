@@ -1,11 +1,11 @@
 # Plano de Teste — FluxID / Oxide IoT
 
-**Versão:** 1.5
+**Versão:** 1.6
 **Data:** 06/10/2026
 **Escopo:** API Oxide (Node.js + TypeScript + Express + SQLite), sincronização com o PostgreSQL FluxID e API FluxID (NestJS) planejada
 **Validação humana:** Natã da Silva Baracho
 
-> Este plano consolida o que já foi implementado e testado (suíte `tests/api.test.ts`, 55 casos) e o que ainda precisa ser testado conforme o `Checklist-Projeto.md`, o `Banco_FluxID.md` (v3.0) e o `Regras-de-Negocio-e-Banco-Oxide.md`. Cada caso indica sua situação: **Automatizado**, **Manual executado** ou **Pendente**.
+> Este plano consolida o que já foi implementado e testado (suíte `tests/api.test.ts`, 57 casos) e o que ainda precisa ser testado conforme o `Checklist-Projeto.md`, o `Banco_FluxID.md` (v3.0) e o `Regras-de-Negocio-e-Banco-Oxide.md`. Cada caso indica sua situação: **Automatizado**, **Manual executado** ou **Pendente**.
 
 ---
 
@@ -93,7 +93,7 @@ Pré-condição para toda execução: banco com schema criado pelo script do `Ox
 **Saída (aprovação)**
 - 100% dos casos de severidade Alta aprovados.
 - Nenhum defeito crítico ou alto aberto.
-- Suíte automatizada sem falhas (hoje 55/55).
+- Suíte automatizada sem falhas (hoje 57/57).
 - Banco limpo após o teardown (zero registros `DSP-TEST%`).
 
 **Suspensão**
@@ -213,7 +213,9 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 | CMD-10 | `error_message` não textual | `400` | Média | P |
 | CMD-11 | `confirm` de comando de outro dispositivo | `404` | Alta | P |
 | CMD-12 | Ordem de múltiplos comandos pendentes | Crescente por `id` | Média | P |
-| CMD-13 | Não existe endpoint de criação de comando | `404` em `POST /iot/commands` | Baixa | P |
+| CMD-13 | Não existe endpoint de criação de comando (decisão da entrega D: comandos criados pelo sistema, não por rota aberta) | `404` em `POST /iot/commands` | Baixa | M |
+| CMD-14 | Comando `PENDENTE` com tipo fora de `TRAVAR_VALVULA`/`DESTRAVAR_VALVULA` ou status desconhecido | Rejeitado pelo banco (`CHECK constraint failed`); histórico com tipo antigo aceito | Alta | A |
+| CMD-15 | Migração da tabela `commands` antiga | `LOCK_VALVE`/`UNLOCK_VALVE` convertidos; pendente com tipo desconhecido vira `ERRO` "tipo de comando descontinuado"; histórico preservado | Alta | M |
 
 ### 6.7 Alertas
 
@@ -256,6 +258,7 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 | BD-14 | Criação do banco pelo script do `Oxidedb.md` em arquivo vazio | Schema equivalente ao criado pela aplicação | Média | P |
 | BD-15 | Teardown | Zero registros `DSP-TEST%` após a suíte | Alta | A |
 | BD-16 | Índice único `idx_devices_api_key` | Existe quando não há chaves duplicadas; inserir chave repetida falha. Com duplicatas pré-existentes, a aplicação sobe e registra aviso | Alta | P |
+| BD-18 | `CHECK` de `commands` | `status` em `PENDENTE`/`EXECUTADO`/`ERRO`; `command_type` do catálogo quando `PENDENTE` | Alta | A |
 | BD-17 | Colunas novas | `telemetry_queue` com `last_repeat_message_id`, `seal_status` e `device_attempt_count` e índice `idx_telemetry_last_repeat_message_id`; `events` com `device_attempt_count` | Média | M |
 
 ---
@@ -421,7 +424,7 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | RN08, RN09 (lacre e abertura) | EVT-04, EVT-05, TEL-23, TEL-24, ALT-05, ESP-07 |
 | RN10, RN11 (geofence e alerta) | GEO-01 a GEO-09, ALT-07 |
 | RN12, RN13 (velocidade e telemetria) | TEL-02, TEL-14, ESP-01 |
-| RN17 (valores controlados) | EVT-03, EVT-06, ALT-03, CMD-04, SYN-11 |
+| RN17 (valores controlados) | EVT-03, EVT-06, ALT-03, CMD-04, CMD-14, BD-18, SYN-11 |
 | RN20, RN21 (auditoria e histórico) | HIS-01, ASC-07, FLX-08, FLX-15, SEG-11 |
 | RN22 (multiempresa) | FLX-04 |
 | RN23 (alertas rastreáveis) | ALT-05, ALT-12, SYN-09 |
@@ -438,9 +441,9 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 
 | Indicador | Valor |
 | --- | --- |
-| Suíte automatizada (`npm test`) | 55 casos (54 testes e 1 de teardown), 55 aprovados em 06/10/2026 |
+| Suíte automatizada (`npm test`) | 57 casos (56 testes e 1 de teardown), 57 aprovados em 06/10/2026 |
 | Compilação (`npx tsc --noEmit`) | Aprovada em 06/10/2026 |
-| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas); [Relatorio-de-Teste-2026-10-06-20h00.md](Relatorio-de-Teste-2026-10-06-20h00.md): entrega E (banco FluxID). Todos **aprovados por Natã da Silva Baracho** |
+| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas); [Relatorio-de-Teste-2026-10-06-20h00.md](Relatorio-de-Teste-2026-10-06-20h00.md): entrega E (banco FluxID); [Relatorio-de-Teste-2026-10-06-20h35.md](Relatorio-de-Teste-2026-10-06-20h35.md): entrega D (catálogo de comandos e tipos de erro). Todos **aprovados por Natã da Silva Baracho** |
 | Cobertura da suíte | Dispositivos, autenticação, telemetria, eventos, comandos e alertas (fluxo principal e erros mais comuns) |
 | Lacunas prioritárias | SEG-05, TEL-19, ALT-07/08/12, EVT-05, BD-04/06/11/16 (fora da suíte; cobertos pelo Roteiro) |
 | Entregas futuras | Todos os casos da seção 10 pendentes (funcionalidades ainda não implementadas) |
@@ -496,3 +499,4 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | 1.3 | 06/10/2026 | Entrega A (segurança), decisões de Natã da Silva Baracho: `api_key` fora das respostas de `/devices` (SEG-01), chave do próprio dispositivo em telemetria e eventos (AUT-08/09), sem criação automática de dispositivo (EVT-07, SEG-04); SEG-02 e SEG-03 registrados como decisões aceitas; R4 e R5 mitigados; suíte com 52 casos |
 | 1.4 | 06/10/2026 | Entrega C, decisões de Natã da Silva Baracho: severidade e status do alerta em texto com os valores do FluxID, severidade padrão por tipo, campos antigos ignorados; latitude e longitude juntas e dentro da faixa. ALT-04, ALT-05, ALT-07 a ALT-09, ALT-12, TEL-11, TEL-13 e BD-06 revisados; R3 e R6 resolvidos; suíte com 55 casos |
 | 1.5 | 06/10/2026 | Entrega E (FluxID): FLX-11 e FLX-12 confirmados no dump; novos casos FLX-18 a FLX-22 executados num servidor PostgreSQL temporário |
+| 1.6 | 06/10/2026 | Entrega D, decisões de Natã da Silva Baracho: catálogo de comandos (`TRAVAR_VALVULA`, `DESTRAVAR_VALVULA`) aplicado no banco, sem rota de criação; novos casos CMD-14, CMD-15 e BD-18; suíte com 57 casos |

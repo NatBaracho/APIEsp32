@@ -11,6 +11,7 @@ Documentos relacionados:
 - [Regras-de-Negocio-e-Banco-Oxide.md](Regras-de-Negocio-e-Banco-Oxide.md): regras detalhadas e schema do SQLite.
 - [Oxidedb.md](Oxidedb.md): script de criação do banco.
 - [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md): como cada dado da Oxide vira um registro do FluxID.
+- [Tipos-de-Erro.md](Tipos-de-Erro.md): catálogo de tipos de erro e ocorrências operacionais (lacre, cilindro, GPS, rota, comunicação, comandos).
 - [Doc_tese/PlanoDeTeste.md](Doc_tese/PlanoDeTeste.md) e [Doc_tese/RoteiroDeTeste.md](Doc_tese/RoteiroDeTeste.md): como a API é testada.
 - Swagger, com a API rodando: `http://<IP_DA_API>:3000/api-docs`.
 
@@ -172,7 +173,9 @@ Rotas de apoio para a equipe: `GET /iot/telemetries` (lista as telemetrias de to
 ```
 
 - A lista traz só comandos `PENDENTE`, do mais antigo para o mais novo.
-- Hoje os comandos são criados direto no banco (não há rota de criação). Os tipos previstos são `TRAVAR_VALVULA` e `DESTRAVAR_VALVULA`; a lista fechada de tipos será implementada numa próxima entrega.
+- Tipos de comando aceitos: `TRAVAR_VALVULA` e `DESTRAVAR_VALVULA`. O firmware precisa reconhecer exatamente esses nomes.
+- Os comandos são criados pelo sistema, não por rota aberta: hoje direto no banco e, no futuro, pelos comandos automáticos (ex.: lacre rompido → `TRAVAR_VALVULA`). Isso evita que qualquer pessoa destrave uma válvula pela API.
+- Comandos ficam só na Oxide; a tabela no FluxID será decidida na fase do Worker.
 
 ## 1.8 Onde cada campo fica no banco
 
@@ -203,7 +206,7 @@ Rotas de apoio para a equipe: `GET /iot/telemetries` (lista as telemetrias de to
 
 ### Comandos e alertas
 
-- `commands`: `command_id`, `device_id`, `command_type`, `status` (`PENDENTE` → `EXECUTADO`/`ERRO`), `created_at`, `executed_at`, `error_message`.
+- `commands`: `command_id`, `device_id`, `command_type` (`TRAVAR_VALVULA`, `DESTRAVAR_VALVULA`), `status` (`PENDENTE` → `EXECUTADO`/`ERRO`), `created_at`, `executed_at`, `error_message`. O banco rejeita comando pendente com outro tipo.
 - `alerts`: `alert_id`, `device_id`, `alert_type`, `severity` (`BAIXA`, `MEDIA`, `ALTA`, `CRITICA`), `status` (`ABERTO`, `EM_ANALISE`, `ENCERRADO`), `title`, `description`, `created_at`, `resolved_at`. Severidade e status usam os mesmos valores do FluxID.
 
 ### Estados da fila
@@ -214,14 +217,14 @@ Rotas de apoio para a equipe: `GET /iot/telemetries` (lista as telemetrias de to
 
 - Worker de sincronização com o FluxID.
 - Cadastro vindo do FluxID (por isso o `POST /devices` provisório).
-- Lista fechada de tipos de comando e criação de comandos pela API.
+- Criação automática de comandos e verificação dos tipos de erro do catálogo (`Tipos-de-Erro.md`), como saída de rota e GPS sem sinal.
 - Rotas para analisar e encerrar alertas.
 - Geofence, comandos automáticos e associação dispositivo → lacre → cilindro.
 
 ## 1.10 Estado atual
 
 - API em funcionamento, validada pela suíte automatizada (`npm test`, 55/55) e pelo Roteiro de Teste completo no `oxide.db` real.
-- Próximas entregas, nesta ordem: catálogo de comandos → associação dispositivo/lacre/cilindro → Worker (depois das decisões P1 a P8 do plano de integração).
+- Próximas entregas: associação dispositivo/lacre/cilindro (B); `alert_type` da Oxide com os códigos em português do catálogo de erros; Worker (depois das decisões P1 a P8 do plano de integração).
 - Pendências conhecidas: firmware do ESP32 precisa enviar `seal_status` e `attempt_count` e tratar as respostas da seção 1.5; `nodemon` com vulnerabilidade apenas em desenvolvimento.
 
 ---
@@ -442,16 +445,32 @@ Compilação aprovada, suíte com 55/55 (três casos novos e um substituído), m
 - Validação registrada em [Relatorio-de-Teste-2026-10-06-20h00.md](Doc_tese/Relatorio-de-Teste-2026-10-06-20h00.md), **aprovada por Natã da Silva Baracho**.
 - Ocorrência no envio: logo após o merge do PR #4, um revert (PR #5) foi mesclado sem intenção e desfez a entrega na `main`. O conteúdo foi reaplicado sem nenhuma alteração por um novo pull request, conferido como idêntico ao aprovado.
 
+### 7.17 Entrega D — catálogo de comandos e tipos de erro (06/10/2026)
+Decisões de Natã da Silva Baracho:
+
+| Tema | Decisão | Implementação |
+| --- | --- | --- |
+| Tipos de comando | Só `TRAVAR_VALVULA` e `DESTRAVAR_VALVULA` | `models/Command.ts` e `CHECK` na tabela `commands` |
+| Regra no banco | Comando `PENDENTE` só com tipo do catálogo; histórico pode guardar tipos antigos; status só `PENDENTE`, `EXECUTADO`, `ERRO` | `CHECK` com migração automática e transacional |
+| Comandos antigos | `LOCK_VALVE` → `TRAVAR_VALVULA`; `UNLOCK_VALVE` → `DESTRAVAR_VALVULA`; pendente desconhecido → `ERRO` "tipo de comando descontinuado" | Migração em `connection.ts` |
+| Criação de comandos | Sem rota aberta (risco de destravar válvula) | Criação pelo banco até os comandos automáticos |
+| Onde ficam | Só na Oxide | Tabela no FluxID decidida na fase do Worker |
+| Tipos de erro | Catálogo único de ocorrências operacionais, em português | Novo `Doc/Tipos-de-Erro.md` v1.0 com 27 códigos, regras de posição e trânsito e fluxo da saída de rota |
+
+Regras de operação definidas no catálogo: o lacre não sai de 10 m do destino final; o cilindro não sai da rota sem desvio justificado antes ou programado (alerta ao motorista e ao gestor, justificativa do motorista, liberação só pelo gestor); em trânsito o lacre fica sempre fechado. Decidido também que o `alert_type` da Oxide passará a usar os códigos em português.
+
+Compilação aprovada, suíte com 57/57 (dois casos novos), migração testada com comandos antigos e Roteiro de Teste v1.6 executado por completo no `oxide.db` real, com checksum idêntico antes e depois. Validação registrada em [Relatorio-de-Teste-2026-10-06-20h35.md](Doc_tese/Relatorio-de-Teste-2026-10-06-20h35.md), **aprovada por Natã da Silva Baracho**.
+
 ## 9. Suíte de testes automatizados (`npm test`)
 
-A suíte `tests/api.test.ts` cobre hoje 55 casos de ponta a ponta:
+A suíte `tests/api.test.ts` cobre hoje 57 casos de ponta a ponta:
 
 1. **Geral & Documentação:** `/`, `/api-docs/` e `/api-docs/swagger-ui-init.js`.
 2. **Dispositivos:** listagem e busca sem `api_key`, `404`, validação `400`, criação `201`, `device_id` duplicado (`409`), `api_key` já usada (`409`) e `active` inválido (`400`).
 3. **Autenticação:** `401` sem header, `401` com chave inválida, `403` para dispositivo inativo e `200` com chave válida.
 4. **Telemetria:** campos obrigatórios (`400`), payload válido (`202`), `message_id` duplicado (`409`), posição repetida (`200`, sem nova linha), posição nova (nova linha), reenvio de posição repetida (`409`), `attempt_count` em `device_attempt_count`, tipo inválido (`400`), dispositivo inexistente (`404`), chave de outro dispositivo (`403`), `seal_status` inválido (`400`), mudança do lacre na mesma posição (nova linha), `attempt_count` negativo (`400`), latitude fora da faixa (`400`), só latitude (`400`) e JSON malformado (`400`).
 5. **Eventos:** sem chave (`401`), campos obrigatórios (`400`), `seal_status` inválido (`400`), evento válido (`202`), `attempt_count` em `device_attempt_count`, dispositivo não cadastrado (`404`, sem criação), chave de outro dispositivo (`403`) e duplicidade (`409`).
-6. **Comandos:** sem chave (`401`), chave de outro dispositivo (`403`), pendentes (`200`), status inválido (`400`), comando inexistente (`404`), confirmação (`200`), reconfirmação (`409`) e lista após confirmação.
+6. **Comandos:** sem chave (`401`), chave de outro dispositivo (`403`), pendentes (`200`), status inválido (`400`), comando inexistente (`404`), confirmação (`200`), reconfirmação (`409`) e lista após confirmação, rejeição pelo banco de comando pendente fora do catálogo e de status desconhecido.
 7. **Alertas:** sem chave (`401`), chave de outro dispositivo (`403`), tipo inválido (`400`), severidade inválida (`400`), criação com severidade padrão e status `ABERTO` (`201`), severidade informada com campos antigos ignorados (`201`) e duplicidade (`409`).
 8. **Limpeza:** remoção dos registros `DSP-TEST%` ao final.
 
