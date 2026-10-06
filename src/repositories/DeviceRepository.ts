@@ -109,21 +109,4 @@ export class DeviceRepository {
 
   }
 
-  ensureDeviceExists(deviceId: string): void {
-
-    const existing = this.findByDeviceId(deviceId);
-
-    if (existing) {
-      return;
-    }
-
-    this.create({
-      device_id: deviceId,
-      api_key: `auto-${deviceId}`,
-      firmware_version: "unknown",
-      active: 1
-    });
-
-  }
-
 }
