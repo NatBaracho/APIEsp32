@@ -5,9 +5,11 @@ import eventRoutes from "./routes/eventRoute";
 import deviceRoutes from "./routes/deviceRoutes";
 import commandRoutes from "./routes/commandRoutes";
 import alertRoutes from "./routes/alertRoutes";
+import syncRoutes from "./routes/syncRoutes";
 import { assignmentRoutes, cylinderRoutes, sealRoutes } from "./routes/assetRoutes";
 import swaggerUi from "swagger-ui-express";
 import openApiSpec from "./docs/openapi";
+import openApiFluxidSpec from "./docs/openapiFluxid";
 import { errorHandler } from "./Middleware/Errohandler";
 
 
@@ -17,7 +19,16 @@ const app = express();
 const API_PREFIX = "/api/v1";
 
 app.use(express.json());
-app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(openApiSpec));
+// serveFiles gera os arquivos de cada página separadamente (com serve, a
+// segunda página sobrescreveria a primeira)
+app.use("/api-docs", swaggerUi.serveFiles(openApiSpec), swaggerUi.setup(openApiSpec));
+// Proposta da API do frontend sobre o FluxID (Doc/Contrato-API-Frontend.md);
+// só documentação, nenhuma rota /api/v1/app existe ainda
+app.use(
+  "/api-docs-fluxid",
+  swaggerUi.serveFiles(openApiFluxidSpec),
+  swaggerUi.setup(openApiFluxidSpec, { customSiteTitle: "API FluxID (proposta)" })
+);
 app.use(`${API_PREFIX}/iot`, telemetryRoutes);
 app.use(`${API_PREFIX}/iot`, eventRoutes);
 app.use(`${API_PREFIX}/iot`, commandRoutes);
@@ -26,6 +37,7 @@ app.use(`${API_PREFIX}/devices`, deviceRoutes);
 app.use(`${API_PREFIX}/seals`, sealRoutes);
 app.use(`${API_PREFIX}/cylinders`, cylinderRoutes);
 app.use(`${API_PREFIX}/assignments`, assignmentRoutes);
+app.use(`${API_PREFIX}/sync`, syncRoutes);
 
 
 try {

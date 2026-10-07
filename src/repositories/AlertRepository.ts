@@ -73,12 +73,18 @@ export class AlertRepository {
       .get(result.lastInsertRowid) as Alert;
   }
 
+  // Toda mudança de status volta o alerta para a fila do Worker
+  // (sync_status PENDING), para o FluxID receber a mudança.
   // Só altera se o alerta ainda estiver no status lido (evita duas
   // atualizações simultâneas passarem pela mesma transição)
   markInAnalysis(alertId: string, currentStatus: AlertStatus): boolean {
     return db.prepare(`
       UPDATE alerts
-      SET status = 'EM_ANALISE'
+      SET status = 'EM_ANALISE',
+          sync_status = 'PENDING',
+          sync_attempt_count = 0,
+          sync_last_error = NULL,
+          sync_next_attempt_at = NULL
       WHERE alert_id = ? AND status = ?
     `).run(alertId, currentStatus).changes > 0;
   }
@@ -94,7 +100,11 @@ export class AlertRepository {
       SET status = 'ENCERRADO',
           resolved_at = CURRENT_TIMESTAMP,
           resolved_by = ?,
-          resolution_note = ?
+          resolution_note = ?,
+          sync_status = 'PENDING',
+          sync_attempt_count = 0,
+          sync_last_error = NULL,
+          sync_next_attempt_at = NULL
       WHERE alert_id = ? AND status = ?
     `).run(resolvedBy, resolutionNote, alertId, currentStatus).changes > 0;
   }

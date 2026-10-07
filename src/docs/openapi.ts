@@ -182,7 +182,8 @@ const openApiSpec = {
     { name: "Alertas", description: "O ESP32 cria alertas com os códigos do catálogo Tipos-de-Erro.md; o gestor lista, analisa e encerra (rotas abertas e provisórias)" },
     { name: "Lacres", description: "Cadastro e estado dos lacres. Cópia provisória do cadastro do FluxID" },
     { name: "Cilindros", description: "Cadastro e estado dos cilindros. Cópia provisória do cadastro do FluxID" },
-    { name: "Vínculos", description: "Dispositivo ↔ lacre e lacre ↔ cilindro, com troca, encerramento e histórico. Nada é apagado" }
+    { name: "Vínculos", description: "Dispositivo ↔ lacre e lacre ↔ cilindro, com troca, encerramento e histórico. Nada é apagado" },
+    { name: "Sincronização", description: "Acompanhamento do Worker Oxide ⇄ FluxID: filas, itens com problema e nova tentativa (rotas abertas e provisórias)" }
   ],
   servers: [
     {
@@ -704,7 +705,55 @@ const openApiSpec = {
         }
       }
     },
-    ...assetPaths
+    ...assetPaths,
+    "/api/v1/sync/status": {
+      get: {
+        tags: ["Sincronização"],
+        summary: "Situação das filas do Worker e últimas rodadas",
+        description: "Para cada fila (telemetry, events, alerts): pendentes, aguardando condição (ex.: vínculo, P3), com nova tentativa agendada, parados para o gestor, enviando e sincronizados",
+        responses: { "200": { description: "Resumo das filas e últimas 5 rodadas (sync_logs)" } }
+      }
+    },
+    "/api/v1/sync/problems": {
+      get: {
+        tags: ["Sincronização"],
+        summary: "Itens com problema numa fila",
+        parameters: [
+          { name: "queue", in: "query", required: true, schema: { type: "string", enum: ["telemetry", "events", "alerts"] } }
+        ],
+        responses: {
+          "200": { description: "Itens PARADO (precisa do gestor), NOVA_TENTATIVA ou AGUARDANDO, com o erro" },
+          "400": { description: "queue inválida" }
+        }
+      }
+    },
+    "/api/v1/sync/retry": {
+      post: {
+        tags: ["Sincronização"],
+        summary: "Mandar um item de volta para a fila",
+        description: "Zera as tentativas; usado pelo gestor depois de corrigir a causa (ex.: cadastrar o dispositivo no FluxID)",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["queue", "key"],
+                properties: {
+                  queue: { type: "string", enum: ["telemetry", "events", "alerts"] },
+                  key: { type: "string", description: "message_id (telemetry, events) ou alert_id (alerts)", example: "MSG-000001" }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          "200": { description: "Item voltou para a fila" },
+          "400": { description: "queue ou key inválidos" },
+          "404": { description: "Item não encontrado ou já sincronizado" }
+        }
+      }
+    }
   }
 };
 

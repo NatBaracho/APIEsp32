@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { DeviceRepository } from "../repositories/DeviceRepository";
+import { deviceAcceptsKey, hashApiKey } from "../utils/apiKeyHash";
 
 const deviceRepository =
   new DeviceRepository();
@@ -24,7 +25,8 @@ export function apiKeyMiddleware(
   }
 
   const device =
-    deviceRepository.findByApiKey(apiKey);
+    deviceRepository.findByApiKey(apiKey) ??
+    deviceRepository.findByApiKeyHash(hashApiKey(apiKey));
 
   if (!device) {
 
@@ -81,7 +83,7 @@ export function apiKeyDeviceMiddleware(
     return;
   }
 
-  if (device.api_key !== req.header("X-API-Key")) {
+  if (!deviceAcceptsKey(device, req.header("X-API-Key") ?? "")) {
     res.status(403).json({
       success: false,
       message: "API Key não pertence ao dispositivo"

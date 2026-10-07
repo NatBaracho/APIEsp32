@@ -49,12 +49,12 @@ X-API-Key: abc123
 
 - `X-API-Key` é a chave de autenticação do equipamento.
 - Ela identifica quem está enviando os dados.
-- Em termos de banco, essa chave fica na tabela `devices`, no campo `api_key`.
+- Em termos de banco, essa chave fica na tabela `devices`: no campo `api_key` (cadastro provisório) ou só como hash em `api_key_hash` (cadastro oficial vindo do FluxID). **Para o firmware não muda nada:** ele sempre envia a chave em texto no header.
 - O backend valida essa chave antes de aceitar os dados do ESP32.
 
 A chave deve ser a **do próprio dispositivo** informado em `device_id`. Com a chave de outro dispositivo, a API responde `403` com `{"success":false,"message":"API Key não pertence ao dispositivo"}`.
 
-O dispositivo precisa estar **cadastrado antes** de enviar dados. O cadastro oficial fica no FluxID; até o Worker trazer esse cadastro, ele é feito uma vez em `POST /api/v1/devices` com `device_id` e `api_key` (veja a seção 1.3 do [Desenvolvimento.md](Desenvolvimento.md)). Dispositivo não cadastrado recebe `404` com `{"success":false,"message":"Dispositivo não encontrado"}`; a API não cria dispositivos automaticamente.
+O dispositivo precisa estar **cadastrado antes** de enviar dados. O cadastro oficial fica no FluxID, e o Worker o traz para a Oxide a cada 5 minutos. Quem cadastra no FluxID gera a chave e a passa para o firmware (o FluxID guarda só o hash). Para testes sem o FluxID, o cadastro provisório continua em `POST /api/v1/devices` com `device_id` e `api_key` (veja a seção 1.3 do [Desenvolvimento.md](Desenvolvimento.md)). Dispositivo não cadastrado recebe `404` com `{"success":false,"message":"Dispositivo não encontrado"}`; a API não cria dispositivos automaticamente.
 
 O lacre e o cilindro do dispositivo também são cadastrados e vinculados pela equipe (rotas `/api/v1/seals`, `/api/v1/cylinders` e `/api/v1/assignments`, seção 1.3 do Desenvolvimento). O firmware **não precisa enviar** `lacre_id` nem `cilindro_id`: a API preenche esses campos pelo vínculo ativo e ignora o que vier no payload. Se o dispositivo enviar sem lacre vinculado, a telemetria é aceita normalmente e fica marcada com `error_type = DISPOSITIVO_SEM_LACRE` para a equipe corrigir o cadastro.
 

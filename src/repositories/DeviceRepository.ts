@@ -33,9 +33,22 @@ export class DeviceRepository {
       .prepare(`
         SELECT *
         FROM devices
-        WHERE api_key = ?
+        WHERE api_key = ? AND api_key_hash IS NULL
       `)
       .get(apiKey) as Device | undefined;
+  }
+
+  findByApiKeyHash(
+    apiKeyHash: string
+  ): Device | undefined {
+
+    return db
+      .prepare(`
+        SELECT *
+        FROM devices
+        WHERE api_key_hash = ?
+      `)
+      .get(apiKeyHash) as Device | undefined;
   }
 
   findById(id: number): Device | undefined {

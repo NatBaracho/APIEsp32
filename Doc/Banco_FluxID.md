@@ -2,7 +2,7 @@
 # FluxID  
 ### Especificação Atualizada do MVP e do Banco de Dados  
 **Segurança • Rastreabilidade • Controle Operacional**  
-**Versão 3.2 — revisada em 07/10/2026: alerta sempre ligado ao lacre e ao cilindro (script 003)**  
+**Versão 3.3 — revisada em 07/10/2026: integração com a Oxide (script 004) e estruturas do frontend (script 005)**  
 Documento substitutivo da versão 1 anexada
 
 ---
@@ -358,9 +358,16 @@ Observações que continuam valendo (sem correção nesta entrega):
 ### 17.3 Como aplicar no banco
 
 1. Fazer backup do banco (pgAdmin > Backup).
-2. No `FluxID_db`, abrir o Query Tool e executar, nesta ordem, `sql/fluxid/001_ajustes_estrutura.sql`, `sql/fluxid/002_correcao_massa_de_testes.sql` e `sql/fluxid/003_alertas_cilindro_obrigatorio.sql` (seção 17.5).
+2. No `FluxID_db`, abrir o Query Tool e executar, nesta ordem:
+   1. `sql/fluxid/001_ajustes_estrutura.sql`;
+   2. `sql/fluxid/002_correcao_massa_de_testes.sql`;
+   3. `sql/fluxid/003_alertas_cilindro_obrigatorio.sql` (seção 17.5);
+   4. `sql/fluxid/004_integracao_oxide.sql` (seção 17.6);
+   5. `sql/fluxid/005_estruturas_do_frontend.sql` (seção 17.7).
+
+   Os cinco podem rodar mais de uma vez. Se um deles parar com erro, nada daquele script é alterado.
 3. Gerar um novo dump no formato custom e substituir o `sql/fluxid/FluxID.sql` do projeto (o dump fica junto dos scripts desde 07/10/2026).
-4. Pedir a conferência do novo dump (contagens e verificações das seções 17.2 e 17.5).
+4. Pedir a conferência do novo dump (contagens e verificações das seções 17.2, 17.5, 17.6 e 17.7).
 
 ### 17.4 Integração com a Oxide
 
@@ -384,4 +391,44 @@ Resultado no servidor temporário (dump + `001` + `002`): os 10 alertas de teste
 
 **Validação também no Docker (07/10/2026):** com a virtualização habilitada, os scripts foram aplicados num container `fluxid-analise` (imagem `postgis/postgis:18-3.6`, porta `127.0.0.1:54329`, senha gerada na hora e não registrada). O container tem dois bancos: `FluxID_original` (dump sem alteração) e `FluxID_db` (dump + `001`, `002` e `003`). Resultado igual ao do servidor temporário: `001` sem erros, `002` corrigiu a massa, `003` preencheu os 10 alertas e, executado de novo, não alterou nada. O container fica disponível para análise no pgAdmin e no Docker Desktop.
 
-**Para uma entrega futura (aprovado):** gatilho que confere se o par lacre + cilindro gravado no alerta tinha mesmo vínculo naquela data (hoje a garantia vem do script e do Worker; um alerta digitado à mão com o par errado ainda seria aceito).
+**Gatilho do par lacre + cilindro (aprovado como entrega futura):** implementado no script `004` (seção 17.6).
+
+### 17.6 Integração com a Oxide — `004_integracao_oxide.sql` (07/10/2026)
+
+Aplica no banco as decisões P1 a P8 (`Integracao-Oxide-FluxID.md`, seção 5) e o gatilho FLX-26. Testado pela IA no Docker em 07/10/2026 (Roteiro v1.10, sem falhas). **Aguardando a validação de Natã da Silva Baracho.**
+
+| Passo | O que muda | Decisão |
+| --- | --- | --- |
+| (a) | `telemetrias.data_coleta` e `eventos_lacre.ocorrido_em` com `DEFAULT now()` | P1 |
+| (b) | `telemetrias.lacre_id` e `cilindro_id` (com chave estrangeira) e índice `(cilindro_id, data_coleta)` | Mapa: onde está cada lacre e cilindro |
+| (c) | Tabela `telemetrias_quarentena` (telemetria sem posição, `motivo = SEM_POSICAO`) | P2 |
+| (d) | Tabela `eventos_dispositivo`; em `eventos_lacre`, as colunas `dispositivo_id`, `codigo_erro` e `payload_raw` | P4 |
+| (e) | `CHECK` de `alertas.tipo` com os 28 códigos do catálogo. Tipos antigos convertidos: `VIOLACAO_LACRE` → `LACRE_VIOLADO`, `ABERTURA_NAO_AUTORIZADA` → `LACRE_ABERTO_SEM_AUTORIZACAO`, `TESTE_HIDROSTATICO` → `TESTE_HIDROSTATICO_VENCIDO`, `REVISAO_LACRE` → `LACRE_REVISAO_VENCIDA` | P5 |
+| (f) | Em `alertas`: `dispositivo_id`, `encerrado_por_nome` e `motivo_encerramento`; `CHECK` de que só o `ENCERRADO` tem data de encerramento | P7 |
+| (g) | Gatilho `trg_alerta_confere_vinculo`: recusa alerta cujo par lacre + cilindro não tinha vínculo em `aberto_em` | FLX-26 |
+| (h) | Conferência: se algum alerta existente violar o gatilho, o script para e lista os códigos | — |
+
+Resultado no Docker (dump + `001` a `004`): sem erros; na segunda execução, nada mudou. Os 10 alertas da massa viraram `LACRE_VIOLADO`. O gatilho recusou um alerta de `LCR-000001` com `CIL-000002`.
+
+### 17.7 Estruturas do frontend — `005_estruturas_do_frontend.sql` (07/10/2026)
+
+O FluxID_db é o banco definitivo (decisão de Natã da Silva Baracho, 07/10/2026). O frontend (repositório `fluxid_integra2026`) foi feito sobre um banco de teste no Supabase, com tabelas que o FluxID não tinha. O `005` replica no FluxID, no padrão dele (português), o que as telas de cilindros do frontend (etapa 006) usam e que não deixa dúvida. **Proposta para validar com o responsável pelo frontend.**
+
+| Frontend (Supabase) | FluxID (`005`) | Observação |
+| --- | --- | --- |
+| `cylinder_types` | `tipos_cilindro` (gás, capacidade e unidade, classificação `MEDICINAL`/`INDUSTRIAL`, ativo) | Os cilindros atuais **não** recebem tipo: a massa diz só "OXIGENIO" e não informa se é medicinal ou industrial |
+| `cylinders` (fabricante, pressão, motivo da inativação, versão) | `cilindros.tipo_cilindro_id`, `fabricante`, `pressao_trabalho_bar`, `motivo_inativacao` (`BAIXADO`, `EXTRAVIADO`, `CONDENADO`, `OUTRO`, só com `INATIVO`), `versao` | — |
+| `cylinder_identifiers` | `identificadores_cilindro` (`QR_CODE`, `DATA_MATRIX`, `NFC`, `NUMERO_CASCO`; desativar exige justificativa; um valor ativo por organização) | Nunca apagados |
+| `cylinder_tests` (laudo, retificação, imutável) | `testes_hidrostaticos.numero_laudo`, `retifica_teste_id`, `justificativa_retificacao`; teste não pode ser alterado nem apagado | Erro se corrige com outro teste que retifica |
+| `cylinder_events` | `historico_cilindro` (sequência por cilindro, imutável, origem `USUARIO`/`OXIDE`/`SISTEMA`) | Integrado com a Oxide: vínculo e desvínculo de lacre e alerta registrado ou encerrado entram sozinhos, por gatilho |
+
+O histórico inicial foi montado só com fatos que já estavam no banco: criação do cilindro, vínculos com lacre e alertas. A criação vem sempre primeiro, porque na massa os vínculos começam em 25/07/2026, antes da data de criação dos cilindros (23/09/2026, dia da geração do dump).
+
+Resultado no Docker (dump + `001` a `005`): sem erros; o `005` rodado de novo não mudou nada; 90 eventos no histórico inicial; os gatilhos registraram um alerta vindo da Oxide e o encerramento dele; alterar o histórico foi recusado.
+
+**Ficou de fora, para decidir com o frontend:**
+
+1. **Situação de estoque** (`in_stock`/`out_of_stock` no frontend) × `cilindros.status` do FluxID (`DISPONIVEL`, `COM_CLIENTE`...): os dois conceitos se sobrepõem.
+2. **Classificação dos tipos** dos cilindros já cadastrados (medicinal ou industrial).
+3. **Login, sessões, convites, recuperação de senha e limites de tentativa** (tabelas privadas do Supabase): dependem de como será o login da API do frontend.
+4. **Papéis por organização** (`memberships`/`membership_roles` no frontend) × `usuario_perfis` no FluxID.

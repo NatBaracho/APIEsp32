@@ -1,60 +1,41 @@
 import db from "../database/connection";
 
+export type SyncLogStatus = "RUNNING" | "OK" | "PARCIAL" | "FALHOU";
+
+export interface SyncLog {
+  id: number;
+  started_at: string;
+  finished_at: string | null;
+  status: SyncLogStatus;
+  log_message: string | null;
+}
+
+// Uma linha por rodada do Worker
 export class SyncLogRepository {
 
-  start(
-    startedAt: string,
-    status: string = "PROCESSING"
-  ): number {
-
+  start(): number {
     const result = db.prepare(`
-      INSERT INTO sync_logs (
-        started_at,
-        status
-      )
-      VALUES (
-        ?,
-        ?
-      )
-    `).run(
-      startedAt,
-      status
-    );
+      INSERT INTO sync_logs (status) VALUES ('RUNNING')
+    `).run();
 
     return Number(result.lastInsertRowid);
   }
 
-  finish(
-    id: number,
-    finishedAt: string,
-    status: string,
-    message?: string
-  ): void {
-
+  finish(id: number, status: SyncLogStatus, message: string): void {
     db.prepare(`
       UPDATE sync_logs
-      SET
-        finished_at = ?,
-        status = ?,
-        log_message = ?
+      SET finished_at = CURRENT_TIMESTAMP, status = ?, log_message = ?
       WHERE id = ?
-    `).run(
-      finishedAt,
-      status,
-      message ?? null,
-      id
-    );
-
+    `).run(status, message, id);
   }
 
-  findAll() {
-
+  latest(limit: number): SyncLog[] {
     return db.prepare(`
       SELECT *
       FROM sync_logs
       ORDER BY id DESC
-    `).all();
-
+      LIMIT ?
+    `).all(limit) as SyncLog[];
   }
 
 }

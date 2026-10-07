@@ -1,6 +1,7 @@
 import { server } from "../src/server";
 import db from "../src/database/connection";
 import openApiSpec from "../src/docs/openapi";
+import openApiFluxidSpec from "../src/docs/openapiFluxid";
 
 const BASE_URL = `http://localhost:${process.env.PORT || 3000}`;
 
@@ -82,6 +83,28 @@ async function main() {
     const text = await res.text();
     const passed = res.status === 200 && text.includes("API ESP32");
     return { passed, status: res.status, expectedStatus: 200, details: "Contém título 'API ESP32'" };
+  });
+
+  await runTest("GET /api-docs-fluxid/ (proposta da API do frontend) -> 200 e cada página com o seu conteúdo", async () => {
+    const page = await fetch(`${BASE_URL}/api-docs-fluxid/`);
+    const fluxidInit = await (await fetch(`${BASE_URL}/api-docs-fluxid/swagger-ui-init.js`)).text();
+    const oxideInit = await (await fetch(`${BASE_URL}/api-docs/swagger-ui-init.js`)).text();
+    const passed =
+      page.status === 200 &&
+      fluxidInit.includes("PROPOSTA") && fluxidInit.includes("query-cylinders") &&
+      oxideInit.includes("API ESP32") && !oxideInit.includes("PROPOSTA");
+    return { passed, status: page.status, expectedStatus: 200, details: "proposta e API atual em páginas separadas" };
+  });
+
+  await runTest("Proposta FluxID: toda função tem grupo declarado e ainda não existe rota /api/v1/app", async () => {
+    const spec = openApiFluxidSpec as any;
+    const declared = new Set((spec.tags ?? []).map((tag: any) => tag.name));
+    const semGrupo = Object.entries<any>(spec.paths)
+      .filter(([, ops]) => !Object.values<any>(ops).every(op => (op.tags ?? []).length > 0 && op.tags.every((t: string) => declared.has(t))))
+      .map(([path]) => path);
+    const res = await fetch(`${BASE_URL}/api/v1/app/query-cylinders`, { method: "POST" });
+    const passed = semGrupo.length === 0 && Object.keys(spec.paths).length === 21 && res.status === 404;
+    return { passed, status: res.status, expectedStatus: 404, details: `${Object.keys(spec.paths).length} funções; sem grupo: ${semGrupo.join(",") || "nenhuma"}` };
   });
 
   await runTest("Swagger: toda rota tem um grupo declarado (sem grupo default)", async () => {
@@ -1243,6 +1266,73 @@ async function main() {
     const res = await api("POST", "/seals/LCR-TEST-1/status", { status: "INSTALADO" });
     const passed = res.status === 409;
     return { passed, status: res.status, expectedStatus: 409, details: res.json.message };
+  });
+
+  // Group 10: Integration with FluxID (Worker queues, hashed keys)
+  console.log("\n--- [10] Integração com o FluxID ---");
+
+  const HASH_DEVICE_ID = "DSP-TEST-HASH";
+  const HASH_DEVICE_KEY = "key-test-hash-12345";
+
+  await runTest("GET /sync/status -> 200 com as filas telemetry, events e alerts", async () => {
+    const res = await api("GET", "/sync/status");
+    const filas = (res.json.filas ?? []).map((f: any) => f.queue).join(",");
+    const passed = res.status === 200 && filas === "telemetry,events,alerts" && Array.isArray(res.json.ultimas_rodadas);
+    return { passed, status: res.status, expectedStatus: 200, details: filas };
+  });
+
+  await runTest("GET /sync/problems com fila inválida -> 400; fila válida -> 200", async () => {
+    const bad = await api("GET", "/sync/problems?queue=xyz");
+    const ok = await api("GET", "/sync/problems?queue=alerts");
+    const passed = bad.status === 400 && ok.status === 200 && Array.isArray(ok.json.itens);
+    return { passed, status: ok.status, expectedStatus: 200, details: `inválida=${bad.status}` };
+  });
+
+  await runTest("POST /sync/retry sem dados -> 400; item inexistente -> 404", async () => {
+    const bad = await api("POST", "/sync/retry", { queue: "telemetry" });
+    const missing = await api("POST", "/sync/retry", { queue: "telemetry", key: "MSG-NAO-EXISTE" });
+    const passed = bad.status === 400 && missing.status === 404;
+    return { passed, status: missing.status, expectedStatus: 404, details: `sem key=${bad.status}` };
+  });
+
+  await runTest("POST /sync/retry devolve à fila item parado (sem gastar tentativa)", async () => {
+    db.prepare(`
+      UPDATE alerts
+      SET sync_status = 'ERROR', sync_attempt_count = 6, sync_last_error = 'teste', sync_next_attempt_at = NULL
+      WHERE alert_id = 'ALT-TEST-AUTORUN-003'
+    `).run();
+    const res = await api("POST", "/sync/retry", { queue: "alerts", key: "ALT-TEST-AUTORUN-003" });
+    const row = db.prepare("SELECT sync_status, sync_attempt_count FROM alerts WHERE alert_id = 'ALT-TEST-AUTORUN-003'").get() as any;
+    const passed = res.status === 200 && row?.sync_status === "PENDING" && row?.sync_attempt_count === 0;
+    return { passed, status: res.status, expectedStatus: 200, details: `${row?.sync_status}, tentativas=${row?.sync_attempt_count}` };
+  });
+
+  await runTest("Mudar o status do alerta o devolve à fila do Worker (sync PENDING)", async () => {
+    db.prepare("UPDATE alerts SET sync_status = 'SYNCED' WHERE alert_id = 'ALT-TEST-AUTORUN-003'").run();
+    const res = await api("PATCH", "/iot/alerts/ALT-TEST-AUTORUN-003/status", { status: "EM_ANALISE" });
+    const row = db.prepare("SELECT sync_status FROM alerts WHERE alert_id = 'ALT-TEST-AUTORUN-003'").get() as any;
+    const passed = res.status === 200 && row?.sync_status === "PENDING";
+    return { passed, status: res.status, expectedStatus: 200, details: `sync_status=${row?.sync_status}` };
+  });
+
+  await runTest("Dispositivo com hash do FluxID: chave certa -> 202; chave em texto guardada -> 401", async () => {
+    const { createHash } = await import("crypto");
+    const storedText = "fluxid-sem-chave:teste-autorun";
+    db.prepare(`
+      INSERT INTO devices (device_id, api_key, api_key_hash, firmware_version, active)
+      VALUES (?, ?, ?, '1.0.0', 1)
+    `).run(HASH_DEVICE_ID, storedText, createHash("sha256").update(HASH_DEVICE_KEY).digest("hex"));
+    const body = { message_id: "MSG-TEST-HASH-1", device_id: HASH_DEVICE_ID, latitude: -7.1, longitude: -39.1 };
+    const good = await api("POST", "/iot/telemetries", body, HASH_DEVICE_KEY);
+    const old = await api("POST", "/iot/telemetries", { ...body, message_id: "MSG-TEST-HASH-2" }, storedText);
+    const passed = good.status === 202 && old.status === 401;
+    return { passed, status: good.status, expectedStatus: 202, details: `chave em texto=${old.status}` };
+  });
+
+  await runTest("GET /devices não mostra api_key nem api_key_hash", async () => {
+    const res = await api("GET", `/devices/${HASH_DEVICE_ID}`);
+    const passed = res.status === 200 && !("api_key" in (res.json ?? {})) && !("api_key_hash" in (res.json ?? {}));
+    return { passed, status: res.status, expectedStatus: 200, details: Object.keys(res.json ?? {}).join(",") };
   });
 
   // Post-cleanup of test records
