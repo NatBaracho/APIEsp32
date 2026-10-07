@@ -286,14 +286,14 @@ A inicialização insere, se estiverem ausentes, os códigos `ACTIVE`, `INACTIVE
 
 - Geofence: configuração de áreas e detecção de entrada/saída.
 - Geração automática de comandos.
-- Teste formal do Worker e da integração com o PostgreSQL (implementados e testados pela IA em 07/10/2026; falta a validação).
+- Teste formal do Worker e da integração com o PostgreSQL (implementados, testados e aprovados em 07/10/2026).
 
 ## 8. Banco principal PostgreSQL FluxID
 
 - FluxID é o banco PostgreSQL principal; `oxide.db` é o armazenamento local/buffer usado atualmente pela API.
 - `FluxID.sql` é um dump PostgreSQL em formato custom (`PGDMP`), não um script SQL texto. Ele deve ser inspecionado/restaurado com `pg_restore`, não com `sqlite3` nem `psql -f`.
 - O catálogo do dump identifica o banco `FluxID_db`, PostgreSQL/`pg_dump` 18.6, 214 entradas e as extensões `pgcrypto` e `postgis`.
-- A API grava no SQLite; o Worker (`npm run worker`) envia a fila ao FluxID e traz o cadastro oficial de volta. As regras completas estão em [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md) (v2.0). Teste formal da IA executado em 07/10/2026, sem falhas; falta a validação de Natã da Silva Baracho.
+- A API grava no SQLite; o Worker (`npm run worker`) envia a fila ao FluxID e traz o cadastro oficial de volta. As regras completas estão em [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md) (v2.0). Teste formal sem falhas; aprovado por Natã da Silva Baracho em 07/10/2026.
 
 ### 8.1 Tabelas FluxID relevantes
 
@@ -334,7 +334,7 @@ O fluxo completo, com as tabelas de conversão, as decisões P1 a P8 e as escolh
 - ✅ Políticas aprovadas (P1 a P8) e implementadas no Worker e no script `004`.
 - ✅ A Oxide guarda `api_key_hash` e compara o SHA-256 da `X-API-Key`.
 - ✅ Teste formal do Worker pela IA (07/10/2026, sem falhas).
-- ⏳ Validação de Natã da Silva Baracho.
+- ✅ Validação de Natã da Silva Baracho (07/10/2026).
 - ⏳ Aplicar `001` a `005` no banco principal e gerar um novo dump.
 - Credenciais do PostgreSQL: só no `.env` (fora do git), nunca registradas em documento.
 

@@ -54,7 +54,7 @@ Worker de sincronização (futuro)
 | Banco oficial | PostgreSQL FluxID |
 | Datas | Geradas/controladas pela API ou Worker |
 
-> **Sincronização:** o estado de cada linha fica na própria fila (`status`, `attempt_count`, `last_error`, `next_attempt_at`; nos alertas, as colunas `sync_*`). `sync_logs` registra cada rodada do Worker. A tabela `sync_items` não foi criada: o estado por item já está na fila (decisão a validar).
+> **Sincronização:** o estado de cada linha fica na própria fila (`status`, `attempt_count`, `last_error`, `next_attempt_at`; nos alertas, as colunas `sync_*`). `sync_logs` registra cada rodada do Worker. A tabela `sync_items` não foi criada: o estado por item já está na fila (decisão aprovada por Natã da Silva Baracho em 07/10/2026).
 
 > **Por que existe a tabela `status`:** `events.status` representa o processamento da fila (`PENDING`, `PROCESSING`, `SYNCED`, `ERROR`). Os códigos `ACTIVE`/`INACTIVE` representam o dispositivo (`devices.active` igual a `1`/`0`), e `LOCKED`/`UNLOCKED`/`BROKEN` representam o lacre em `events.seal_status`. O catálogo separado guarda os nomes e descrições sem misturar esses conceitos.
 

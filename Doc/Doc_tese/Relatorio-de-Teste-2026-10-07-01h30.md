@@ -3,8 +3,8 @@
 **Data/hora:** 07/10/2026, publicado às 01:30
 **Executor:** IA (Claude Code, modelo Claude Opus 5.5)
 **Pedido de:** Natã da Silva Baracho, em 07/10/2026: "deixe tudo pronto sobre o lacre e a integração da API com os dois bancos [...] usando o banco de dados FluxID como banco principal. Se for necessário replicar o banco que ele [o frontend] está fazendo, faça, mas que fique integrado com a Oxide. [...] no final gere um relatório para eu validar depois [...] deixe para fazer o teste amanhã antes da integração API e front."
-**Branch:** `feat/integracao-oxide-fluxid`, a partir da `main` `387a18e` (merge do PR #14). **Nada foi enviado ao GitHub:** o envio acontece depois da sua validação.
-**Situação:** teste formal da IA **executado em 07/10/2026, 01:39 às 01:40** (seção 12): 0 falhas. ⏳ **Aguardando a validação de Natã da Silva Baracho.**
+**Branch:** `feat/integracao-oxide-fluxid`, a partir da `main` `387a18e` (merge do PR #14). Enviado no PR #15 (aberto como rascunho e liberado depois da validação).
+**Situação:** teste formal da IA executado em 07/10/2026, 01:39 às 01:40 (seção 12), sem falhas. ✅ **Validação aprovada por Natã da Silva Baracho em 07/10/2026** (seção 13).
 
 ---
 
@@ -261,3 +261,31 @@ Seção 5.10 (Worker):
 | SYN-14 | Rodadas registradas | `PARCIAL`, `PARCIAL`, `OK`, `OK`, `FALHOU` | PASSOU |
 
 **Falhas: 0. Achados: 0.**
+
+## 13. Validação humana (questionário)
+
+Respondido por **Natã da Silva Baracho** em 07/10/2026.
+
+| # | Pergunta | Resposta |
+| --- | --- | --- |
+| 1 | O Worker pode enviar telemetria, eventos e alertas ao FluxID e trazer de volta o cadastro, com o FluxID valendo sobre a cópia local e sem apagar nada? | Sim |
+| 2 | Tentativas: envio inicial + 5 novas tentativas (1 min, 5 min, 15 min, 1 h, 6 h), depois a linha para para o gestor? (I1) | Sim |
+| 3 | FluxID fora do ar: os dados continuam na fila sem gastar tentativa? (I2) | Sim |
+| 4 | Alerta sem lacre/cilindro na data, ou com código já usado no FluxID, para na hora para o gestor? (I3) | Sim |
+| 5 | Basta `sync_logs`, sem `sync_items`? (I4) | Sim |
+| 6 | Quem encerrou o alerta vai como texto até a API do frontend? (I5) | Sim |
+| 7 | O lacre do evento é o do vínculo ativo na chegada ao FluxID? (I6) | Sim |
+| 8 | Rotas `/api/v1/sync/*` abertas e provisórias? (I7) | Sim |
+| 9 | Chave por hash: dispositivo do FluxID só entra com a chave que gera o hash; a chave em texto deixa de valer? | Sim |
+| 10 | O script `004` está aprovado? | Sim |
+| 11 | O script `005` está aprovado como proposta, com F1 a F4 para decidir com o aalissonalmeidaq? | Sim |
+| 12 | O teste formal (Roteiro v1.10, seção 12) está de acordo? | Sim |
+| 13 | Pode registrar a aprovação, atualizar os documentos e tirar o PR #15 do rascunho? | Sim |
+| 14 | O contrato da API para o frontend (v0.1, D1 a D9) pode ser levado ao aalissonalmeidaq como proposta? | Sim |
+| 15 | A página `/api-docs-fluxid` pode ficar no projeto até a API do frontend existir? | Sim |
+
+## 14. Conclusão
+
+**Aprovado.** A integração do lacre com os dois bancos está pronta e validada: o Worker envia ao FluxID tudo o que vem do lacre, traz de volta o cadastro oficial e segue as decisões P1 a P8; a chave do dispositivo passa a ser conferida pelo hash; os scripts `004` e `005` estão aprovados (o `005` como proposta, com F1 a F4 para o frontend); o contrato da API do frontend pode ser levado ao aalissonalmeidaq. Falta aplicar `001` a `005` no `FluxID_db` principal (com Natã) e gerar o novo dump.
+
+> **Validação aprovada por Natã da Silva Baracho em 07/10/2026.**

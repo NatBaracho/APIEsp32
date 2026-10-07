@@ -368,13 +368,13 @@ Implementada na Oxide como cópia provisória do FluxID: rotas abertas `/seals`,
 
 ### 10.5 Worker SQLite → PostgreSQL
 
-> Implementado em 07/10/2026 (`src/worker/`, scripts `004` e `005`). A IA fez uma verificação técnica no FluxID de análise no Docker (relatório [Relatorio-de-Teste-2026-10-07-01h30.md](Relatorio-de-Teste-2026-10-07-01h30.md)); o **teste formal** destes casos foi feito pela IA na mesma madrugada (Roteiro v1.10, seção 5.10, sem falhas); falta a validação humana. Os casos INT são automatizados na suíte.
+> Implementado em 07/10/2026 (`src/worker/`, scripts `004` e `005`). A IA fez uma verificação técnica no FluxID de análise no Docker (relatório [Relatorio-de-Teste-2026-10-07-01h30.md](Relatorio-de-Teste-2026-10-07-01h30.md)); o **teste formal** destes casos foi feito pela IA na mesma madrugada (Roteiro v1.10, seção 5.10, sem falhas); aprovado por Natã da Silva Baracho em 07/10/2026. Os casos INT são automatizados na suíte.
 
 | ID | Caso | Esperado |
 | --- | --- | --- |
 | SYN-01 | Sincronização de itens `PENDING` | Marcados `SYNCED`; dados corretos no destino |
 | SYN-02 | Reprocessamento do mesmo lote | Sem duplicar (idempotência por `message_id`) |
-| SYN-03 | PostgreSQL indisponível | Rodada `FALHOU` em `sync_logs`; itens continuam `PENDING` **sem gastar tentativa** (escolha I2, a validar) |
+| SYN-03 | PostgreSQL indisponível | Rodada `FALHOU` em `sync_logs`; itens continuam `PENDING` **sem gastar tentativa** (escolha I2, aprovada) |
 | SYN-04 | Recuperação após queda | Sem perda e sem duplicidade |
 | SYN-05 | Falha no meio do lote | Transação garante consistência |
 | SYN-06 | Telemetria sem GPS | Vai para `telemetrias_quarentena` (P2); `data_coleta` é a hora de chegada (P1) |
@@ -487,9 +487,9 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 
 | Indicador | Valor |
 | --- | --- |
-| Suíte automatizada (`npm test`) | 96 casos (95 testes e 1 de teardown), 96 aprovados em 07/10/2026 (teste formal da IA com o Roteiro v1.10; aguarda validação) |
+| Suíte automatizada (`npm test`) | 96 casos (95 testes e 1 de teardown), 96 aprovados em 07/10/2026 (teste formal com o Roteiro v1.10; aprovado por Natã da Silva Baracho) |
 | Compilação (`npx tsc --noEmit`) | Aprovada em 06/10/2026 |
-| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas); [Relatorio-de-Teste-2026-10-06-20h00.md](Relatorio-de-Teste-2026-10-06-20h00.md): entrega E (banco FluxID); [Relatorio-de-Teste-2026-10-06-20h35.md](Relatorio-de-Teste-2026-10-06-20h35.md): entrega D (catálogo de comandos e tipos de erro); [Relatorio-de-Teste-2026-10-06-21h31.md](Relatorio-de-Teste-2026-10-06-21h31.md): entrega B (associação); [Relatorio-de-Teste-2026-10-06-23h40.md](Relatorio-de-Teste-2026-10-06-23h40.md): alertas em português, análise e encerramento; [Relatorio-de-Teste-2026-10-07-00h15.md](Relatorio-de-Teste-2026-10-07-00h15.md): FluxID, alerta com cilindro e lacre obrigatórios; [Relatorio-de-Teste-2026-10-07-00h45.md](Relatorio-de-Teste-2026-10-07-00h45.md): grupos do Swagger e FluxID no Docker; [Relatorio-de-Teste-2026-10-07-01h30.md](Relatorio-de-Teste-2026-10-07-01h30.md): integração Oxide ⇄ FluxID (verificação técnica, **aguardando validação**). Os demais, **aprovados por Natã da Silva Baracho** |
+| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas); [Relatorio-de-Teste-2026-10-06-20h00.md](Relatorio-de-Teste-2026-10-06-20h00.md): entrega E (banco FluxID); [Relatorio-de-Teste-2026-10-06-20h35.md](Relatorio-de-Teste-2026-10-06-20h35.md): entrega D (catálogo de comandos e tipos de erro); [Relatorio-de-Teste-2026-10-06-21h31.md](Relatorio-de-Teste-2026-10-06-21h31.md): entrega B (associação); [Relatorio-de-Teste-2026-10-06-23h40.md](Relatorio-de-Teste-2026-10-06-23h40.md): alertas em português, análise e encerramento; [Relatorio-de-Teste-2026-10-07-00h15.md](Relatorio-de-Teste-2026-10-07-00h15.md): FluxID, alerta com cilindro e lacre obrigatórios; [Relatorio-de-Teste-2026-10-07-00h45.md](Relatorio-de-Teste-2026-10-07-00h45.md): grupos do Swagger e FluxID no Docker; [Relatorio-de-Teste-2026-10-07-01h30.md](Relatorio-de-Teste-2026-10-07-01h30.md): integração Oxide ⇄ FluxID. Todos **aprovados por Natã da Silva Baracho** |
 | Cobertura da suíte | Dispositivos, autenticação, telemetria, eventos, comandos, alertas (criação, listagem, análise e encerramento) e associação |
 | Lacunas prioritárias | SEG-05, TEL-19, ALT-07/08/12, EVT-05, BD-04/06/11/16 (fora da suíte; cobertos pelo Roteiro) |
 | Entregas futuras | Todos os casos da seção 10 pendentes (funcionalidades ainda não implementadas) |

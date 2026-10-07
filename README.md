@@ -98,7 +98,7 @@ A tabela `alerts` armazena alertas associados a dispositivos. `POST /api/v1/iot/
 - [Especificação do banco SQLite Oxide](Doc/Oxidedb.md)
 - [Banco PostgreSQL FluxID](Doc/Banco_FluxID.md) e scripts de ajuste em [`sql/fluxid/`](sql/fluxid)
 - [Integração Oxide ⇄ FluxID (Worker)](Doc/Integracao-Oxide-FluxID.md)
-- [Contrato da API para o frontend](Doc/Contrato-API-Frontend.md) (proposta, aguardando aprovação)
+- [Contrato da API para o frontend](Doc/Contrato-API-Frontend.md) (proposta aprovada pelo backend; falta o frontend)
 - [Catálogo de tipos de erro e ocorrências](Doc/Tipos-de-Erro.md)
 - [Plano de Teste](Doc/Doc_tese/PlanoDeTeste.md)
 - [Roteiro de Teste para IA](Doc/Doc_tese/RoteiroDeTeste.md)
