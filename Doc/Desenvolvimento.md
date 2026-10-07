@@ -12,6 +12,7 @@ Documentos relacionados:
 - [Regras-de-Negocio-e-Banco-Oxide.md](Regras-de-Negocio-e-Banco-Oxide.md): regras detalhadas e schema do SQLite.
 - [Oxidedb.md](Oxidedb.md): script de criação do banco.
 - [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md): como cada dado da Oxide vira um registro do FluxID.
+- [Contrato-API-Frontend.md](Contrato-API-Frontend.md): chamadas que a API vai oferecer ao frontend sobre o FluxID (proposta, aguardando aprovação).
 - [Tipos-de-Erro.md](Tipos-de-Erro.md): catálogo de tipos de erro e ocorrências operacionais (lacre, cilindro, GPS, rota, comunicação, comandos).
 - [Doc_tese/PlanoDeTeste.md](Doc_tese/PlanoDeTeste.md) e [Doc_tese/RoteiroDeTeste.md](Doc_tese/RoteiroDeTeste.md): como a API é testada.
 - Swagger, com a API rodando: `http://<IP_DA_API>:3000/api-docs`.

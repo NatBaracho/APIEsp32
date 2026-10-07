@@ -251,7 +251,7 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 | Decisões de integração (P1 a P8) | Fechadas |
 | Worker e sincronização PostgreSQL | Implementados (07/10/2026); aguardando teste formal e validação |
 | Estruturas do frontend no FluxID | Proposta (script `005`); a validar com o frontend |
-| API do frontend sobre o FluxID | Pendente (próxima etapa) |
+| API do frontend sobre o FluxID | Contrato proposto (`Contrato-API-Frontend.md` v0.1); implementação pendente |
 | Dashboard com mapa | Pendente (requisito definido) |
 | Hardening adicional de segurança | Pendente, fora do MVP atual |
 

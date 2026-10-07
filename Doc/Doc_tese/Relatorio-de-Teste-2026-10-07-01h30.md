@@ -204,7 +204,18 @@ Não é o teste formal, que você pediu para amanhã. É a conferência mínima 
 
 | Tipo | Arquivos |
 | --- | --- |
-| Novos | `sql/fluxid/004_integracao_oxide.sql`, `sql/fluxid/005_estruturas_do_frontend.sql`, `src/worker/` (`config.ts`, `retry.ts`, `fluxid.ts`, `pushTelemetry.ts`, `pushEvents.ts`, `pushAlerts.ts`, `cadastroSync.ts`, `runner.ts`, `index.ts`), `src/repositories/SyncRepository.ts`, `src/controllers/SyncController.ts`, `src/routes/syncRoutes.ts`, `src/utils/apiKeyHash.ts`, `.env.example`, este relatório |
+| Novos | `Doc/Contrato-API-Frontend.md` (proposta do contrato da API para o frontend, pedida por você depois deste relatório; ver seção 10), `sql/fluxid/004_integracao_oxide.sql`, `sql/fluxid/005_estruturas_do_frontend.sql`, `src/worker/` (`config.ts`, `retry.ts`, `fluxid.ts`, `pushTelemetry.ts`, `pushEvents.ts`, `pushAlerts.ts`, `cadastroSync.ts`, `runner.ts`, `index.ts`), `src/repositories/SyncRepository.ts`, `src/controllers/SyncController.ts`, `src/routes/syncRoutes.ts`, `src/utils/apiKeyHash.ts`, `.env.example`, este relatório |
 | Alterados (código) | `src/database/connection.ts`, `src/Middleware/apiKeyMiddleware.ts`, `src/repositories/DeviceRepository.ts`, `AlertRepository.ts`, `syncLogRepository.ts`, `src/services/DeviceService.ts`, `src/models/Device.ts`, `Alert.ts`, `src/server.ts`, `src/docs/openapi.ts`, `tests/api.test.ts`, `package.json`, `package-lock.json` |
 | Atualizados (documentos) | `Integracao-Oxide-FluxID.md` v2.0, `Banco_FluxID.md` v3.3, `Desenvolvimento.md` (1.1, 1.3, 1.8 a 1.10, 7.23, 9, Parte 3), `Oxidedb.md` v1.7, `Regras-de-Negocio-e-Banco-Oxide.md`, `Checklist-Projeto.md`, `ESP32-envio-de-dados.md`, `README.md`, `PlanoDeTeste.md` v1.11, `RoteiroDeTeste.md` v1.10 |
 | Fora do git | `.env` (FluxID de análise no Docker) e o `oxide.db` real, que não foi tocado |
+
+## 10. Documento novo: contrato da API para o frontend
+
+Pedido por você depois deste relatório ("aproveite, faça hoje se necessário"). O arquivo [Contrato-API-Frontend.md](../Contrato-API-Frontend.md) (v0.1) é uma **proposta** para você e o aalissonalmeidaq aprovarem antes da API do frontend:
+
+- A API **imita o jeito como o frontend já chama o servidor**: mesmos nomes de função, corpo e códigos. O frontend muda o endereço base e o login.
+- Lista cada chamada (login, permissões, cilindros, lacres, mapa, alertas, visão geral, comandos) e a tabela do FluxID que a atende.
+- Traz 9 decisões (D1 a D9) com recomendação; elas incluem as F1 a F4 da seção 4.2.
+- Nada foi implementado: é só o contrato.
+
+Pergunta extra para o questionário de amanhã: **14.** O contrato v0.1 pode ser levado ao aalissonalmeidaq como proposta?
