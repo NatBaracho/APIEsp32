@@ -158,7 +158,8 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ Teste completo da API e do banco Oxide no `oxide.db` real, com backup e restauração (06/10/2026).
 - ✅ Dependência não usada `sqlite3` removida.
 - [ ] Atualizar o `nodemon` quando houver versão sem a vulnerabilidade do `braces` (3 alertas altos no `npm audit`, só em desenvolvimento).
-- [ ] Verificar a estrutura do FluxID (PostgreSQL) numa rodada de teste antes de iniciar o Worker.
+- ✅ Estrutura do FluxID verificada em PostgreSQL temporário e no Docker (container `fluxid-analise`, 07/10/2026).
+- ✅ Swagger organizado em grupos, com teste que barra rota sem grupo (07/10/2026).
 - [ ] Reexecutar compilação e suíte após concluir as próximas funcionalidades.
 
 **Status:** funcionalidades atuais do MVP validadas; a suíte deve ser repetida a cada nova etapa.
@@ -172,7 +173,7 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ Repositories, services, controllers e rotas (`/seals`, `/cylinders`, `/assignments`).
 - ✅ Entidades inexistentes (`404`), duplicidade e conflitos (`409`) validados; rotas abertas por decisão (ownership não se aplica).
 - ✅ Telemetria preenche `lacre_id`/`cilindro_id` pelo vínculo ativo; `error_type` registra dispositivo sem lacre, lacre sem cilindro e lacre aberto em trânsito.
-- ✅ OpenAPI (grupo "Associação") e documentação atualizados.
+- ✅ OpenAPI e documentação atualizados (no Swagger, grupos Lacres, Cilindros e Vínculos desde 07/10/2026).
 - [ ] Substituir a cópia provisória pelos dados sincronizados do FluxID (Worker).
 
 ### 2. Histórico de associações

@@ -1,6 +1,6 @@
 # Roteiro de Teste para IA — API Oxide (FluxID / Oxide IoT)
 
-**Versão:** 1.8
+**Versão:** 1.9
 **Data:** 06/10/2026
 **Uso:** instruções executáveis para uma IA (ou pessoa) testar a API Oxide e produzir um relatório padronizado.
 **Base:** `Doc/Doc_tese/PlanoDeTeste.md` (IDs dos casos entre colchetes, ex.: `[TEL-03]`).
@@ -136,7 +136,7 @@ curl -s -o /dev/null -w "porta 3000: %{http_code}\n" "$BASE/"   # esperado: 000 
 npm test
 ```
 
-Registre: total, aprovados, reprovados. **Esperado:** 86 casos, 86 aprovados, saída com código `0`.
+Registre: total, aprovados, reprovados. **Esperado:** 87 casos, 87 aprovados, saída com código `0`.
 Se houver reprovação, copie o nome de cada teste que falhou para o relatório.
 
 > A suíte limpa registros `DSP-TEST%` no início e no fim. Os casos manuais abaixo usam `DSP-TEST-RT`, que **também** será limpo na seção 8.
@@ -595,7 +595,7 @@ Marque como `NÃO EXECUTADO – funcionalidade pendente` no relatório (sem tent
 - Rate limiting, hash/rotação de chaves e auditoria (`SEG-09` a `SEG-11`).
 - Testes com hardware (`ESP-03`, `ESP-05`, `ESP-06`) e operação (`OPE-*`).
 
-Se o dump `FluxID.sql` e o `pg_restore` estiverem disponíveis em banco local de análise, a IA pode **apenas verificar a estrutura** (tabelas `dispositivos`, `telemetrias`, `eventos_lacre`, `alertas`, `CHECK` de tipo/severidade/status) para apoiar `SYN-09` a `SYN-11`. Não escrever no banco principal e não registrar credenciais.
+Se o dump `sql/fluxid/FluxID.sql` e o `pg_restore` estiverem disponíveis em banco local de análise (servidor temporário ou o container Docker `fluxid-analise`), a IA pode **apenas verificar a estrutura** (tabelas `dispositivos`, `telemetrias`, `eventos_lacre`, `alertas`, `CHECK` de tipo/severidade/status) para apoiar `SYN-09` a `SYN-11`. Não escrever no banco principal e não registrar credenciais.
 
 ---
 
@@ -671,7 +671,7 @@ Gere o arquivo `Relatorio-de-Teste-AAAA-MM-DD-HHhMM.md` em `Doc/Doc_tese/` (ex.:
 | Indicador | Valor |
 | --- | --- |
 | Compilação | PASSOU/FALHOU |
-| Suíte automatizada | X/86 |
+| Suíte automatizada | X/87 |
 | Casos manuais executados | N |
 | PASSOU | N |
 | FALHOU | N |
@@ -728,3 +728,4 @@ marque NÃO EXECUTADO com o motivo.
 | 1.6 | 06/10/2026 | Entrega D: comandos de teste com `TRAVAR_VALVULA`/`DESTRAVAR_VALVULA`; novo BD-18 (catálogo no banco); suíte com 57 casos |
 | 1.7 | 06/10/2026 | Entrega B: nova seção 5.9 (associação, troca, encerramento, histórico e `error_type`); limpeza inclui lacres, cilindros e vínculos de teste; suíte com 71 casos |
 | 1.8 | 06/10/2026 | Entrega de alertas: tipos do catálogo em português com transição dos nomes antigos, listagem, análise e encerramento (ALT-13 a ALT-20), regras do banco (BD-19), função `patch` no arquivo de ambiente; suíte com 86 casos |
+| 1.9 | 07/10/2026 | Swagger em grupos (GER-06 na suíte); dump em `sql/fluxid/FluxID.sql` e banco de análise no Docker; suíte com 87 casos |

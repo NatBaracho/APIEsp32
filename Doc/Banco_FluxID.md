@@ -359,7 +359,7 @@ Observações que continuam valendo (sem correção nesta entrega):
 
 1. Fazer backup do banco (pgAdmin > Backup).
 2. No `FluxID_db`, abrir o Query Tool e executar, nesta ordem, `sql/fluxid/001_ajustes_estrutura.sql`, `sql/fluxid/002_correcao_massa_de_testes.sql` e `sql/fluxid/003_alertas_cilindro_obrigatorio.sql` (seção 17.5).
-3. Gerar um novo dump no formato custom e substituir o `FluxID.sql` do projeto.
+3. Gerar um novo dump no formato custom e substituir o `sql/fluxid/FluxID.sql` do projeto (o dump fica junto dos scripts desde 07/10/2026).
 4. Pedir a conferência do novo dump (contagens e verificações das seções 17.2 e 17.5).
 
 ### 17.4 Integração com a Oxide
@@ -381,5 +381,7 @@ Decisão de **Natã da Silva Baracho**: todo alerta tem **cilindro e lacre obrig
 Resultado no servidor temporário (dump + `001` + `002`): os 10 alertas de teste estavam sem cilindro; todos foram preenchidos pelo vínculo da data (`LCR-000001` → `CIL-000001` … `LCR-000010` → `CIL-000010`). Segunda execução sem alteração; demais tabelas sem mudança.
 
 **No Worker:** o cilindro e o lacre do alerta vêm do histórico de vínculos do FluxID na data do alerta da Oxide (`created_at`). Sem vínculo naquela data, o alerta não é enviado e fica na Oxide como erro, para o gestor resolver.
+
+**Validação também no Docker (07/10/2026):** com a virtualização habilitada, os scripts foram aplicados num container `fluxid-analise` (imagem `postgis/postgis:18-3.6`, porta `127.0.0.1:54329`, senha gerada na hora e não registrada). O container tem dois bancos: `FluxID_original` (dump sem alteração) e `FluxID_db` (dump + `001`, `002` e `003`). Resultado igual ao do servidor temporário: `001` sem erros, `002` corrigiu a massa, `003` preencheu os 10 alertas e, executado de novo, não alterou nada. O container fica disponível para análise no pgAdmin e no Docker Desktop.
 
 **Para uma entrega futura (aprovado):** gatilho que confere se o par lacre + cilindro gravado no alerta tinha mesmo vínculo naquela data (hoje a garantia vem do script e do Worker; um alerta digitado à mão com o par errado ainda seria aceito).
