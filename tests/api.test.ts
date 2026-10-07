@@ -1,6 +1,7 @@
 import { server } from "../src/server";
 import db from "../src/database/connection";
 import openApiSpec from "../src/docs/openapi";
+import openApiFluxidSpec from "../src/docs/openapiFluxid";
 
 const BASE_URL = `http://localhost:${process.env.PORT || 3000}`;
 
@@ -82,6 +83,28 @@ async function main() {
     const text = await res.text();
     const passed = res.status === 200 && text.includes("API ESP32");
     return { passed, status: res.status, expectedStatus: 200, details: "Contém título 'API ESP32'" };
+  });
+
+  await runTest("GET /api-docs-fluxid/ (proposta da API do frontend) -> 200 e cada página com o seu conteúdo", async () => {
+    const page = await fetch(`${BASE_URL}/api-docs-fluxid/`);
+    const fluxidInit = await (await fetch(`${BASE_URL}/api-docs-fluxid/swagger-ui-init.js`)).text();
+    const oxideInit = await (await fetch(`${BASE_URL}/api-docs/swagger-ui-init.js`)).text();
+    const passed =
+      page.status === 200 &&
+      fluxidInit.includes("PROPOSTA") && fluxidInit.includes("query-cylinders") &&
+      oxideInit.includes("API ESP32") && !oxideInit.includes("PROPOSTA");
+    return { passed, status: page.status, expectedStatus: 200, details: "proposta e API atual em páginas separadas" };
+  });
+
+  await runTest("Proposta FluxID: toda função tem grupo declarado e ainda não existe rota /api/v1/app", async () => {
+    const spec = openApiFluxidSpec as any;
+    const declared = new Set((spec.tags ?? []).map((tag: any) => tag.name));
+    const semGrupo = Object.entries<any>(spec.paths)
+      .filter(([, ops]) => !Object.values<any>(ops).every(op => (op.tags ?? []).length > 0 && op.tags.every((t: string) => declared.has(t))))
+      .map(([path]) => path);
+    const res = await fetch(`${BASE_URL}/api/v1/app/query-cylinders`, { method: "POST" });
+    const passed = semGrupo.length === 0 && Object.keys(spec.paths).length === 21 && res.status === 404;
+    return { passed, status: res.status, expectedStatus: 404, details: `${Object.keys(spec.paths).length} funções; sem grupo: ${semGrupo.join(",") || "nenhuma"}` };
   });
 
   await runTest("Swagger: toda rota tem um grupo declarado (sem grupo default)", async () => {
