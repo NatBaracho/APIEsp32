@@ -91,8 +91,13 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ Registro de `executed_at` e `error_message`.
 - ✅ Validação de API Key e ownership do dispositivo.
 - ✅ Prevenção de reconfirmação.
+- ✅ Catálogo de comandos (`TRAVAR_VALVULA`, `DESTRAVAR_VALVULA`) aplicado no banco, com migração dos comandos antigos (entrega D).
+- ✅ Catálogo de tipos de erro e ocorrências operacionais (`Doc/Tipos-de-Erro.md`).
+- [ ] Comandos automáticos (ex.: lacre rompido → `TRAVAR_VALVULA`).
+- [ ] `alert_type` da Oxide com os códigos em português do catálogo, aceitando os nomes antigos na transição.
+- [ ] Fluxo de saída de rota: rota planejada, desvios justificados, justificativa do motorista e liberação pelo gestor.
 
-**Status:** fluxo manual de comandos implementado e testado.
+**Status:** fluxo manual de comandos implementado e testado, com catálogo de tipos.
 
 ## Alertas
 

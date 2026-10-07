@@ -340,7 +340,7 @@ GET http://<IP_DA_API>/api/v1/iot/commands/DSP-000001
 X-API-Key: auto-DSP-000001
 ```
 
-A resposta é uma lista em ordem de criação. Comandos confirmados deixam de ser retornados.
+A resposta é uma lista em ordem de criação. Comandos confirmados deixam de ser retornados. O campo `command_type` é sempre `TRAVAR_VALVULA` ou `DESTRAVAR_VALVULA`: o firmware deve reconhecer exatamente esses nomes.
 
 ### Confirmar comando executado
 
@@ -358,7 +358,9 @@ Content-Type: application/json
 }
 ```
 
-Em caso de falha, envie `status: "ERRO"` e, opcionalmente, `error_message`.
+Em caso de falha, envie `status: "ERRO"` e, opcionalmente, `error_message`. Os únicos estados aceitos na confirmação são `EXECUTADO` e `ERRO`.
+
+Os tipos de erro e ocorrências que a equipe usa (lacre violado, GPS sem sinal, saída de rota etc.) estão no catálogo [Tipos-de-Erro.md](Tipos-de-Erro.md).
 
 ---
 

@@ -54,22 +54,84 @@ if (missingStatuses.length > 0) {
   seedMissingStatuses();
 }
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS commands (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    command_id TEXT NOT NULL UNIQUE,
-    device_id TEXT NOT NULL,
-    command_type TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'PENDENTE',
-    created_at DATETIME NOT NULL,
-    executed_at DATETIME,
-    error_message TEXT,
-    FOREIGN KEY (device_id)
-      REFERENCES devices(device_id)
-      ON UPDATE CASCADE
-      ON DELETE RESTRICT
-  )
-`);
+// Comando PENDENTE (o que o ESP32 vai executar) só aceita tipos do catálogo;
+// o histórico (EXECUTADO/ERRO) pode guardar tipos anteriores ao catálogo
+function commandsTableSql(tableName: string): string {
+  return `
+    CREATE TABLE ${tableName} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      command_id TEXT NOT NULL UNIQUE,
+      device_id TEXT NOT NULL,
+      command_type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'PENDENTE'
+        CHECK (status IN ('PENDENTE', 'EXECUTADO', 'ERRO')),
+      created_at DATETIME NOT NULL,
+      executed_at DATETIME,
+      error_message TEXT,
+      CHECK (
+        status <> 'PENDENTE'
+        OR command_type IN ('TRAVAR_VALVULA', 'DESTRAVAR_VALVULA')
+      ),
+      FOREIGN KEY (device_id)
+        REFERENCES devices(device_id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT
+    )
+  `;
+}
+
+const commandsTable = db
+  .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'commands'")
+  .get() as { sql: string } | undefined;
+
+if (!commandsTable) {
+  db.exec(commandsTableSql("commands"));
+} else if (!commandsTable.sql.includes("TRAVAR_VALVULA")) {
+  // Tabela anterior ao catálogo: recria com as regras, preservando os
+  // comandos. Nomes antigos em inglês viram os do catálogo; pendente com
+  // tipo desconhecido vira ERRO (o tipo original é mantido no histórico)
+  const migrateCommands = db.transaction(() => {
+    db.exec(commandsTableSql("commands_migrated"));
+    db.exec(`
+      INSERT INTO commands_migrated (
+        id, command_id, device_id, command_type, status,
+        created_at, executed_at, error_message
+      )
+      SELECT
+        id,
+        command_id,
+        device_id,
+        CASE command_type
+          WHEN 'LOCK_VALVE' THEN 'TRAVAR_VALVULA'
+          WHEN 'UNLOCK_VALVE' THEN 'DESTRAVAR_VALVULA'
+          ELSE command_type
+        END,
+        CASE
+          WHEN status = 'PENDENTE'
+            AND command_type NOT IN (
+              'LOCK_VALVE', 'UNLOCK_VALVE', 'TRAVAR_VALVULA', 'DESTRAVAR_VALVULA'
+            )
+          THEN 'ERRO'
+          ELSE status
+        END,
+        created_at,
+        executed_at,
+        CASE
+          WHEN status = 'PENDENTE'
+            AND command_type NOT IN (
+              'LOCK_VALVE', 'UNLOCK_VALVE', 'TRAVAR_VALVULA', 'DESTRAVAR_VALVULA'
+            )
+          THEN 'tipo de comando descontinuado'
+          ELSE error_message
+        END
+      FROM commands
+    `);
+    db.exec("DROP TABLE commands");
+    db.exec("ALTER TABLE commands_migrated RENAME TO commands");
+  });
+
+  migrateCommands();
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS alerts (

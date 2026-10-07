@@ -102,7 +102,9 @@ Respostas do middleware: `401` para chave ausente ou inválida; `403` para dispo
 - Só um comando pertencente ao dispositivo informado e ainda `PENDENTE` pode ser confirmado.
 - Ao confirmar, o banco grava o status e `executed_at = CURRENT_TIMESTAMP`; `error_message` é gravado ou fica nulo.
 - Comando inexistente para o dispositivo retorna `404`; comando já confirmado retorna `409`.
-- A criação de comandos é feita fora das rotas HTTP atuais; não há endpoint de criação.
+- Tipos de comando aceitos: `TRAVAR_VALVULA` e `DESTRAVAR_VALVULA`. O banco rejeita comando `PENDENTE` com outro tipo; comandos já executados ou com erro podem guardar tipos antigos (histórico).
+- A criação de comandos não tem rota HTTP, por decisão de segurança (uma rota aberta permitiria destravar válvulas). Os comandos são criados pelo sistema: hoje direto no banco; no futuro, pelos comandos automáticos.
+- Os comandos ficam só na Oxide; a tabela correspondente no FluxID será decidida na fase do Worker.
 
 ### 4.5 Alertas
 
@@ -183,8 +185,8 @@ A inicialização insere, se estiverem ausentes, os códigos `ACTIVE`, `INACTIVE
 | `id` | Chave primária autoincremental. |
 | `command_id` | `TEXT NOT NULL UNIQUE`. |
 | `device_id` | `TEXT NOT NULL`, FK para `devices.device_id`, `ON UPDATE CASCADE`, `ON DELETE RESTRICT`. |
-| `command_type` | `TEXT NOT NULL`. |
-| `status` | `TEXT NOT NULL DEFAULT 'PENDENTE'`. |
+| `command_type` | `TEXT NOT NULL`; quando `status = 'PENDENTE'`, só `TRAVAR_VALVULA` ou `DESTRAVAR_VALVULA` (`CHECK`). |
+| `status` | `TEXT NOT NULL DEFAULT 'PENDENTE'`, `CHECK` em `PENDENTE`, `EXECUTADO`, `ERRO`. |
 | `created_at` | `DATETIME NOT NULL`, sem default no schema. |
 | `executed_at` | `DATETIME`, opcional. |
 | `error_message` | `TEXT`, opcional. |
@@ -215,6 +217,7 @@ A inicialização insere, se estiverem ausentes, os códigos `ACTIVE`, `INACTIVE
 ## 6. Inicialização e migrações
 
 - A aplicação cria `status`, `commands` e `alerts` quando ausentes e semeia os códigos faltantes de `status`.
+- Se a tabela `commands` ainda não tiver o catálogo, recria a tabela de forma transacional preservando os comandos: `LOCK_VALVE` → `TRAVAR_VALVULA`, `UNLOCK_VALVE` → `DESTRAVAR_VALVULA`, pendente com tipo desconhecido → `ERRO` "tipo de comando descontinuado".
 - Adiciona `device_status_id`, `valve_status_id` e `seal_status_id` a `devices` quando faltarem.
 - Normaliza nomes legados de colunas.
 - Se a tabela `telemetry_queue` tiver colunas ou nulabilidade legadas, recria a tabela de forma transacional e copia os registros, preenchendo defaults para campos novos.
@@ -262,7 +265,7 @@ O dump não contém tabela `commands`. No dump de 23/09/2026 os IDs UUID não ti
 | `telemetry_queue` | `telemetrias` | Mapear `device_id` para `dispositivo_id` UUID. FluxID exige `data_coleta`, latitude e longitude não nulas; Oxide aceita coordenadas ausentes e não tem timestamp de coleta equivalente garantido. Definir rejeição, quarentena ou ajuste de schema/política antes de sincronizar essas linhas. |
 | `events` | `eventos_lacre` | Só há correspondência direta para eventos de lacre; FluxID exige `lacre_id`, usa outro catálogo de tipos. A idempotência usa `eventos_lacre.message_id` (script 001). Definir a resolução do lacre e os eventos sem estado de lacre. |
 | `alerts` | `alertas` | FluxID exige organização, código, UUID, data de abertura e valores textuais de tipo/severidade/status; severidade e status já usam os mesmos valores nas duas bases; os tipos têm nomes diferentes. Definir todos os mapeamentos antes de inserir. |
-| `commands` | Sem tabela no dump | Decidir se comandos permanecem locais ou se será criada uma entidade correspondente no PostgreSQL. |
+| `commands` | Sem tabela no dump | Por enquanto ficam só na Oxide (entrega D); criar ou não uma entidade no PostgreSQL será decidido na fase do Worker. |
 | `telemetry_queue.lacre_id` / `cilindro_id` | Vínculos FluxID | No SQLite esses campos são texto opcional sem FK; não são suficientes para reconstruir os vínculos históricos do FluxID. Usar as tabelas `vinculos_*` com regras temporais próprias. |
 
 Mapeamentos semânticos candidatos de alertas que precisam ser aprovados: `SEAL_BROKEN` → `VIOLACAO_LACRE`, `GEOFENCE_EXIT` → `SAIDA_GEOCERCA`, `LOW_BATTERY` → `BATERIA_BAIXA` e `COMMUNICATION_LOST` → `SEM_COMUNICACAO`. `DEVICE_ERROR` e `COMMAND_FAILURE` não têm valor equivalente explícito no `CHECK` de `alertas.tipo` do dump. As severidades FluxID aceitas são `BAIXA`, `MEDIA`, `ALTA` e `CRITICA`; os estados aceitos são `ABERTO`, `EM_ANALISE` e `ENCERRADO`.

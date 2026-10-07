@@ -1,6 +1,6 @@
 # Roteiro de Teste para IA — API Oxide (FluxID / Oxide IoT)
 
-**Versão:** 1.5
+**Versão:** 1.6
 **Data:** 06/10/2026
 **Uso:** instruções executáveis para uma IA (ou pessoa) testar a API Oxide e produzir um relatório padronizado.
 **Base:** `Doc/Doc_tese/PlanoDeTeste.md` (IDs dos casos entre colchetes, ex.: `[TEL-03]`).
@@ -41,6 +41,7 @@ Você é um executor de testes. Siga este roteiro na ordem, sem pular etapas.
 - Telemetria: latitude e longitude vêm juntas, com latitude entre -90 e 90 e longitude entre -180 e 180 (`400` fora disso).
 - `seal_status` aceita: `LOCKED`, `UNLOCKED`, `BROKEN`.
 - Estados de comando na confirmação: `EXECUTADO`, `ERRO` (comando novo nasce `PENDENTE`).
+- Tipos de comando: `TRAVAR_VALVULA` e `DESTRAVAR_VALVULA`. O banco rejeita comando `PENDENTE` com outro tipo; o histórico (`EXECUTADO`/`ERRO`) pode guardar tipos antigos.
 
 ---
 
@@ -128,7 +129,7 @@ curl -s -o /dev/null -w "porta 3000: %{http_code}\n" "$BASE/"   # esperado: 000 
 npm test
 ```
 
-Registre: total, aprovados, reprovados. **Esperado:** 55 casos, 55 aprovados, saída com código `0`.
+Registre: total, aprovados, reprovados. **Esperado:** 57 casos, 57 aprovados, saída com código `0`.
 Se houver reprovação, copie o nome de cada teste que falhou para o relatório.
 
 > A suíte limpa registros `DSP-TEST%` no início e no fim. Os casos manuais abaixo usam `DSP-TEST-RT`, que **também** será limpo na seção 8.
@@ -303,8 +304,8 @@ source ./roteiro-env.sh
 
 # Inserir comandos de teste direto no banco (não há endpoint de criação). Esperado: ok
 sqlexec "INSERT INTO commands (command_id, device_id, command_type, status, created_at) VALUES
-('CMD-RT-001','DSP-TEST-RT','LOCK_VALVE','PENDENTE',datetime('now')),
-('CMD-RT-002','DSP-TEST-RT','UNLOCK_VALVE','PENDENTE',datetime('now'));"
+('CMD-RT-001','DSP-TEST-RT','TRAVAR_VALVULA','PENDENTE',datetime('now')),
+('CMD-RT-002','DSP-TEST-RT','DESTRAVAR_VALVULA','PENDENTE',datetime('now'));"
 
 # [CMD-12] esperado: 200; CMD-RT-001 antes de CMD-RT-002
 get /iot/commands/DSP-TEST-RT "$KEY"
@@ -445,6 +446,9 @@ sqlexec "INSERT INTO events (message_id, device_id, message_type) VALUES ('EVT-R
 # [BD-08] regra de active. Esperado: erro "CHECK constraint failed"
 sqlexec "INSERT INTO devices (device_id, api_key, active) VALUES ('DSP-TEST-CHK','key-rt-chk',2);"
 
+# [BD-18] catálogo de comandos. Esperado: erro "CHECK constraint failed" (pendente com tipo fora da lista)
+sqlexec "INSERT INTO commands (command_id, device_id, command_type, status, created_at) VALUES ('CMD-RT-TIPO','DSP-TEST-RT','LIGAR_SIRENE','PENDENTE',datetime('now'));"
+
 # [BD-16] índice único de api_key. Esperado: idx_devices_api_key com unique 1;
 # o INSERT falha com "UNIQUE constraint failed: devices.api_key"
 sql "SELECT name, \"unique\" FROM pragma_index_list('devices')"
@@ -560,7 +564,7 @@ Gere o arquivo `Relatorio-de-Teste-AAAA-MM-DD-HHhMM.md` em `Doc/Doc_tese/` (ex.:
 | Indicador | Valor |
 | --- | --- |
 | Compilação | PASSOU/FALHOU |
-| Suíte automatizada | X/55 |
+| Suíte automatizada | X/57 |
 | Casos manuais executados | N |
 | PASSOU | N |
 | FALHOU | N |
@@ -614,3 +618,4 @@ marque NÃO EXECUTADO com o motivo.
 | 1.3 | 06/10/2026 | Nome do relatório passa a incluir a hora da publicação (`AAAA-MM-DD-HHhMM`), a pedido de Natã da Silva Baracho |
 | 1.4 | 06/10/2026 | Entrega A (segurança): AUT-08, AUT-09 e SEG-04 passam a esperar `403`/`404` e SEG-01 a ausência de `api_key`; suíte com 52 casos |
 | 1.5 | 06/10/2026 | Entrega C: alertas com `severity`/`status` em texto (valores do FluxID) e severidade padrão por tipo; ALT-08, ALT-09 e ALT-12 reescritos; TEL-11 e TEL-13 passam a esperar `400`; BD-06 com 1 FK; suíte com 55 casos |
+| 1.6 | 06/10/2026 | Entrega D: comandos de teste com `TRAVAR_VALVULA`/`DESTRAVAR_VALVULA`; novo BD-18 (catálogo no banco); suíte com 57 casos |

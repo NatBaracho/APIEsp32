@@ -4,7 +4,7 @@
 
 **Buffer temporário de ingestão para dispositivos ESP32**
 
-**Versão:** 1.3  
+**Versão:** 1.4  
 **Projeto:** FluxID / Oxide IoT
 
 Inclui instruções de criação, modelo de dados e script SQL completo.
@@ -166,10 +166,16 @@ CREATE TABLE IF NOT EXISTS commands (
     command_id TEXT NOT NULL UNIQUE,
     device_id TEXT NOT NULL,
     command_type TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'PENDENTE',
+    status TEXT NOT NULL DEFAULT 'PENDENTE'
+        CHECK (status IN ('PENDENTE', 'EXECUTADO', 'ERRO')),
     created_at DATETIME NOT NULL,
     executed_at DATETIME,
     error_message TEXT,
+    -- Comando pendente só com tipo do catálogo; histórico pode guardar tipos antigos
+    CHECK (
+        status <> 'PENDENTE'
+        OR command_type IN ('TRAVAR_VALVULA', 'DESTRAVAR_VALVULA')
+    ),
     FOREIGN KEY(device_id)
         REFERENCES devices(device_id)
         ON UPDATE CASCADE

@@ -1,8 +1,11 @@
 import { Request, Response } from "express";
-import { CommandExecutionStatus } from "../models/Command";
+import {
+  CommandExecutionStatus,
+  commandExecutionStatuses
+} from "../models/Command";
 import { CommandService } from "../services/CommandService";
 
-const commandStatuses: CommandExecutionStatus[] = ["EXECUTADO", "ERRO"];
+const commandStatuses: readonly CommandExecutionStatus[] = commandExecutionStatuses;
 
 export class CommandController {
 

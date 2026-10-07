@@ -92,7 +92,9 @@ Eventos **sem** `seal_status` (ex.: `startup`, falha de hardware) não têm tipo
 
 ### 3.4 Comandos
 
-O FluxID não tem tabela de comandos. A decisão (manter só na Oxide ou criar a tabela no FluxID) faz parte da **entrega D**.
+O FluxID não tem tabela de comandos. Decisão da entrega D: os comandos (`TRAVAR_VALVULA`, `DESTRAVAR_VALVULA`) ficam **só na Oxide** por enquanto; criar ou não uma tabela no FluxID será decidido junto com o Worker.
+
+Os tipos de alerta seguirão os códigos em português do catálogo [Tipos-de-Erro.md](Tipos-de-Erro.md), o que reduz as conversões da seção 3.3.
 
 ## 4. Chave de API do dispositivo
 
