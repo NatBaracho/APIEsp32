@@ -1,6 +1,6 @@
 # Catálogo de Tipos de Erro (`error_type`) — FluxID / Oxide
 
-**Versão:** 1.0 — 06/10/2026 — aprovada por Natã da Silva Baracho (entrega D)
+**Versão:** 1.1 — 06/10/2026 — entrega B: `DISPOSITIVO_SEM_LACRE` e registro em `error_type`
 **Público:** equipe do projeto, programador do ESP32 e quem for implementar o Worker e as regras automáticas.
 
 Este catálogo dá **um código único** para cada ocorrência operacional que precisa ser registrada, investigada ou tratada: problemas no lacre, no cilindro, no dispositivo, no GPS, na comunicação, na rota e nos comandos. Hoje esses tipos estão espalhados em três lugares, com nomes diferentes:
@@ -8,6 +8,8 @@ Este catálogo dá **um código único** para cada ocorrência operacional que p
 - `alert_type` na API Oxide (em inglês, ex.: `SEAL_BROKEN`);
 - `alertas.tipo` no FluxID (ex.: `VIOLACAO_LACRE`);
 - `eventos_lacre.tipo` no FluxID (ex.: `VIOLACAO`, `ABERTURA_NAO_AUTORIZADA`).
+
+Desde a entrega B, a API Oxide grava na coluna `error_type` de `telemetry_queue` e `events` o código detectado no recebimento (`LACRE_ABERTO_EM_TRANSITO`, `DISPOSITIVO_SEM_LACRE` ou `LACRE_SEM_CILINDRO`, nessa ordem de prioridade), sem gerar alerta. A geração automática de alertas virá na entrega de regras automáticas.
 
 A coluna **Equivalente atual** mostra onde cada código já existe. A coluna **Situação** diz se a detecção já está implementada:
 
@@ -30,9 +32,10 @@ Limites ainda não decididos estão marcados como **a definir** e não devem ser
 | Código | Significado | Quem detecta / como | Severidade sugerida | Equivalente atual | Situação |
 | --- | --- | --- | --- | --- | --- |
 | `LACRE_VIOLADO` | O lacre foi rompido fisicamente | ESP32 envia `seal_status: BROKEN` | CRITICA | Oxide `SEAL_BROKEN`; FluxID `VIOLACAO_LACRE` e evento `VIOLACAO` | Implementado (recebimento) |
-| `LACRE_ABERTO_EM_TRANSITO` | O lacre foi aberto enquanto o cilindro está em trânsito, onde deve estar sempre fechado (regra 3) | ESP32 envia `seal_status: UNLOCKED` ou `BROKEN` com o cilindro `EM_TRANSITO` ou a entrega `EM_ANDAMENTO` | CRITICA | — (no FluxID, entra como `ABERTURA_NAO_AUTORIZADA`) | Previsto (depende do estado do cilindro, entrega B) |
+| `LACRE_ABERTO_EM_TRANSITO` | O lacre foi aberto enquanto o cilindro está em trânsito, onde deve estar sempre fechado (regra 3) | ESP32 envia `seal_status: UNLOCKED` ou `BROKEN` com o cilindro `EM_TRANSITO` ou a entrega `EM_ANDAMENTO` | CRITICA | — (no FluxID, entra como `ABERTURA_NAO_AUTORIZADA`) | Implementado (registrado em `error_type`, sem alerta) |
 | `LACRE_ABERTO_SEM_AUTORIZACAO` | O lacre foi aberto no cliente sem autorização registrada (RN09) | ESP32 envia `seal_status: UNLOCKED` e não há autorização para aquele lacre | CRITICA | FluxID alerta e evento `ABERTURA_NAO_AUTORIZADA` | Parcial (falta o registro de autorização) |
-| `LACRE_SEM_CILINDRO` | O lacre está em uso (envia dados) mas não tem vínculo ativo com nenhum cilindro | Worker/FluxID: dispositivo → lacre sem `vinculos_cilindro_lacre` ativo | ALTA | — | Previsto (entrega B) |
+| `DISPOSITIVO_SEM_LACRE` | O dispositivo enviou dados sem estar vinculado a nenhum lacre | API Oxide: dispositivo sem vínculo ativo em `seal_assignments` | MEDIA | — | Implementado (registrado em `error_type`, sem alerta) |
+| `LACRE_SEM_CILINDRO` | O lacre está em uso (envia dados) mas não tem vínculo ativo com nenhum cilindro | API Oxide: lacre do dispositivo sem vínculo ativo em `cylinder_assignments` | ALTA | — | Implementado (registrado em `error_type`, sem alerta) |
 | `LACRE_SEM_DISPOSITIVO` | O lacre está instalado num cilindro mas sem dispositivo ativo vinculado | FluxID: lacre `INSTALADO` sem `vinculos_dispositivo_lacre` ativo | MEDIA | — | Previsto (entrega B) |
 | `LACRE_REVISAO_VENCIDA` | Passou a data da revisão quinquenal do lacre (RN16) | FluxID: `lacres.proxima_revisao` < hoje | MEDIA | FluxID `REVISAO_LACRE` | Parcial (falta a rotina diária) |
 | `LACRE_REPROVADO_EM_USO` | Lacre reprovado ou inutilizado na inspeção continua instalado | FluxID: inspeção `REPROVADO`/`INUTILIZADO` e lacre `INSTALADO` | ALTA | — | Previsto |

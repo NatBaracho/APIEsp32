@@ -1,5 +1,6 @@
 import { Telemetry } from "../models/Telemetry";
 import { DeviceRepository } from "../repositories/DeviceRepository";
+import { AssignmentService } from "./AssignmentService";
 import { TelemetryQueueRepository } from "../repositories/TelemetryQueueRepository";
 
 export type CreateTelemetryResult =
@@ -9,6 +10,8 @@ export type CreateTelemetryResult =
   | "device_not_found";
 
 export class TelemetryService {
+
+  private assignments = new AssignmentService();
 
   private repository =
     new TelemetryQueueRepository();
@@ -76,9 +79,18 @@ export class TelemetryService {
 
     }
 
-    this.repository.create(
-      telemetry
+    // lacre_id e cilindro_id vêm do vínculo ativo, nunca do payload
+    const situation = this.assignments.describeDevice(
+      telemetry.device_id,
+      telemetry.seal_status
     );
+
+    this.repository.create({
+      ...telemetry,
+      lacre_id: situation.seal_code,
+      cilindro_id: situation.cylinder_code,
+      error_type: situation.error_type
+    });
 
     console.log(
       "Telemetria salva:",

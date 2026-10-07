@@ -29,8 +29,9 @@ ESP32 → Oxide API → oxide.db (status PENDING)
 | --- | --- | --- |
 | `device_id` (ex.: `DSP-000001`) | `dispositivos.id` (UUID) | `dispositivos.codigo = device_id` — os códigos já seguem o mesmo padrão |
 | — | `organizacao_id` | O da linha de `dispositivos` encontrada |
-| — | `lacre_id` | Vínculo ativo em `vinculos_dispositivo_lacre` (`data_fim IS NULL`) |
-| — | `cilindro_id` | Vínculo ativo do lacre em `vinculos_cilindro_lacre` |
+| `telemetry_queue.lacre_id` (ex.: `LCR-000001`) | `lacre_id` (UUID) | `lacres.codigo = lacre_id`. A Oxide já grava o código do vínculo ativo no recebimento (entrega B) |
+| `telemetry_queue.cilindro_id` (ex.: `CIL-000001`) | `cilindro_id` (UUID) | `cilindros.codigo = cilindro_id` |
+| `seal_assignments`, `cylinder_assignments` | `vinculos_dispositivo_lacre`, `vinculos_cilindro_lacre` | Mesmo modelo (início, fim, motivo). Quando o Worker existir, o FluxID passa a ser a fonte e a cópia da Oxide é atualizada a partir dele |
 | `api_key` | `dispositivos.api_key_hash` | SHA-256 da chave, em hexadecimal (ver seção 4) |
 
 Dispositivo da Oxide sem correspondente em `dispositivos` não é sincronizado: a linha fica em `ERROR` com `last_error = "dispositivo não cadastrado no FluxID"`.
@@ -124,6 +125,6 @@ Consequências para implementar junto com o Worker:
 
 1. Aplicar `sql/fluxid/001_ajustes_estrutura.sql` e `002_correcao_massa_de_testes.sql` no FluxID e gerar um novo dump.
 2. Entrega D (catálogo de comandos), já decidindo a seção 3.4.
-3. Entrega B (associação), usando o cadastro e os vínculos do FluxID.
+3. ✅ Entrega B (associação): cópia provisória na Oxide no mesmo modelo do FluxID, com `error_type` registrando dispositivo sem lacre, lacre sem cilindro e lacre aberto em trânsito.
 4. Fechar as decisões P1 a P8.
 5. Implementar o Worker e a chave por hash na Oxide (seção 4), testando primeiro num FluxID de análise (Docker).

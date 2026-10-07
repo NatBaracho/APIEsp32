@@ -123,6 +123,7 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ `events`
 - ✅ `commands`
 - ✅ `alerts`
+- ✅ `seals`, `cylinders`, `seal_assignments` e `cylinder_assignments`
 - [ ] `sync_logs` e `sync_items` como tabelas operacionais no banco atual.
 
 ### Relacionamentos e integridade
@@ -165,20 +166,21 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 
 ### 1. Associação Dispositivo → Lacre → Cilindro
 
-- [ ] Definir regras de associação, troca e desassociação.
-- [ ] Criar schema SQLite para lacres, cilindros e vínculos, com integridade referencial.
-- [ ] Implementar models/DTOs, repositories, services, controllers e rotas.
-- [ ] Validar ownership, entidades inexistentes, duplicidade e conflitos.
-- [ ] Testar persistência e atualização dos vínculos.
-- [ ] Atualizar OpenAPI e documentação.
+- ✅ Regras de associação, troca (`replace`) e desassociação definidas (RN04, RN05, RN21).
+- ✅ Schema SQLite de lacres, cilindros e vínculos, com integridade referencial e índices de vínculo ativo único.
+- ✅ Repositories, services, controllers e rotas (`/seals`, `/cylinders`, `/assignments`).
+- ✅ Entidades inexistentes (`404`), duplicidade e conflitos (`409`) validados; rotas abertas por decisão (ownership não se aplica).
+- ✅ Telemetria preenche `lacre_id`/`cilindro_id` pelo vínculo ativo; `error_type` registra dispositivo sem lacre, lacre sem cilindro e lacre aberto em trânsito.
+- ✅ OpenAPI (grupo "Associação") e documentação atualizados.
+- [ ] Substituir a cópia provisória pelos dados sincronizados do FluxID (Worker).
 
 ### 2. Histórico de associações
 
-- [ ] Definir dados e eventos que compõem o histórico.
-- [ ] Persistir início e término sem sobrescrever associações anteriores.
-- [ ] Implementar consulta por dispositivo, lacre e/ou cilindro.
-- [ ] Testar associações sucessivas, desassociação e ordenação temporal.
-- [ ] Documentar o contrato e exemplos.
+- ✅ Histórico com início, fim e motivo, sem sobrescrever vínculos anteriores.
+- ✅ Consulta por dispositivo, lacre e cilindro, com filtro de ativos, do mais recente ao mais antigo.
+- ✅ Testes de associações sucessivas, troca, encerramento e ordenação.
+- ✅ Contrato e exemplos documentados (Desenvolvimento 1.3 e Swagger).
+- [ ] Teste de reassociação do mesmo par (HIS-04).
 
 ### 3. Geofence
 
@@ -230,8 +232,8 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 | Dispositivos, estados, telemetria e eventos | Implementados e validados |
 | Comandos manuais | Implementados e validados |
 | Criação de alertas | Implementada e validada; severidade e status alinhados ao FluxID |
-| Associação dispositivo/lacre/cilindro | Pendente |
-| Histórico de associações | Pendente |
+| Associação dispositivo/lacre/cilindro | Implementada e validada (cópia provisória do FluxID) |
+| Histórico de associações | Implementado e validado |
 | Geofence | Pendente |
 | Comandos automáticos | Pendente |
 | Worker e sincronização PostgreSQL | Pendente |

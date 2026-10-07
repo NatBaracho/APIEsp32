@@ -43,6 +43,10 @@ async function main() {
   const TEST_ALT_ID = "ALT-TEST-AUTORUN-001";
 
   // Pre-cleanup in case of dirty database
+  db.prepare("DELETE FROM cylinder_assignments WHERE seal_code LIKE 'LCR-TEST%' OR cylinder_code LIKE 'CIL-TEST%'").run();
+  db.prepare("DELETE FROM seal_assignments WHERE device_id LIKE 'DSP-TEST%' OR seal_code LIKE 'LCR-TEST%'").run();
+  db.prepare("DELETE FROM seals WHERE seal_code LIKE 'LCR-TEST%'").run();
+  db.prepare("DELETE FROM cylinders WHERE cylinder_code LIKE 'CIL-TEST%'").run();
   db.prepare("DELETE FROM alerts WHERE device_id LIKE 'DSP-TEST%'").run();
   db.prepare("DELETE FROM commands WHERE device_id LIKE 'DSP-TEST%'").run();
   db.prepare("DELETE FROM telemetry_queue WHERE device_id LIKE 'DSP-TEST%'").run();
@@ -978,9 +982,134 @@ async function main() {
     return { passed, status: res.status, expectedStatus: 409, details: json.message };
   });
 
+  // Group 9: Association device → seal → cylinder
+  console.log("\n--- [9] Associação dispositivo → lacre → cilindro ---");
+
+  const api = async (method: string, path: string, body?: unknown, key?: string) => {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (key) headers["X-API-Key"] = key;
+    const init: RequestInit = { method, headers };
+    if (body !== undefined) init.body = JSON.stringify(body);
+    const res = await fetch(`${BASE_URL}/api/v1${path}`, init);
+    return { status: res.status, json: (await res.json()) as any };
+  };
+  const sealStatus = (code: string) =>
+    (db.prepare("SELECT status FROM seals WHERE seal_code = ?").get(code) as any)?.status;
+
+  await runTest("POST /seals cadastra lacres -> 201 (EM_ESTOQUE por padrão)", async () => {
+    const a = await api("POST", "/seals", { seal_code: "LCR-TEST-1", nfc_uid: "NFC-TEST-1" });
+    const b = await api("POST", "/seals", { seal_code: "LCR-TEST-2", nfc_uid: "NFC-TEST-2" });
+    const c = await api("POST", "/seals", { seal_code: "LCR-TEST-3", nfc_uid: "NFC-TEST-3", status: "DANIFICADO" });
+    const passed = a.status === 201 && b.status === 201 && c.status === 201 && a.json.seal?.status === "EM_ESTOQUE";
+    return { passed, status: a.status, expectedStatus: 201, details: `${a.json.seal?.seal_code} ${a.json.seal?.status}` };
+  });
+
+  await runTest("POST /seals duplicado, UID NFC repetido -> 409; status INSTALADO no cadastro -> 400", async () => {
+    const dup = await api("POST", "/seals", { seal_code: "LCR-TEST-1", nfc_uid: "NFC-TEST-9" });
+    const nfc = await api("POST", "/seals", { seal_code: "LCR-TEST-9", nfc_uid: "NFC-TEST-1" });
+    const inst = await api("POST", "/seals", { seal_code: "LCR-TEST-8", nfc_uid: "NFC-TEST-8", status: "INSTALADO" });
+    const passed = dup.status === 409 && nfc.status === 409 && inst.status === 400;
+    return { passed, details: `${dup.status} / ${nfc.status} / ${inst.status}` };
+  });
+
+  await runTest("POST /cylinders cadastra -> 201; número de série repetido -> 409", async () => {
+    const a = await api("POST", "/cylinders", { cylinder_code: "CIL-TEST-1", serial_number: "SER-TEST-1" });
+    const b = await api("POST", "/cylinders", { cylinder_code: "CIL-TEST-2", serial_number: "SER-TEST-2" });
+    const dup = await api("POST", "/cylinders", { cylinder_code: "CIL-TEST-9", serial_number: "SER-TEST-1" });
+    const passed = a.status === 201 && b.status === 201 && a.json.cylinder?.status === "DISPONIVEL" && dup.status === 409;
+    return { passed, details: `${a.status} / ${b.status} / ${dup.status}` };
+  });
+
+  await runTest("POST /assignments/device-seal vincula -> 201; dispositivo com lacre ativo -> 409", async () => {
+    const link = await api("POST", "/assignments/device-seal", { device_id: TEST_DEVICE_ID, seal_code: "LCR-TEST-1" });
+    const conflict = await api("POST", "/assignments/device-seal", { device_id: TEST_DEVICE_ID, seal_code: "LCR-TEST-2" });
+    const passed = link.status === 201 && link.json.assignment?.ended_at === null && conflict.status === 409;
+    return { passed, details: `${link.status} / ${conflict.status} ${conflict.json.message}` };
+  });
+
+  await runTest("POST /assignments/seal-cylinder vincula -> 201 e lacre vira INSTALADO", async () => {
+    const link = await api("POST", "/assignments/seal-cylinder", { seal_code: "LCR-TEST-1", cylinder_code: "CIL-TEST-1" });
+    const passed = link.status === 201 && sealStatus("LCR-TEST-1") === "INSTALADO";
+    return { passed, status: link.status, expectedStatus: 201, details: `lacre ${sealStatus("LCR-TEST-1")}` };
+  });
+
+  await runTest("Cilindro com lacre ativo -> 409; lacre DANIFICADO não instala -> 409", async () => {
+    const busy = await api("POST", "/assignments/seal-cylinder", { seal_code: "LCR-TEST-2", cylinder_code: "CIL-TEST-1" });
+    const damaged = await api("POST", "/assignments/seal-cylinder", { seal_code: "LCR-TEST-3", cylinder_code: "CIL-TEST-2" });
+    const passed = busy.status === 409 && damaged.status === 409 && damaged.json.message.includes("DANIFICADO");
+    return { passed, details: `${busy.status} / ${damaged.status} ${damaged.json.message}` };
+  });
+
+  await runTest("Telemetria recebe lacre e cilindro do vínculo (payload ignorado), sem error_type", async () => {
+    const res = await api("POST", "/iot/telemetries", {
+      message_id: "MSG-TEST-ASC-1", device_id: TEST_DEVICE_ID,
+      latitude: -8.9, longitude: -35.0, lacre_id: "LCR-FALSO", cilindro_id: "CIL-FALSO"
+    }, TEST_API_KEY);
+    const row = db.prepare("SELECT lacre_id, cilindro_id, error_type FROM telemetry_queue WHERE message_id = 'MSG-TEST-ASC-1'").get() as any;
+    const passed = res.status === 202 && row?.lacre_id === "LCR-TEST-1" && row?.cilindro_id === "CIL-TEST-1" && row?.error_type === null;
+    return { passed, status: res.status, expectedStatus: 202, details: `${row?.lacre_id} / ${row?.cilindro_id} / ${row?.error_type}` };
+  });
+
+  await runTest("Telemetria enviada antes do vínculo ficou com error_type DISPOSITIVO_SEM_LACRE", async () => {
+    const row = db.prepare("SELECT lacre_id, error_type FROM telemetry_queue WHERE message_id = 'MSG-TEST-TEL-001'").get() as any;
+    const passed = row?.lacre_id === null && row?.error_type === "DISPOSITIVO_SEM_LACRE";
+    return { passed, details: `${row?.error_type}` };
+  });
+
+  await runTest("Evento de lacre aberto com cilindro EM_TRANSITO -> error_type LACRE_ABERTO_EM_TRANSITO", async () => {
+    const transit = await api("POST", "/cylinders/CIL-TEST-1/status", { status: "EM_TRANSITO" });
+    const ev = await api("POST", "/iot/events", {
+      message_id: "EVT-TEST-ASC-1", device_id: TEST_DEVICE_ID, event_type: "seal_changed", seal_status: "UNLOCKED"
+    }, TEST_API_KEY);
+    const row = db.prepare("SELECT error_type FROM events WHERE message_id = 'EVT-TEST-ASC-1'").get() as any;
+    const passed = transit.status === 200 && ev.status === 202 && row?.error_type === "LACRE_ABERTO_EM_TRANSITO";
+    return { passed, details: `${row?.error_type}` };
+  });
+
+  await runTest("Troca do lacre do cilindro (replace) -> antigo encerrado e REMOVIDO, novo INSTALADO", async () => {
+    const swap = await api("POST", "/assignments/seal-cylinder", { seal_code: "LCR-TEST-2", cylinder_code: "CIL-TEST-1", replace: true });
+    const old = db.prepare("SELECT ended_at, end_reason FROM cylinder_assignments WHERE seal_code = 'LCR-TEST-1'").get() as any;
+    const passed =
+      swap.status === 201 && old?.ended_at !== null && old?.end_reason === "Substituído por novo vínculo" &&
+      sealStatus("LCR-TEST-1") === "REMOVIDO" && sealStatus("LCR-TEST-2") === "INSTALADO";
+    return { passed, details: `antigo ${sealStatus("LCR-TEST-1")}, novo ${sealStatus("LCR-TEST-2")}` };
+  });
+
+  await runTest("Telemetria de lacre sem cilindro -> error_type LACRE_SEM_CILINDRO", async () => {
+    await api("POST", "/iot/telemetries", { message_id: "MSG-TEST-ASC-2", device_id: TEST_DEVICE_ID, latitude: -8.91, longitude: -35.01 }, TEST_API_KEY);
+    const row = db.prepare("SELECT lacre_id, cilindro_id, error_type FROM telemetry_queue WHERE message_id = 'MSG-TEST-ASC-2'").get() as any;
+    const passed = row?.lacre_id === "LCR-TEST-1" && row?.cilindro_id === null && row?.error_type === "LACRE_SEM_CILINDRO";
+    return { passed, details: `${row?.lacre_id} / ${row?.cilindro_id} / ${row?.error_type}` };
+  });
+
+  await runTest("Encerrar vínculo -> 200 e lacre REMOVIDO; encerrar de novo -> 409", async () => {
+    const active = db.prepare("SELECT id FROM cylinder_assignments WHERE seal_code = 'LCR-TEST-2' AND ended_at IS NULL").get() as any;
+    const end = await api("POST", `/assignments/seal-cylinder/${active.id}/end`, { reason: "Retirada para manutenção" });
+    const again = await api("POST", `/assignments/seal-cylinder/${active.id}/end`, {});
+    const passed = end.status === 200 && end.json.assignment?.end_reason === "Retirada para manutenção" && sealStatus("LCR-TEST-2") === "REMOVIDO" && again.status === 409;
+    return { passed, details: `${end.status} / ${again.status}; lacre ${sealStatus("LCR-TEST-2")}` };
+  });
+
+  await runTest("Histórico do cilindro preserva todos os vínculos, do mais recente ao mais antigo", async () => {
+    const res = await api("GET", "/assignments/seal-cylinder?cylinder_code=CIL-TEST-1");
+    const codes = Array.isArray(res.json) ? res.json.map((a: any) => a.seal_code) : [];
+    const passed = res.status === 200 && codes.length === 2 && codes[0] === "LCR-TEST-2" && codes[1] === "LCR-TEST-1" && res.json.every((a: any) => a.ended_at !== null);
+    return { passed, status: res.status, expectedStatus: 200, details: codes.join(" → ") };
+  });
+
+  await runTest("Status INSTALADO manual -> 409 (só pelo vínculo)", async () => {
+    const res = await api("POST", "/seals/LCR-TEST-1/status", { status: "INSTALADO" });
+    const passed = res.status === 409;
+    return { passed, status: res.status, expectedStatus: 409, details: res.json.message };
+  });
+
   // Post-cleanup of test records
   console.log("\n--- [8] Limpeza e Teardown ---");
   await runTest("Limpeza de registros temporários criados nos testes", async () => {
+    db.prepare("DELETE FROM cylinder_assignments WHERE seal_code LIKE 'LCR-TEST%' OR cylinder_code LIKE 'CIL-TEST%'").run();
+    db.prepare("DELETE FROM seal_assignments WHERE device_id LIKE 'DSP-TEST%' OR seal_code LIKE 'LCR-TEST%'").run();
+    db.prepare("DELETE FROM seals WHERE seal_code LIKE 'LCR-TEST%'").run();
+    db.prepare("DELETE FROM cylinders WHERE cylinder_code LIKE 'CIL-TEST%'").run();
     db.prepare("DELETE FROM alerts WHERE device_id LIKE 'DSP-TEST%'").run();
     db.prepare("DELETE FROM commands WHERE device_id LIKE 'DSP-TEST%'").run();
     db.prepare("DELETE FROM telemetry_queue WHERE device_id LIKE 'DSP-TEST%'").run();

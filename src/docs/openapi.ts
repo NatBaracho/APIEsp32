@@ -1,3 +1,170 @@
+const jsonBody = (properties: object, required: string[]) => ({
+  required: true,
+  content: {
+    "application/json": {
+      schema: { type: "object", required, properties }
+    }
+  }
+});
+
+const codeParam = (name: string, example: string) => ({
+  name,
+  in: "path",
+  required: true,
+  schema: { type: "string" },
+  example
+});
+
+const sealStatusEnum = [
+  "EM_ESTOQUE", "INSTALADO", "SUSPEITA_VIOLACAO", "ROMPIDO",
+  "REMOVIDO", "DANIFICADO", "INUTILIZADO"
+];
+
+const cylinderStatusEnum = [
+  "DISPONIVEL", "EM_TRANSITO", "COM_CLIENTE", "MANUTENCAO", "EXTRAVIADO", "INATIVO"
+];
+
+const historyQuery = [
+  { name: "device_id", in: "query", schema: { type: "string" } },
+  { name: "seal_code", in: "query", schema: { type: "string" } },
+  { name: "cylinder_code", in: "query", schema: { type: "string" } },
+  { name: "active", in: "query", schema: { type: "string", enum: ["true"] }, description: "true = só vínculos ativos" }
+];
+
+const idParam = [{ name: "id", in: "path", required: true, schema: { type: "integer" } }];
+
+const endBody = jsonBody({ reason: { type: "string", example: "Retirada para manutenção" } }, []);
+
+const endResponses = {
+  "200": { description: "Vínculo encerrado (fica no histórico)" },
+  "404": { description: "Vínculo não encontrado" },
+  "409": { description: "Vínculo já encerrado" }
+};
+
+// Associação dispositivo → lacre → cilindro (entrega B). Rotas abertas e
+// provisórias até o Worker trazer o cadastro oficial do FluxID
+const assetPaths = {
+  "/api/v1/seals": {
+    get: { tags: ["Associação"], summary: "Listar lacres", responses: { "200": { description: "Lista de lacres" } } },
+    post: {
+      tags: ["Associação"],
+      summary: "Cadastrar lacre (provisório até o FluxID)",
+      requestBody: jsonBody({
+        seal_code: { type: "string", example: "LCR-000001" },
+        nfc_uid: { type: "string", example: "04A2B3C4D5" },
+        status: { type: "string", enum: sealStatusEnum.filter(s => s !== "INSTALADO"), example: "EM_ESTOQUE" }
+      }, ["seal_code", "nfc_uid"]),
+      responses: {
+        "201": { description: "Lacre cadastrado (EM_ESTOQUE por padrão)" },
+        "400": { description: "Campos obrigatórios ou status inválido (INSTALADO só pelo vínculo)" },
+        "409": { description: "Código ou UID NFC já cadastrado" }
+      }
+    }
+  },
+  "/api/v1/seals/{sealCode}": {
+    get: {
+      tags: ["Associação"], summary: "Buscar lacre", parameters: [codeParam("sealCode", "LCR-000001")],
+      responses: { "200": { description: "Lacre" }, "404": { description: "Lacre não encontrado" } }
+    }
+  },
+  "/api/v1/seals/{sealCode}/status": {
+    post: {
+      tags: ["Associação"], summary: "Alterar estado do lacre", parameters: [codeParam("sealCode", "LCR-000001")],
+      requestBody: jsonBody({ status: { type: "string", enum: sealStatusEnum, example: "SUSPEITA_VIOLACAO" } }, ["status"]),
+      responses: {
+        "200": { description: "Estado alterado" },
+        "400": { description: "Estado inválido" },
+        "404": { description: "Lacre não encontrado" },
+        "409": { description: "INSTALADO só pelo vínculo; EM_ESTOQUE/REMOVIDO só sem cilindro ativo" }
+      }
+    }
+  },
+  "/api/v1/cylinders": {
+    get: { tags: ["Associação"], summary: "Listar cilindros", responses: { "200": { description: "Lista de cilindros" } } },
+    post: {
+      tags: ["Associação"],
+      summary: "Cadastrar cilindro (provisório até o FluxID)",
+      requestBody: jsonBody({
+        cylinder_code: { type: "string", example: "CIL-000001" },
+        serial_number: { type: "string", example: "SN-123456" },
+        status: { type: "string", enum: cylinderStatusEnum, example: "DISPONIVEL" }
+      }, ["cylinder_code", "serial_number"]),
+      responses: {
+        "201": { description: "Cilindro cadastrado (DISPONIVEL por padrão)" },
+        "400": { description: "Campos obrigatórios ou status inválido" },
+        "409": { description: "Código ou número de série já cadastrado" }
+      }
+    }
+  },
+  "/api/v1/cylinders/{cylinderCode}": {
+    get: {
+      tags: ["Associação"], summary: "Buscar cilindro", parameters: [codeParam("cylinderCode", "CIL-000001")],
+      responses: { "200": { description: "Cilindro" }, "404": { description: "Cilindro não encontrado" } }
+    }
+  },
+  "/api/v1/cylinders/{cylinderCode}/status": {
+    post: {
+      tags: ["Associação"], summary: "Alterar estado do cilindro", parameters: [codeParam("cylinderCode", "CIL-000001")],
+      requestBody: jsonBody({ status: { type: "string", enum: cylinderStatusEnum, example: "EM_TRANSITO" } }, ["status"]),
+      responses: { "200": { description: "Estado alterado" }, "400": { description: "Estado inválido" }, "404": { description: "Cilindro não encontrado" } }
+    }
+  },
+  "/api/v1/assignments/device-seal": {
+    get: {
+      tags: ["Associação"], summary: "Histórico dispositivo ↔ lacre (mais recente primeiro)", parameters: historyQuery,
+      responses: { "200": { description: "Vínculos" } }
+    },
+    post: {
+      tags: ["Associação"],
+      summary: "Vincular dispositivo a lacre (RN05)",
+      requestBody: jsonBody({
+        device_id: { type: "string", example: "DSP-000001" },
+        seal_code: { type: "string", example: "LCR-000001" },
+        replace: { type: "boolean", description: "true = troca: encerra os vínculos em conflito e cria o novo", example: false }
+      }, ["device_id", "seal_code"]),
+      responses: {
+        "201": { description: "Vínculo criado" },
+        "400": { description: "Campos obrigatórios" },
+        "404": { description: "Dispositivo ou lacre não encontrado" },
+        "409": { description: "Dispositivo ou lacre já tem vínculo ativo (use replace: true)" }
+      }
+    }
+  },
+  "/api/v1/assignments/device-seal/{id}/end": {
+    post: {
+      tags: ["Associação"], summary: "Encerrar vínculo dispositivo ↔ lacre",
+      parameters: idParam, requestBody: endBody, responses: endResponses
+    }
+  },
+  "/api/v1/assignments/seal-cylinder": {
+    get: {
+      tags: ["Associação"], summary: "Histórico lacre ↔ cilindro (mais recente primeiro)", parameters: historyQuery,
+      responses: { "200": { description: "Vínculos" } }
+    },
+    post: {
+      tags: ["Associação"],
+      summary: "Instalar lacre em cilindro (RN04); lacre vira INSTALADO",
+      requestBody: jsonBody({
+        seal_code: { type: "string", example: "LCR-000001" },
+        cylinder_code: { type: "string", example: "CIL-000001" },
+        replace: { type: "boolean", description: "true = troca: encerra os vínculos em conflito; o lacre substituído vira REMOVIDO", example: false }
+      }, ["seal_code", "cylinder_code"]),
+      responses: {
+        "201": { description: "Vínculo criado" },
+        "400": { description: "Campos obrigatórios" },
+        "404": { description: "Lacre ou cilindro não encontrado" },
+        "409": { description: "Vínculo ativo em conflito ou lacre fora de EM_ESTOQUE/REMOVIDO" }
+      }
+    }
+  },
+  "/api/v1/assignments/seal-cylinder/{id}/end": {
+    post: {
+      tags: ["Associação"], summary: "Encerrar vínculo lacre ↔ cilindro; lacre INSTALADO vira REMOVIDO",
+      parameters: idParam, requestBody: endBody, responses: endResponses
+    }
+  }
+};
+
 const openApiSpec = {
   openapi: "3.0.3",
   info: {
@@ -440,7 +607,8 @@ const openApiSpec = {
           "409": { description: "alert_id já cadastrado" }
         }
       }
-    }
+    },
+    ...assetPaths
   }
 };
 

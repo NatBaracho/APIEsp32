@@ -86,6 +86,24 @@ Content-Type: application/json
 - Um dispositivo **não cadastrado** recebe `404` em telemetria e eventos. A API **não** cria dispositivos automaticamente.
 - `GET /devices` e `GET /devices/:deviceId` são abertos para a equipe consultar, mas **não mostram a `api_key`**. Guarde a chave no momento do cadastro.
 
+### Cadastro do lacre, do cilindro e dos vínculos (provisório)
+
+Para a API saber a que lacre e cilindro cada dispositivo pertence, cadastre também (rotas abertas, sem chave, até o Worker trazer os dados do FluxID):
+
+```http
+POST /api/v1/seals          { "seal_code": "LCR-000010", "nfc_uid": "04A2B3C4D5" }
+POST /api/v1/cylinders      { "cylinder_code": "CIL-000010", "serial_number": "SN-123456" }
+POST /api/v1/assignments/device-seal    { "device_id": "DSP-000010", "seal_code": "LCR-000010" }
+POST /api/v1/assignments/seal-cylinder  { "seal_code": "LCR-000010", "cylinder_code": "CIL-000010" }
+```
+
+- Um lacre tem **um** cilindro ativo e um cilindro **um** lacre ativo (RN04); um lacre tem **um** dispositivo ativo (RN05). Conflito → `409`.
+- **Troca:** envie `"replace": true`; o vínculo antigo é encerrado ("Substituído por novo vínculo") e o novo é criado na mesma operação.
+- **Encerrar:** `POST /api/v1/assignments/seal-cylinder/{id}/end` (ou `device-seal/{id}/end`) com `{ "reason": "..." }`. Nada é apagado: o vínculo fica no histórico com data de fim e motivo.
+- **Estado do lacre:** ao ser instalado num cilindro vira `INSTALADO` (só se estiver `EM_ESTOQUE` ou `REMOVIDO`); ao sair do cilindro vira `REMOVIDO` (um lacre violado ou rompido mantém o estado). `INSTALADO` não pode ser definido manualmente.
+- **Histórico:** `GET /api/v1/assignments/seal-cylinder?cylinder_code=CIL-000010` (também `?device_id=`, `?seal_code=`, `?active=true`), do mais recente ao mais antigo.
+- Estado do cilindro (ex.: `EM_TRANSITO`): `POST /api/v1/cylinders/{codigo}/status`.
+
 ## 1.4 Rotas usadas pelo ESP32
 
 | Método e rota | Para quê | Respostas |
@@ -96,7 +114,7 @@ Content-Type: application/json
 | `POST /iot/commands/confirm` | Confirmar execução de um comando | `200`; `400`; `401`; `403`; `404`; `409` |
 | `POST /iot/alerts` | Registrar um alerta | `201`; `400`; `401`; `403`; `404`; `409` |
 
-Rotas de apoio para a equipe: `GET /iot/telemetries` (lista as telemetrias de todos os dispositivos, da mais recente para a mais antiga; exige uma chave válida) e `GET/POST /devices`.
+Rotas de apoio para a equipe: `GET /iot/telemetries` (lista as telemetrias de todos os dispositivos, da mais recente para a mais antiga; exige uma chave válida) e `GET/POST /devices`, `/seals`, `/cylinders` e `/assignments` (seção 1.3).
 
 ### Telemetria — exemplo
 
@@ -189,7 +207,8 @@ Rotas de apoio para a equipe: `GET /iot/telemetries` (lista as telemetrias de to
 | `seal_status` | `seal_status` | `LOCKED`, `UNLOCKED`, `BROKEN` |
 | `attempt_count` | `device_attempt_count` | Tentativas de envio do ESP32 |
 | `last_seen_at` | `last_seen_at` | Opcional, ISO 8601. Na posição repetida, o servidor grava a hora atual (UTC, `AAAA-MM-DD HH:MM:SS`) |
-| `lacre_id`, `cilindro_id` | Mesmo nome | Texto livre provisório, até a entrega de associação |
+| `lacre_id`, `cilindro_id` | Mesmo nome | **Não vêm do ESP32:** a API preenche pelo vínculo ativo do dispositivo no momento do recebimento (o que vier no payload é ignorado) |
+| — | `error_type` | Código do catálogo `Tipos-de-Erro.md` detectado no recebimento, sem gerar alerta: `LACRE_ABERTO_EM_TRANSITO`, `DISPOSITIVO_SEM_LACRE` ou `LACRE_SEM_CILINDRO` |
 | `payload_json` (ou o corpo inteiro) | `payload_json` | Guarda o JSON original recebido |
 | `status` | — | **Ignorado** (fica só em `payload_json`). Não enviar |
 | — | `status`, `attempt_count`, `last_error` | Controle do Worker: começa `PENDING` e `0` |
@@ -202,12 +221,19 @@ Rotas de apoio para a equipe: `GET /iot/telemetries` (lista as telemetrias de to
 | `message_id`, `device_id`, `seal_status`, `payload_json` | Mesmo nome |
 | `event_type` | `message_type` |
 | `attempt_count` | `device_attempt_count` |
+| — | `error_type`: código do catálogo detectado no recebimento (ex.: `LACRE_ABERTO_EM_TRANSITO`) |
 | — | `status` (`PENDING`), `attempt_count` (`0`), `last_error`: controle do Worker |
 
 ### Comandos e alertas
 
 - `commands`: `command_id`, `device_id`, `command_type` (`TRAVAR_VALVULA`, `DESTRAVAR_VALVULA`), `status` (`PENDENTE` → `EXECUTADO`/`ERRO`), `created_at`, `executed_at`, `error_message`. O banco rejeita comando pendente com outro tipo.
 - `alerts`: `alert_id`, `device_id`, `alert_type`, `severity` (`BAIXA`, `MEDIA`, `ALTA`, `CRITICA`), `status` (`ABERTO`, `EM_ANALISE`, `ENCERRADO`), `title`, `description`, `created_at`, `resolved_at`. Severidade e status usam os mesmos valores do FluxID.
+
+### Associação
+
+- `seals`: `seal_code`, `nfc_uid`, `status` (estados de `lacres` do FluxID).
+- `cylinders`: `cylinder_code`, `serial_number`, `status` (estados de `cilindros` do FluxID).
+- `seal_assignments` (dispositivo ↔ lacre) e `cylinder_assignments` (lacre ↔ cilindro): `started_at`, `ended_at`, `end_reason`. Vínculo ativo = `ended_at` vazio.
 
 ### Estados da fila
 
@@ -216,15 +242,15 @@ Rotas de apoio para a equipe: `GET /iot/telemetries` (lista as telemetrias de to
 ## 1.9 O que ainda não existe
 
 - Worker de sincronização com o FluxID.
-- Cadastro vindo do FluxID (por isso o `POST /devices` provisório).
+- Cadastro e vínculos vindos do FluxID (por isso `/devices`, `/seals`, `/cylinders` e `/assignments` são provisórios).
 - Criação automática de comandos e verificação dos tipos de erro do catálogo (`Tipos-de-Erro.md`), como saída de rota e GPS sem sinal.
 - Rotas para analisar e encerrar alertas.
-- Geofence, comandos automáticos e associação dispositivo → lacre → cilindro.
+- Geofence, comandos automáticos e alertas automáticos a partir do `error_type`.
 
 ## 1.10 Estado atual
 
-- API em funcionamento, validada pela suíte automatizada (`npm test`, 55/55) e pelo Roteiro de Teste completo no `oxide.db` real.
-- Próximas entregas: associação dispositivo/lacre/cilindro (B); `alert_type` da Oxide com os códigos em português do catálogo de erros; Worker (depois das decisões P1 a P8 do plano de integração).
+- API em funcionamento, validada pela suíte automatizada (`npm test`, 71/71) e pelo Roteiro de Teste completo no `oxide.db` real.
+- Próximas entregas: `alert_type` da Oxide com os códigos em português do catálogo de erros; regras e alertas automáticos (incluindo comandos automáticos); Worker (depois das decisões P1 a P8 do plano de integração).
 - Pendências conhecidas: firmware do ESP32 precisa enviar `seal_status` e `attempt_count` e tratar as respostas da seção 1.5; `nodemon` com vulnerabilidade apenas em desenvolvimento.
 
 ---
@@ -240,10 +266,10 @@ Registro em ordem cronológica. Descreve o estado da API **no momento de cada re
 | `src/server.ts` | Inicializa o Express, registra rotas, Swagger e o tratamento de erros |
 | `src/database/connection.ts` | Conexão `better-sqlite3`, criação de tabelas e migrações automáticas |
 | `src/Middleware/` | `apiKeyMiddleware.ts` (chave válida, chave do próprio dispositivo) e `Errohandler.ts` |
-| `src/routes/` | Rotas de dispositivos, telemetria, eventos, comandos e alertas |
+| `src/routes/` | Rotas de dispositivos, telemetria, eventos, comandos, alertas e associação (`assetRoutes.ts`: lacres, cilindros e vínculos) |
 | `src/controllers/` | Validação do payload e montagem das respostas HTTP |
 | `src/services/` | Regras de negócio (duplicidade, posição repetida, cadastro) |
-| `src/repositories/` | Consultas SQL de cada tabela |
+| `src/repositories/` | Consultas SQL de cada tabela (inclui `SealRepository`, `CylinderRepository` e `AssignmentRepository`) |
 | `src/models/` | Tipos de dados |
 | `src/docs/openapi.ts` | Especificação do Swagger |
 | `tests/api.test.ts` | Suíte automatizada (`npm test`) |
@@ -461,9 +487,24 @@ Regras de operação definidas no catálogo: o lacre não sai de 10 m do destino
 
 Compilação aprovada, suíte com 57/57 (dois casos novos), migração testada com comandos antigos e Roteiro de Teste v1.6 executado por completo no `oxide.db` real, com checksum idêntico antes e depois. Validação registrada em [Relatorio-de-Teste-2026-10-06-20h35.md](Doc_tese/Relatorio-de-Teste-2026-10-06-20h35.md), **aprovada por Natã da Silva Baracho**.
 
+### 7.18 Entrega B — associação dispositivo → lacre → cilindro (06/10/2026)
+Decisões de Natã da Silva Baracho:
+
+| Tema | Decisão | Implementação |
+| --- | --- | --- |
+| Onde a associação vive | Cópia provisória na Oxide, nos mesmos códigos e estados do FluxID | Tabelas `seals`, `cylinders`, `seal_assignments`, `cylinder_assignments` |
+| Regras | RN04, RN05; conflito `409`; nada apagado (RN21) | Índices únicos parciais `ended_at IS NULL`; encerrar = preencher `ended_at` e `end_reason` |
+| Troca | `replace: true` encerra e cria na mesma operação | Transação em `AssignmentService` |
+| Estado do lacre | Segue o vínculo: `INSTALADO` ao instalar (só de `EM_ESTOQUE`/`REMOVIDO`), `REMOVIDO` ao sair | `AssignmentService` e `SealService` |
+| Rotas | Abertas e provisórias, como `/devices` | `/seals`, `/cylinders`, `/assignments`, no Swagger (grupo "Associação") |
+| Telemetria | `lacre_id`/`cilindro_id` sempre do vínculo ativo | `TelemetryService` |
+| Erros do catálogo | Só registrar, sem alerta | Coluna `error_type` em `telemetry_queue` e `events`; novo código `DISPOSITIVO_SEM_LACRE` |
+
+Compilação aprovada, suíte com 71/71 (14 casos novos) executada duas vezes seguidas e Roteiro de Teste v1.7 executado por completo no `oxide.db` real: as 67 respostas anteriores idênticas à rodada da entrega D e as 17 da nova seção 5.9 conforme, com checksum idêntico antes e depois. Validação registrada em [Relatorio-de-Teste-2026-10-06-21h31.md](Doc_tese/Relatorio-de-Teste-2026-10-06-21h31.md), **aprovada por Natã da Silva Baracho**.
+
 ## 9. Suíte de testes automatizados (`npm test`)
 
-A suíte `tests/api.test.ts` cobre hoje 57 casos de ponta a ponta:
+A suíte `tests/api.test.ts` cobre hoje 71 casos de ponta a ponta:
 
 1. **Geral & Documentação:** `/`, `/api-docs/` e `/api-docs/swagger-ui-init.js`.
 2. **Dispositivos:** listagem e busca sem `api_key`, `404`, validação `400`, criação `201`, `device_id` duplicado (`409`), `api_key` já usada (`409`) e `active` inválido (`400`).
@@ -472,7 +513,8 @@ A suíte `tests/api.test.ts` cobre hoje 57 casos de ponta a ponta:
 5. **Eventos:** sem chave (`401`), campos obrigatórios (`400`), `seal_status` inválido (`400`), evento válido (`202`), `attempt_count` em `device_attempt_count`, dispositivo não cadastrado (`404`, sem criação), chave de outro dispositivo (`403`) e duplicidade (`409`).
 6. **Comandos:** sem chave (`401`), chave de outro dispositivo (`403`), pendentes (`200`), status inválido (`400`), comando inexistente (`404`), confirmação (`200`), reconfirmação (`409`) e lista após confirmação, rejeição pelo banco de comando pendente fora do catálogo e de status desconhecido.
 7. **Alertas:** sem chave (`401`), chave de outro dispositivo (`403`), tipo inválido (`400`), severidade inválida (`400`), criação com severidade padrão e status `ABERTO` (`201`), severidade informada com campos antigos ignorados (`201`) e duplicidade (`409`).
-8. **Limpeza:** remoção dos registros `DSP-TEST%` ao final.
+8. **Associação:** cadastro de lacres e cilindros (inclusive duplicidades), vínculos, conflitos RN04/RN05, lacre danificado que não instala, troca com `replace`, encerramento, histórico, `INSTALADO` manual bloqueado, telemetria com lacre e cilindro do vínculo e os três `error_type`.
+9. **Limpeza:** remoção dos registros `DSP-TEST%`, `LCR-TEST%` e `CIL-TEST%` ao final.
 
 ### Correção no cadastro de dispositivos (fase inicial)
 - Problema: quando `active` era omitido, o valor chegava como `undefined`, virava `NULL` e violava o `NOT NULL` (erro `500`).
