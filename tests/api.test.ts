@@ -1245,6 +1245,73 @@ async function main() {
     return { passed, status: res.status, expectedStatus: 409, details: res.json.message };
   });
 
+  // Group 10: Integration with FluxID (Worker queues, hashed keys)
+  console.log("\n--- [10] Integração com o FluxID ---");
+
+  const HASH_DEVICE_ID = "DSP-TEST-HASH";
+  const HASH_DEVICE_KEY = "key-test-hash-12345";
+
+  await runTest("GET /sync/status -> 200 com as filas telemetry, events e alerts", async () => {
+    const res = await api("GET", "/sync/status");
+    const filas = (res.json.filas ?? []).map((f: any) => f.queue).join(",");
+    const passed = res.status === 200 && filas === "telemetry,events,alerts" && Array.isArray(res.json.ultimas_rodadas);
+    return { passed, status: res.status, expectedStatus: 200, details: filas };
+  });
+
+  await runTest("GET /sync/problems com fila inválida -> 400; fila válida -> 200", async () => {
+    const bad = await api("GET", "/sync/problems?queue=xyz");
+    const ok = await api("GET", "/sync/problems?queue=alerts");
+    const passed = bad.status === 400 && ok.status === 200 && Array.isArray(ok.json.itens);
+    return { passed, status: ok.status, expectedStatus: 200, details: `inválida=${bad.status}` };
+  });
+
+  await runTest("POST /sync/retry sem dados -> 400; item inexistente -> 404", async () => {
+    const bad = await api("POST", "/sync/retry", { queue: "telemetry" });
+    const missing = await api("POST", "/sync/retry", { queue: "telemetry", key: "MSG-NAO-EXISTE" });
+    const passed = bad.status === 400 && missing.status === 404;
+    return { passed, status: missing.status, expectedStatus: 404, details: `sem key=${bad.status}` };
+  });
+
+  await runTest("POST /sync/retry devolve à fila item parado (sem gastar tentativa)", async () => {
+    db.prepare(`
+      UPDATE alerts
+      SET sync_status = 'ERROR', sync_attempt_count = 6, sync_last_error = 'teste', sync_next_attempt_at = NULL
+      WHERE alert_id = 'ALT-TEST-AUTORUN-003'
+    `).run();
+    const res = await api("POST", "/sync/retry", { queue: "alerts", key: "ALT-TEST-AUTORUN-003" });
+    const row = db.prepare("SELECT sync_status, sync_attempt_count FROM alerts WHERE alert_id = 'ALT-TEST-AUTORUN-003'").get() as any;
+    const passed = res.status === 200 && row?.sync_status === "PENDING" && row?.sync_attempt_count === 0;
+    return { passed, status: res.status, expectedStatus: 200, details: `${row?.sync_status}, tentativas=${row?.sync_attempt_count}` };
+  });
+
+  await runTest("Mudar o status do alerta o devolve à fila do Worker (sync PENDING)", async () => {
+    db.prepare("UPDATE alerts SET sync_status = 'SYNCED' WHERE alert_id = 'ALT-TEST-AUTORUN-003'").run();
+    const res = await api("PATCH", "/iot/alerts/ALT-TEST-AUTORUN-003/status", { status: "EM_ANALISE" });
+    const row = db.prepare("SELECT sync_status FROM alerts WHERE alert_id = 'ALT-TEST-AUTORUN-003'").get() as any;
+    const passed = res.status === 200 && row?.sync_status === "PENDING";
+    return { passed, status: res.status, expectedStatus: 200, details: `sync_status=${row?.sync_status}` };
+  });
+
+  await runTest("Dispositivo com hash do FluxID: chave certa -> 202; chave em texto guardada -> 401", async () => {
+    const { createHash } = await import("crypto");
+    const storedText = "fluxid-sem-chave:teste-autorun";
+    db.prepare(`
+      INSERT INTO devices (device_id, api_key, api_key_hash, firmware_version, active)
+      VALUES (?, ?, ?, '1.0.0', 1)
+    `).run(HASH_DEVICE_ID, storedText, createHash("sha256").update(HASH_DEVICE_KEY).digest("hex"));
+    const body = { message_id: "MSG-TEST-HASH-1", device_id: HASH_DEVICE_ID, latitude: -7.1, longitude: -39.1 };
+    const good = await api("POST", "/iot/telemetries", body, HASH_DEVICE_KEY);
+    const old = await api("POST", "/iot/telemetries", { ...body, message_id: "MSG-TEST-HASH-2" }, storedText);
+    const passed = good.status === 202 && old.status === 401;
+    return { passed, status: good.status, expectedStatus: 202, details: `chave em texto=${old.status}` };
+  });
+
+  await runTest("GET /devices não mostra api_key nem api_key_hash", async () => {
+    const res = await api("GET", `/devices/${HASH_DEVICE_ID}`);
+    const passed = res.status === 200 && !("api_key" in (res.json ?? {})) && !("api_key_hash" in (res.json ?? {}));
+    return { passed, status: res.status, expectedStatus: 200, details: Object.keys(res.json ?? {}).join(",") };
+  });
+
   // Post-cleanup of test records
   console.log("\n--- [8] Limpeza e Teardown ---");
   await runTest("Limpeza de registros temporários criados nos testes", async () => {

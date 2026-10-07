@@ -598,6 +598,49 @@ db.exec(`
 addColumnIfMissing("telemetry_queue", "error_type", "TEXT");
 addColumnIfMissing("events", "error_type", "TEXT");
 
+// Integração com o FluxID (Worker). next_attempt_at: quando a linha pode
+// ser tentada de novo (5 tentativas com espera crescente, decisão P6)
+addColumnIfMissing("telemetry_queue", "next_attempt_at", "DATETIME");
+addColumnIfMissing("events", "next_attempt_at", "DATETIME");
+
+// Alerta: status de negócio (ABERTO...) é separado do status da
+// sincronização; mudar o alerta (analisar/encerrar) o reenvia ao FluxID
+addColumnIfMissing("alerts", "sync_status", "TEXT NOT NULL DEFAULT 'PENDING'");
+addColumnIfMissing("alerts", "sync_attempt_count", "INTEGER NOT NULL DEFAULT 0");
+addColumnIfMissing("alerts", "sync_last_error", "TEXT");
+addColumnIfMissing("alerts", "sync_next_attempt_at", "DATETIME");
+
+// Chave do dispositivo vinda do FluxID só como hash (SHA-256 em
+// hexadecimal). Quando existe, a chave em texto deixa de valer
+addColumnIfMissing("devices", "api_key_hash", "TEXT");
+db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_api_key_hash
+  ON devices(api_key_hash) WHERE api_key_hash IS NOT NULL
+`);
+
+// Vínculos trazidos do FluxID: id do vínculo lá, para atualizar o mesmo
+// registro nas próximas sincronizações
+addColumnIfMissing("seal_assignments", "fluxid_id", "TEXT");
+addColumnIfMissing("cylinder_assignments", "fluxid_id", "TEXT");
+db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_seal_assignment_fluxid
+    ON seal_assignments (fluxid_id) WHERE fluxid_id IS NOT NULL;
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_cylinder_assignment_fluxid
+    ON cylinder_assignments (fluxid_id) WHERE fluxid_id IS NOT NULL;
+`);
+
+// Registro de cada rodada do Worker (o que foi enviado, o que falhou)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sync_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at DATETIME,
+    status TEXT NOT NULL DEFAULT 'RUNNING'
+      CHECK (status IN ('RUNNING', 'OK', 'PARCIAL', 'FALHOU')),
+    log_message TEXT
+  )
+`);
+
 // Verificação inicial
 console.log("✅ SQLite conectado:", databasePath);
 

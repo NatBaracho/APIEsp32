@@ -1,16 +1,18 @@
 import { Device } from "../models/Device";
 import { DeviceRepository } from "../repositories/DeviceRepository";
+import { hashApiKey } from "../utils/apiKeyHash";
 
 export type CreateDeviceResult =
   | "created"
   | "duplicate_device"
   | "duplicate_api_key";
 
-// Dispositivo como exposto pela API: a api_key nunca sai nas respostas (SEG-01)
-export type PublicDevice = Omit<Device, "api_key">;
+// Dispositivo como exposto pela API: a api_key (e o hash dela) nunca sai
+// nas respostas (SEG-01)
+export type PublicDevice = Omit<Device, "api_key" | "api_key_hash">;
 
 function toPublicDevice(device: Device): PublicDevice {
-  const { api_key: _apiKey, ...publicDevice } = device;
+  const { api_key: _apiKey, api_key_hash: _apiKeyHash, ...publicDevice } = device;
   return publicDevice;
 }
 
@@ -55,7 +57,10 @@ export class DeviceService {
 
     }
 
-    if (this.repository.findByApiKey(device.api_key)) {
+    if (
+      this.repository.findByApiKey(device.api_key) ||
+      this.repository.findByApiKeyHash(hashApiKey(device.api_key))
+    ) {
 
       console.log(
         "⚠️ API Key já usada por outro dispositivo"

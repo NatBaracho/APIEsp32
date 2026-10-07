@@ -112,4 +112,9 @@ export interface Alert {
   resolved_at?: string | null;
   resolved_by?: string | null;
   resolution_note?: string | null;
+  // Sincronização com o FluxID (Worker)
+  sync_status?: string;
+  sync_attempt_count?: number;
+  sync_last_error?: string | null;
+  sync_next_attempt_at?: string | null;
 }

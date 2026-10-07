@@ -6,7 +6,8 @@
   "scripts": {
     "start": "ts-node src/server.ts",
     "dev": "nodemon --exec ts-node src/server.ts",
-    "test": "ts-node tests/api.test.ts"
+    "test": "ts-node tests/api.test.ts",
+    "worker": "node --env-file-if-exists=.env --require ts-node/register src/worker/index.ts"
   },
   "keywords": [],
   "author": "",
@@ -15,12 +16,14 @@
   "dependencies": {
     "better-sqlite3": "^13.0.3",
     "express": "^5.2.1",
+    "pg": "^8.23.1",
     "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.3",
+    "@types/pg": "^8.23.1",
     "@types/swagger-ui-express": "^4.1.8",
     "nodemon": "^3.1.14",
     "ts-node": "^10.9.2",
