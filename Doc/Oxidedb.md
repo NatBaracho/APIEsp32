@@ -375,7 +375,7 @@ Tipos de alerta: os códigos em português do catálogo [Tipos-de-Erro.md](Tipos
 
 ## 9. Tabelas não existentes no banco atual
 
-- `sync_items`: não criada. O estado de cada item já fica na própria fila (`status`, tentativas, erro e próxima tentativa); a criação ou não é decisão a validar.
+- `sync_items`: não criada. O estado de cada item já fica na própria fila (`status`, tentativas, erro e próxima tentativa); não criar foi aprovado por Natã da Silva Baracho em 07/10/2026.
 - Não existe uma tabela `telemetries`; o nome real da fila é `telemetry_queue`.
 - `POST /api/v1/iot/alerts` cria alertas; `GET /api/v1/iot/alerts` lista; `PATCH /api/v1/iot/alerts/{alert_id}/status` passa para `EM_ANALISE` ou `ENCERRADO`.
 
