@@ -318,7 +318,7 @@ Mapeamentos semânticos candidatos de alertas que precisam ser aprovados: `SEAL_
 
 ### 8.3 Preparação pendente para iniciar a sincronização
 
-O plano completo, com as tabelas de conversão e as decisões pendentes P1 a P8, está em [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md).
+O plano completo, com as tabelas de conversão e as decisões P1 a P8 (fechadas em 06/10/2026), está em [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md).
 
 - ✅ Dump restaurado e analisado num servidor PostgreSQL temporário, separado do banco principal (entrega E).
 - Aplicar os scripts de `sql/fluxid/` no banco principal e gerar um novo dump.
