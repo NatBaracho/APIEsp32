@@ -205,11 +205,13 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ Scripts de ajuste de estrutura e de correção da massa de testes do FluxID (`sql/fluxid/`), validados em servidor temporário.
 - [ ] Aplicar os scripts no FluxID principal e versionar o novo dump.
 - ✅ Decisões P1 a P8 do plano de integração fechadas (06/10/2026).
+- [ ] Script `sql/fluxid/003`: data gravada na chegada (P1), quarentena da telemetria sem GPS (P2), tabela de eventos do dispositivo (P4) e tipos de alerta do catálogo em `alertas.tipo` (P5).
+- [ ] Regras do Worker: evento sem lacre espera o vínculo (P3), código do alerta = `alert_id` da Oxide (P7) e lacre só marcado como `SUSPEITA_VIOLACAO`, com confirmação do gestor (P8).
 - [ ] Oxide passar a guardar `api_key_hash` e comparar o SHA-256 da `X-API-Key`.
 - [ ] Definir configuração segura de conexão.
 - [ ] Implementar leitura de pendências e envio ao PostgreSQL.
 - [ ] Implementar estados/tabelas de sincronização (`sync_logs` e `sync_items`).
-- [ ] Garantir transações, idempotência, retry e recuperação sem perda de dados.
+- [ ] Garantir transações, idempotência, retry (5 tentativas: 1 min, 5 min, 15 min, 1 h e 6 h; depois o gestor resolve, P6) e recuperação sem perda de dados.
 - [ ] Implementar inicialização, encerramento e logs operacionais do Worker.
 - [ ] Testar sucesso, repetição, indisponibilidade do PostgreSQL e recuperação.
 - [ ] Documentar configuração, execução e recuperação de falhas.
@@ -219,8 +221,9 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - [ ] Definir política de expurgo e retenção.
 - [ ] Definir backup e procedimento de restauração.
 - [ ] Implementar observabilidade e métricas necessárias para operação.
-- [ ] Avaliar necessidade de dashboard operacional.
+- [ ] Dashboard com mapa, lendo o FluxID: lacres e cilindros pelo Brasil, lacre sem GPS na última posição conhecida e alertas como pontos e cores na posição atual do lacre (requisito definido em 06/10/2026).
 - [ ] Executar compilação, suíte de testes e testes de integração com PostgreSQL.
+- ✅ `Desenvolvimento.md` com o papel de cada parte (API, Oxide, Worker e FluxID) e o histórico de PRs por funcionalidade (Parte 3), atualizado a cada PR.
 - [ ] Revisar documentação final e confirmar que todos os fluxos implantados estão descritos.
 
 ## Status real
@@ -236,7 +239,10 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 | Histórico de associações | Implementado e validado |
 | Geofence | Pendente |
 | Comandos automáticos | Pendente |
-| Worker e sincronização PostgreSQL | Pendente |
+| Decisões de integração (P1 a P8) | Fechadas |
+| Worker e sincronização PostgreSQL | Pendente (regras definidas) |
+| Dashboard com mapa | Pendente (requisito definido) |
 | Hardening adicional de segurança | Pendente, fora do MVP atual |
 
 **Conclusão:** a API local atual está operacional para os fluxos implementados. O projeto completo ainda não está concluído; faltam as próximas entregas do roadmap e a camada de sincronização/operação.
+Atualização de 06/10/2026 (decisões P1 a P8 e dashboard com mapa) conferida por questionário (3/3 sim) e **aprovada por Natã da Silva Baracho**.
