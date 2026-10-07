@@ -1,6 +1,6 @@
 # Plano de Teste — FluxID / Oxide IoT
 
-**Versão:** 1.11
+**Versão:** 1.12
 **Data:** 06/10/2026
 **Escopo:** API Oxide (Node.js + TypeScript + Express + SQLite), sincronização com o PostgreSQL FluxID e API FluxID (NestJS) planejada
 **Validação humana:** Natã da Silva Baracho
@@ -328,7 +328,7 @@ Implementada na Oxide como cópia provisória do FluxID: rotas abertas `/seals`,
 | ASC-10 | Lacre aberto (`UNLOCKED`/`BROKEN`) com cilindro `EM_TRANSITO` | `error_type = LACRE_ABERTO_EM_TRANSITO`, sem alerta | A |
 | ASC-11 | Telemetria de dispositivo sem lacre / lacre sem cilindro | `error_type` `DISPOSITIVO_SEM_LACRE` / `LACRE_SEM_CILINDRO` | A |
 | ASC-12 | Lacre fora de `EM_ESTOQUE`/`REMOVIDO` instalado num cilindro | `409` | A |
-| ASC-13 | Cadastro de lacre/cilindro duplicado (código, UID NFC, número de série) e lacre cadastrado como `INSTALADO` | `409` / `400` | A |
+| ASC-13 | Cadastro de lacre/cilindro duplicado (código, UID NFC) e lacre cadastrado como `INSTALADO` | `409` / `400`. Número de série repetido é **aceito** (`201`), porque a série só é única por empresa, no FluxID (achado A3, 07/10/2026) | A |
 | ASC-14 | Estado `INSTALADO` manual | `409` (só pelo vínculo) | A |
 
 ### 10.2 Histórico de associações
@@ -410,6 +410,22 @@ Implementada na Oxide como cópia provisória do FluxID: rotas abertas `/seals`,
 | INT-07 | `GET /devices` | Sem `api_key` e sem `api_key_hash` | A |
 
 ---
+
+### 10.7 Simulação do lacre (`npm run simular`)
+
+Ferramenta de teste de ponta a ponta, fora da suíte: cada rodada faz cerca de 58 verificações, sobre a Oxide e o FluxID de análise no Docker. Relatório: [Relatorio-de-Teste-2026-10-07-18h45.md](Relatorio-de-Teste-2026-10-07-18h45.md).
+
+| ID | Caso | Esperado |
+| --- | --- | --- |
+| SIM-01 | Operador: cadastro unitário (empresa, operador, cliente com endereço, cilindro, lacre, dispositivo, vínculos e rota/entrega) | Tudo cadastrado; lacre `INSTALADO`; entrega `PENDENTE` com o cilindro |
+| SIM-02 | Operador: erros de cadastro | Série repetida na mesma empresa, código de lacre repetido, segundo lacre no cilindro e alerta com o par errado: recusados |
+| SIM-03 | Operador: cadastro em massa (CSV) | 20 conjuntos numa transação; reimportação recusada inteira |
+| SIM-04 | Cadastro FluxID → Oxide | 0 conflitos; todos os cilindros da empresa copiados (achado A3) |
+| SIM-05 | Lacre ativo, trajeto, duplicidade e GPS sem sinal | `202`, `200` na posição repetida, `409` no `message_id` repetido, quarentena |
+| SIM-06 | Lacre aberto em trânsito, fora da rota, geocerca (dentro e fora de 10 m), violação | `error_type` `LACRE_ABERTO_EM_TRANSITO`; distâncias calculadas; alertas aceitos |
+| SIM-07 | Todos os alertas do catálogo, nome antigo e código inválido | `201` nos 28 códigos e no nome antigo; `400` no inválido |
+| SIM-08 | Fila | FluxID fora do ar sem gastar tentativa; espera do vínculo; dispositivo fora do FluxID com nova tentativa; alerta sem lacre parado; reenvio sem duplicar; nova tentativa pelo gestor |
+| SIM-09 | Gestor e visualização | Encerramento no FluxID; mapa com a cor do alerta; eventos, quarentena, histórico do cilindro e erros da sincronização |
 
 ## 11. Testes da API FluxID (NestJS) — fase planejada
 
@@ -550,4 +566,5 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | 1.8 | 06/10/2026 | Entrega de alertas, decisões de Natã da Silva Baracho: `alert_type` com os códigos do catálogo em português (nomes antigos convertidos), severidade padrão do catálogo, listagem e rota para analisar e encerrar alertas; ALT-03, ALT-05, ALT-07, ALT-08 e BD-06 revisados; novos ALT-13 a ALT-21 e BD-19; suíte com 86 casos |
 | 1.9 | 07/10/2026 | FluxID, decisão de Natã da Silva Baracho: alerta com cilindro e lacre obrigatórios (script `003`); novos FLX-23 a FLX-25 executados num servidor PostgreSQL temporário e FLX-26 (gatilho) pendente; SYN-09 passa a citar o script `004` |
 | 1.10 | 07/10/2026 | Swagger organizado em grupos (novo GER-06); FluxID de análise no Docker; dump em `sql/fluxid/FluxID.sql`; suíte com 87 casos |
+| 1.12 | 07/10/2026 | Simulador do lacre (seção 10.7, SIM-01 a SIM-09); ASC-13 revisto (série repetida aceita; achado A3) |
 | 1.11 | 07/10/2026 | Integração Oxide ⇄ FluxID implementada: SYN-01 a SYN-16 revistos com as regras aprovadas, novos SYN-17 a SYN-24 e INT-01 a INT-07; BD-01 e BD-02 com `sync_logs`; página `/api-docs-fluxid` com a proposta da API do frontend (GER-07, GER-08); suíte com 96 casos. Teste formal da IA em 07/10/2026, sem falhas |

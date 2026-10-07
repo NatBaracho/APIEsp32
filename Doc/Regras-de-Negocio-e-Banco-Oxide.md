@@ -131,7 +131,7 @@ Respostas do middleware: `401` para chave ausente ou inválida; `403` para dispo
 
 - O cadastro oficial está no FluxID; a Oxide mantém uma **cópia provisória** (mesmos códigos `LCR-…`/`CIL-…` e mesmos estados) até o Worker sincronizar os dados. As rotas são abertas, como `/devices`.
 - Lacre: `seal_code` e `nfc_uid` únicos; nasce `EM_ESTOQUE`; não pode ser cadastrado como `INSTALADO`.
-- Cilindro: `cylinder_code` e `serial_number` únicos; nasce `DISPONIVEL`; estado alterado por `POST /cylinders/:cylinderCode/status`.
+- Cilindro: `cylinder_code` único; `serial_number` pode repetir (duas empresas podem ter a mesma série; a regra "série única por empresa" é do FluxID, que conhece a empresa). A API chega ao cilindro pelo lacre e pelo código, nunca pela série. Nasce `DISPONIVEL`; estado alterado por `POST /cylinders/:cylinderCode/status`.
 - Um lacre tem um cilindro ativo e um cilindro um lacre ativo (RN04); um lacre tem um dispositivo ativo e um dispositivo um lacre ativo (RN05). Conflito → `409`; entidade inexistente → `404`.
 - `replace: true` faz a **troca** numa transação: encerra os vínculos em conflito com motivo "Substituído por novo vínculo" e cria o novo.
 - Encerrar um vínculo preenche `ended_at` e `end_reason`; nada é apagado (RN21). Encerrar de novo → `409`.
@@ -243,7 +243,7 @@ A inicialização insere, se estiverem ausentes, os códigos `ACTIVE`, `INACTIVE
 | Coluna | Regra |
 | --- | --- |
 | `cylinder_code` | `TEXT NOT NULL UNIQUE` (ex.: `CIL-000001`). |
-| `serial_number` | `TEXT NOT NULL UNIQUE`. |
+| `serial_number` | `TEXT NOT NULL`, com índice (sem `UNIQUE` desde 07/10/2026; bancos antigos são migrados preservando os dados). |
 | `status` | `TEXT NOT NULL DEFAULT 'DISPONIVEL'`, `CHECK` com os estados de `cilindros` do FluxID. |
 | `created_at`, `updated_at` | `DATETIME`, preenchidos pelo banco. |
 
