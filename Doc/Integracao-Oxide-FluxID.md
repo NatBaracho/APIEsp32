@@ -83,16 +83,15 @@ Eventos **sem** `seal_status` (ex.: `startup`, falha de hardware) vão para uma 
 
 | Oxide | FluxID | Regra |
 | --- | --- | --- |
-| `alert_type` `SEAL_BROKEN` | `tipo` `VIOLACAO_LACRE` | Conversão |
-| `GEOFENCE_EXIT` | `SAIDA_GEOCERCA` | Conversão |
-| `LOW_BATTERY` | `BATERIA_BAIXA` | Conversão |
-| `COMMUNICATION_LOST` | `SEM_COMUNICACAO` | Conversão |
-| `DEVICE_ERROR`, `COMMAND_FAILURE` e demais códigos | Código do catálogo | O FluxID passa a aceitar **todos os códigos** de [Tipos-de-Erro.md](Tipos-de-Erro.md) em `alertas.tipo` (decisão P5) |
+| `alert_type` (código do catálogo, ex.: `LACRE_VIOLADO`) | `tipo` | **Direto**: desde a entrega de alertas em português, a Oxide grava os códigos de [Tipos-de-Erro.md](Tipos-de-Erro.md) |
+| — | — | O FluxID passa a aceitar **todos os códigos** do catálogo em `alertas.tipo` (decisão P5, script `003`). Enquanto isso não for aplicado, códigos como `VIOLACAO_LACRE` do dump antigo correspondem a `LACRE_VIOLADO` (seção 7 de `Tipos-de-Erro.md`) |
 | `severity` | `severidade` | **Direto** (entrega C: mesmos valores) |
 | `status` | `status` | **Direto** (entrega C: mesmos valores) |
 | `title`, `description` | `titulo`, `descricao` | Direto |
 | `created_at` | `aberto_em` | Direto |
 | `resolved_at` | `encerrado_em` | Direto |
+| `resolved_by` | `encerrado_por` | Texto na Oxide; no FluxID é o usuário. O Worker precisa mapear o nome para o usuário (a definir) |
+| `resolution_note` | — | Motivo do encerramento; sem coluna própria no dump: guardar na descrição ou em coluna nova do script `003` (a definir) |
 | `alert_id` | `codigo` | **Direto** (decisão P7): a API Oxide gera o alerta e o envia; o FluxID não cria outro código |
 | `device_id` | `organizacao_id`, `lacre_id`, `cilindro_id` | Seção 2 |
 
@@ -102,7 +101,7 @@ Eventos **sem** `seal_status` (ex.: `startup`, falha de hardware) vão para uma 
 
 O FluxID não tem tabela de comandos. Decisão da entrega D: os comandos (`TRAVAR_VALVULA`, `DESTRAVAR_VALVULA`) ficam **só na Oxide** por enquanto; criar ou não uma tabela no FluxID será decidido junto com o Worker.
 
-Os tipos de alerta seguirão os códigos em português do catálogo [Tipos-de-Erro.md](Tipos-de-Erro.md), o que reduz as conversões da seção 3.3.
+Os tipos de alerta já usam os códigos em português do catálogo [Tipos-de-Erro.md](Tipos-de-Erro.md), sem conversão na seção 3.3.
 
 ## 4. Chave de API do dispositivo
 

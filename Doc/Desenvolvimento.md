@@ -46,7 +46,7 @@ O que a Oxide faz hoje:
 | Mantém fila local | Grava no `oxide.db` (tabelas `telemetry_queue`, `events`, `commands`, `alerts`) até o Worker sincronizar |
 | Executa regras operacionais | Valida o payload, detecta duplicidade, controla posições repetidas e atualiza `last_seen_at` |
 | Gerencia comandos | O ESP32 consulta comandos pendentes (ex.: travar ou destravar a válvula) e confirma `EXECUTADO` ou `ERRO` |
-| Gerencia alertas | `SEAL_BROKEN`, `LOW_BATTERY`, `GEOFENCE_EXIT`, `DEVICE_ERROR`, `COMMAND_FAILURE`, `COMMUNICATION_LOST` |
+| Gerencia alertas | Tipos do catálogo [Tipos-de-Erro.md](Tipos-de-Erro.md) (ex.: `LACRE_VIOLADO`, `BATERIA_BAIXA`, `SEM_COMUNICACAO`); listagem, análise e encerramento pelo gestor |
 
 ### Quem faz o quê: API, Oxide, Worker e FluxID
 
@@ -63,11 +63,11 @@ O que a Oxide faz hoje:
 - Valida o que chega: tipos, faixa de latitude e longitude, `seal_status` e listas fechadas (severidade, comandos).
 - Evita duplicidade pelo `message_id` e não grava de novo uma posição repetida, só atualiza a data e a hora.
 - Preenche o lacre e o cilindro da telemetria pelo vínculo ativo e marca o `error_type` (`DISPOSITIVO_SEM_LACRE`, `LACRE_SEM_CILINDRO`, `LACRE_ABERTO_EM_TRANSITO`).
-- Gera os alertas, com severidade padrão por tipo. O código do alerta é o que vai para o FluxID (decisão P7).
+- Gera os alertas com os códigos em português do catálogo e a severidade sugerida nele. O código do alerta é o que vai para o FluxID (decisão P7). Na transição, os nomes antigos em inglês enviados pelo firmware são convertidos.
+- Lista os alertas e deixa o gestor passar um alerta para `EM_ANALISE` e `ENCERRADO`, registrando quem encerrou e o motivo.
 - Oferece as rotas provisórias de cadastro (`/devices`, `/seals`, `/cylinders`, `/assignments`) e o Swagger.
 
 **API — fará**
-- Tipos de alerta com os códigos em português de [Tipos-de-Erro.md](Tipos-de-Erro.md).
 - Alertas e comandos automáticos a partir do `error_type`: geofence, saída de rota (alerta ao motorista e ao gestor), lacre aberto → `TRAVAR_VALVULA`.
 - Conferir a chave pelo hash vindo do FluxID, em vez da chave em texto.
 
@@ -75,7 +75,7 @@ O que a Oxide faz hoje:
 - É a **fila local**: `telemetry_queue` e `events` ficam com `status = PENDING` até o Worker sincronizar. Se o FluxID estiver fora do ar, nada se perde.
 - Guarda os comandos (`commands`) e os alertas (`alerts`).
 - Guarda a **cópia provisória** do cadastro: `devices`, `seals`, `cylinders` e os vínculos com histórico (`seal_assignments`, `cylinder_assignments`).
-- Protege as regras no próprio banco: chave única, `active` só 0 ou 1, catálogo de comandos, severidade e status do alerta, um vínculo ativo por lacre, cilindro e dispositivo (RN04, RN05).
+- Protege as regras no próprio banco: chave única, `active` só 0 ou 1, catálogo de comandos, tipo, severidade e status do alerta (alerta `ENCERRADO` sempre com data), um vínculo ativo por lacre, cilindro e dispositivo (RN04, RN05).
 - As tabelas são criadas e migradas automaticamente quando a API inicia.
 
 **Oxide — fará**
@@ -160,6 +160,8 @@ POST /api/v1/assignments/seal-cylinder  { "seal_code": "LCR-000010", "cylinder_c
 | `POST /iot/commands/confirm` | Confirmar execução de um comando | `200`; `400`; `401`; `403`; `404`; `409` |
 | `POST /iot/alerts` | Registrar um alerta | `201`; `400`; `401`; `403`; `404`; `409` |
 
+Rotas de alertas para a equipe e o gestor (abertas e provisórias, até o controle por perfil do FluxID): `GET /iot/alerts?status=&device_id=` (lista, do mais recente ao mais antigo) e `PATCH /iot/alerts/{alert_id}/status` (analisar ou encerrar).
+
 Rotas de apoio para a equipe: `GET /iot/telemetries` (lista as telemetrias de todos os dispositivos, da mais recente para a mais antiga; exige uma chave válida) e `GET/POST /devices`, `/seals`, `/cylinders` e `/assignments` (seção 1.3).
 
 ### Telemetria — exemplo
@@ -196,12 +198,24 @@ Rotas de apoio para a equipe: `GET /iot/telemetries` (lista as telemetrias de to
 ### Alerta — exemplo
 
 ```json
-{ "alert_id": "ALT-000001", "device_id": "DSP-000001", "alert_type": "SEAL_BROKEN", "severity": "CRITICA", "title": "Lacre rompido" }
+{ "alert_id": "ALT-000001", "device_id": "DSP-000001", "alert_type": "LACRE_VIOLADO", "severity": "CRITICA", "title": "Lacre rompido" }
 ```
 
 - Obrigatórios: `alert_id`, `device_id`, `alert_type` e `title`.
-- `severity` é opcional (`BAIXA`, `MEDIA`, `ALTA`, `CRITICA`). Sem ela, vale o padrão do tipo: `SEAL_BROKEN` → `CRITICA`; `GEOFENCE_EXIT` e `COMMAND_FAILURE` → `ALTA`; `DEVICE_ERROR` e `COMMUNICATION_LOST` → `MEDIA`; `LOW_BATTERY` → `BAIXA`.
+- `alert_type`: um dos 28 códigos de [Tipos-de-Erro.md](Tipos-de-Erro.md) (ex.: `LACRE_VIOLADO`, `GPS_INATIVO`, `BATERIA_BAIXA`, `DISPOSITIVO_FALHA`). Outro valor → `400`.
+- **Transição:** os nomes antigos continuam aceitos e são gravados em português: `SEAL_BROKEN` → `LACRE_VIOLADO`, `GEOFENCE_EXIT` → `SAIDA_GEOCERCA`, `LOW_BATTERY` → `BATERIA_BAIXA`, `DEVICE_ERROR` → `DISPOSITIVO_FALHA`, `COMMAND_FAILURE` → `COMANDO_FALHOU`, `COMMUNICATION_LOST` → `SEM_COMUNICACAO`. Atualize o firmware para os códigos em português quando puder.
+- `severity` é opcional (`BAIXA`, `MEDIA`, `ALTA`, `CRITICA`). Sem ela, vale a severidade sugerida no catálogo (ex.: `LACRE_VIOLADO` → `CRITICA`; `SEM_COMUNICACAO` e `COMANDO_FALHOU` → `ALTA`; `DISPOSITIVO_FALHA` → `MEDIA`; `BATERIA_BAIXA` → `BAIXA`).
 - O alerta nasce sempre `ABERTO`. Campos antigos `status_id` e `severity_id` são ignorados.
+
+### Análise e encerramento de alertas (gestor)
+
+```http
+PATCH /api/v1/iot/alerts/ALT-000001/status   { "status": "EM_ANALISE" }
+PATCH /api/v1/iot/alerts/ALT-000001/status   { "status": "ENCERRADO", "resolved_by": "Maria (gestora)", "resolution_note": "Lacre conferido no local" }
+```
+
+- Caminhos: `ABERTO` → `EM_ANALISE` → `ENCERRADO`, ou `ABERTO` → `ENCERRADO`. Encerrar exige `resolved_by` e `resolution_note` (`400` sem eles); a data é preenchida sozinha.
+- `ENCERRADO` é final: tentar mudar de novo → `409` ("um problema novo gera um alerta novo"). Transição repetida → `409`; alerta inexistente → `404`.
 
 ## 1.5 O que o firmware faz com cada resposta
 
@@ -273,7 +287,7 @@ Rotas de apoio para a equipe: `GET /iot/telemetries` (lista as telemetrias de to
 ### Comandos e alertas
 
 - `commands`: `command_id`, `device_id`, `command_type` (`TRAVAR_VALVULA`, `DESTRAVAR_VALVULA`), `status` (`PENDENTE` → `EXECUTADO`/`ERRO`), `created_at`, `executed_at`, `error_message`. O banco rejeita comando pendente com outro tipo.
-- `alerts`: `alert_id`, `device_id`, `alert_type`, `severity` (`BAIXA`, `MEDIA`, `ALTA`, `CRITICA`), `status` (`ABERTO`, `EM_ANALISE`, `ENCERRADO`), `title`, `description`, `created_at`, `resolved_at`. Severidade e status usam os mesmos valores do FluxID.
+- `alerts`: `alert_id`, `device_id`, `alert_type`, `severity` (`BAIXA`, `MEDIA`, `ALTA`, `CRITICA`), `status` (`ABERTO`, `EM_ANALISE`, `ENCERRADO`), `title`, `description`, `created_at`, `resolved_at`, `resolved_by`, `resolution_note`. Tipo, severidade e status usam os mesmos valores do FluxID e são protegidos por `CHECK`.
 
 ### Associação
 
@@ -290,13 +304,13 @@ Rotas de apoio para a equipe: `GET /iot/telemetries` (lista as telemetrias de to
 - Worker de sincronização com o FluxID.
 - Cadastro e vínculos vindos do FluxID (por isso `/devices`, `/seals`, `/cylinders` e `/assignments` são provisórios).
 - Criação automática de comandos e verificação dos tipos de erro do catálogo (`Tipos-de-Erro.md`), como saída de rota e GPS sem sinal.
-- Rotas para analisar e encerrar alertas.
+- Justificativa do motorista na saída de rota (fica para a entrega de geofence e rota).
 - Geofence, comandos automáticos e alertas automáticos a partir do `error_type`.
 
 ## 1.10 Estado atual
 
-- API em funcionamento, validada pela suíte automatizada (`npm test`, 71/71) e pelo Roteiro de Teste completo no `oxide.db` real.
-- Próximas entregas: `alert_type` da Oxide com os códigos em português do catálogo de erros; regras e alertas automáticos (incluindo comandos automáticos); Worker (decisões P1 a P8 já fechadas na seção 5 do plano de integração).
+- API em funcionamento, validada pela suíte automatizada (`npm test`, 86/86) e pelo Roteiro de Teste completo no `oxide.db` real.
+- Próximas entregas: geofence e rota; regras e alertas automáticos (incluindo comandos automáticos); Worker (decisões P1 a P8 já fechadas na seção 5 do plano de integração).
 - Pendências conhecidas: firmware do ESP32 precisa enviar `seal_status` e `attempt_count` e tratar as respostas da seção 1.5; `nodemon` com vulnerabilidade apenas em desenvolvimento.
 
 ---
@@ -563,9 +577,24 @@ Natã da Silva Baracho fechou as decisões pendentes do plano de integração (s
 
 Nenhum código foi alterado: as decisões orientam a entrega do Worker. Registro conferido por questionário (6/6 sim), **aprovado por Natã da Silva Baracho** em 06/10/2026.
 
+### 7.20 Alertas em português, análise e encerramento (06/10/2026)
+Decisões de Natã da Silva Baracho:
+
+| Tema | Decisão | Implementação |
+| --- | --- | --- |
+| Tipos aceitos | Os 28 códigos do catálogo `Tipos-de-Erro.md` (mesma lista do FluxID, P5) | `alertTypes` em `models/Alert.ts`; `CHECK` em `alerts.alert_type` |
+| Transição | Nomes antigos em inglês aceitos e gravados em português, até nova decisão | `normalizeAlertType` |
+| Severidade padrão | A sugerida no catálogo (`SEM_COMUNICACAO` passa de `MEDIA` para `ALTA`) | `defaultSeverityByType` |
+| Alertas já gravados | Migração automática; tipo desconhecido vira `DISPOSITIVO_FALHA` com o original na descrição | `migrateAlertTypes` em `connection.ts` |
+| Analisar e encerrar | `PATCH /iot/alerts/{alert_id}/status`; `ABERTO` → `EM_ANALISE` → `ENCERRADO` ou direto; `ENCERRADO` é final; encerrar exige `resolved_by` e `resolution_note` | `AlertService`; colunas novas; `CHECK` de `ENCERRADO` com data |
+| Listagem | `GET /iot/alerts` com filtros `status` e `device_id` | `AlertRepository.list` |
+| Acesso | Rotas abertas e provisórias, como `/devices` | `alertRoutes.ts` |
+
+Compilação aprovada, suíte com 86/86 (15 casos novos) em quatro rodadas, migração testada em cópias do banco (formato anterior à entrega C e formato das entregas C a B), BD-14 com 86/86 num banco criado só pelo script do `Oxidedb.md` e Roteiro de Teste v1.8 completo no `oxide.db` real, com checksum idêntico antes e depois e as demais seções idênticas à rodada da entrega B. Validação registrada em [Relatorio-de-Teste-2026-10-06-23h40.md](Doc_tese/Relatorio-de-Teste-2026-10-06-23h40.md), **aprovada por Natã da Silva Baracho**.
+
 ## 9. Suíte de testes automatizados (`npm test`)
 
-A suíte `tests/api.test.ts` cobre hoje 71 casos de ponta a ponta:
+A suíte `tests/api.test.ts` cobre hoje 86 casos de ponta a ponta:
 
 1. **Geral & Documentação:** `/`, `/api-docs/` e `/api-docs/swagger-ui-init.js`.
 2. **Dispositivos:** listagem e busca sem `api_key`, `404`, validação `400`, criação `201`, `device_id` duplicado (`409`), `api_key` já usada (`409`) e `active` inválido (`400`).
@@ -573,7 +602,7 @@ A suíte `tests/api.test.ts` cobre hoje 71 casos de ponta a ponta:
 4. **Telemetria:** campos obrigatórios (`400`), payload válido (`202`), `message_id` duplicado (`409`), posição repetida (`200`, sem nova linha), posição nova (nova linha), reenvio de posição repetida (`409`), `attempt_count` em `device_attempt_count`, tipo inválido (`400`), dispositivo inexistente (`404`), chave de outro dispositivo (`403`), `seal_status` inválido (`400`), mudança do lacre na mesma posição (nova linha), `attempt_count` negativo (`400`), latitude fora da faixa (`400`), só latitude (`400`) e JSON malformado (`400`).
 5. **Eventos:** sem chave (`401`), campos obrigatórios (`400`), `seal_status` inválido (`400`), evento válido (`202`), `attempt_count` em `device_attempt_count`, dispositivo não cadastrado (`404`, sem criação), chave de outro dispositivo (`403`) e duplicidade (`409`).
 6. **Comandos:** sem chave (`401`), chave de outro dispositivo (`403`), pendentes (`200`), status inválido (`400`), comando inexistente (`404`), confirmação (`200`), reconfirmação (`409`) e lista após confirmação, rejeição pelo banco de comando pendente fora do catálogo e de status desconhecido.
-7. **Alertas:** sem chave (`401`), chave de outro dispositivo (`403`), tipo inválido (`400`), severidade inválida (`400`), criação com severidade padrão e status `ABERTO` (`201`), severidade informada com campos antigos ignorados (`201`) e duplicidade (`409`).
+7. **Alertas:** sem chave (`401`), chave de outro dispositivo (`403`), tipo inválido e `toString` (`400`), severidade inválida (`400`), nome antigo convertido para português com severidade padrão (`201`), severidade informada com campos antigos ignorados (`201`), duplicidade (`409`), código do catálogo (`201`), `CHECK` de tipo, listagem e filtros, transições `EM_ANALISE`/`ENCERRADO` (`200`), transição repetida e reabertura (`409`), encerrar sem motivo (`400`), inexistente (`404`) e `CHECK` de encerramento.
 8. **Associação:** cadastro de lacres e cilindros (inclusive duplicidades), vínculos, conflitos RN04/RN05, lacre danificado que não instala, troca com `replace`, encerramento, histórico, `INSTALADO` manual bloqueado, telemetria com lacre e cilindro do vínculo e os três `error_type`.
 9. **Limpeza:** remoção dos registros `DSP-TEST%`, `LCR-TEST%` e `CIL-TEST%` ao final.
 
@@ -596,6 +625,7 @@ Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **a
 | #3 | C — Severidade e coordenadas | Alerta com `severity` (`BAIXA` a `CRITICA`, padrão por tipo) e `status` sempre `ABERTO`; campos antigos ignorados; latitude e longitude fora da faixa ou incompletas → `400` |
 | #7 | D — Catálogo de comandos | Comandos só `TRAVAR_VALVULA` e `DESTRAVAR_VALVULA`; leitura e confirmação pelo ESP32 sem mudança; sem rota aberta para criar comando |
 | #8 | B — Associação | Rotas `/seals`, `/cylinders` e `/assignments` (abertas e provisórias); troca com `replace`; telemetria recebe lacre e cilindro do vínculo ativo; `error_type` registrado no recebimento |
+| #12 | Alertas em português | `alert_type` com os 28 códigos do catálogo (nomes antigos convertidos); severidade padrão do catálogo; `GET /iot/alerts` com filtros; `PATCH /iot/alerts/{alert_id}/status` para analisar e encerrar, com quem e motivo |
 
 ## 3.2 Oxide (`oxide.db`)
 
@@ -605,6 +635,7 @@ Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **a
 | #3 | C — Severidade e coordenadas | Tabela `alerts` com `severity` e `status` em texto e `CHECK`; migração automática dos alertas antigos |
 | #7 | D — Catálogo de comandos | `CHECK` do catálogo e do status em `commands`; migração de `LOCK_VALVE`/`UNLOCK_VALVE` e de pendentes desconhecidos |
 | #8 | B — Associação | Tabelas `seals`, `cylinders`, `seal_assignments` e `cylinder_assignments`, com índices de vínculo ativo único e `ON DELETE RESTRICT`; coluna `error_type` em telemetria e eventos; `Oxidedb.md` v1.5 validado |
+| #12 | Alertas em português | `alerts` com `CHECK` do catálogo em `alert_type`, colunas `resolved_by` e `resolution_note` e `CHECK` de `ENCERRADO` com data; migração automática dos tipos em inglês; `Oxidedb.md` v1.6 validado |
 
 ## 3.3 FluxID
 
@@ -616,6 +647,7 @@ Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **a
 | #7 | D — Catálogo de erros | `Tipos-de-Erro.md`: catálogo em português com o equivalente de cada código no FluxID |
 | #8 | B — Associação | A cópia provisória da Oxide segue os mesmos códigos e estados de lacres, cilindros e vínculos do FluxID |
 | #9 | Decisões P1 a P8 | Data gravada na chegada, quarentena para telemetria sem GPS, tabela de eventos do dispositivo, tipos de alerta do catálogo (script `003` futuro) |
+| #12 | Alertas em português | A Oxide já usa os mesmos códigos de alerta que o FluxID vai aceitar (P5); `resolved_by` e `resolution_note` correspondem a `alertas.encerrado_por` e ao motivo do encerramento |
 
 ## 3.4 Worker
 
@@ -627,3 +659,4 @@ Ainda não implementado. O que já foi preparado:
 | #4 | E — Banco FluxID | `Integracao-Oxide-FluxID.md`: fluxo, identificação e conversão de cada dado; chave por hash |
 | #8 | B — Associação | Mapeamento dos vínculos da Oxide para os do FluxID |
 | #9 | Decisões P1 a P8 | Regras do Worker: data, quarentena, espera de vínculo, eventos do dispositivo, tipos de alerta, 5 tentativas, código do alerta e suspeita de violação |
+| #12 | Alertas em português | O tipo do alerta passa direto, sem conversão; falta mapear `resolved_by` (texto) para o usuário do FluxID |

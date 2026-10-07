@@ -47,6 +47,8 @@ Use **Try it out** para executar as requisições. Para telemetrias e eventos, c
 | `GET` | `/api/v1/iot/commands/:deviceId` | Buscar comandos pendentes do dispositivo |
 | `POST` | `/api/v1/iot/commands/confirm` | Confirmar execução ou erro de comando |
 | `POST` | `/api/v1/iot/alerts` | Registrar alerta do dispositivo |
+| `GET` | `/api/v1/iot/alerts` | Listar alertas (filtros `status` e `device_id`; aberta e provisória) |
+| `PATCH` | `/api/v1/iot/alerts/{alert_id}/status` | Analisar ou encerrar alerta (aberta e provisória) |
 | `GET`/`POST` | `/api/v1/seals` | Listar e cadastrar lacres (provisório) |
 | `GET`/`POST` | `/api/v1/cylinders` | Listar e cadastrar cilindros (provisório) |
 | `GET`/`POST` | `/api/v1/assignments/device-seal` | Histórico e vínculo dispositivo ↔ lacre |
@@ -68,7 +70,7 @@ A tabela `devices` também possui `device_status_id`, `valve_status_id` e `seal_
 
 A associação dispositivo → lacre → cilindro fica numa cópia provisória do cadastro do FluxID (`seals`, `cylinders` e vínculos com histórico). Um lacre tem um cilindro e um dispositivo ativos por vez; a troca usa `replace: true`; nada é apagado. A telemetria recebe `lacre_id` e `cilindro_id` do vínculo ativo, e `error_type` registra dispositivo sem lacre, lacre sem cilindro e lacre aberto em trânsito.
 
-A tabela `alerts` armazena alertas associados a dispositivos. `POST /api/v1/iot/alerts` exige a API Key do dispositivo e aceita `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` ou `COMMUNICATION_LOST`. `severity` é opcional e aceita `BAIXA`, `MEDIA`, `ALTA` ou `CRITICA` (os mesmos valores do FluxID); sem ela, a API usa o padrão do tipo (`SEAL_BROKEN` → `CRITICA`; `GEOFENCE_EXIT` e `COMMAND_FAILURE` → `ALTA`; `DEVICE_ERROR` e `COMMUNICATION_LOST` → `MEDIA`; `LOW_BATTERY` → `BAIXA`). Todo alerta nasce com `status` `ABERTO`. Os campos antigos `status_id` e `severity_id` são ignorados.
+A tabela `alerts` armazena alertas associados a dispositivos. `POST /api/v1/iot/alerts` exige a API Key do dispositivo e aceita os 28 códigos em português do catálogo [Tipos-de-Erro.md](Doc/Tipos-de-Erro.md) (ex.: `LACRE_VIOLADO`, `BATERIA_BAIXA`, `SEM_COMUNICACAO`); a API e o banco recusam qualquer outro. Transição: os nomes antigos `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` e `COMMUNICATION_LOST` continuam aceitos e são gravados em português (`LACRE_VIOLADO`, `SAIDA_GEOCERCA`, `BATERIA_BAIXA`, `DISPOSITIVO_FALHA`, `COMANDO_FALHOU`, `SEM_COMUNICACAO`). `severity` é opcional e aceita `BAIXA`, `MEDIA`, `ALTA` ou `CRITICA` (os mesmos valores do FluxID); sem ela, vale a severidade sugerida no catálogo. Todo alerta nasce com `status` `ABERTO`; o gestor muda para `EM_ANALISE` e `ENCERRADO` pelo `PATCH`, e encerrar exige `resolved_by` e `resolution_note`. Os campos antigos `status_id` e `severity_id` são ignorados.
 
 ## Documentos
 

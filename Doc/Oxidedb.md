@@ -4,7 +4,7 @@
 
 **Buffer temporário de ingestão para dispositivos ESP32**
 
-**Versão:** 1.5  
+**Versão:** 1.6  
 **Projeto:** FluxID / Oxide IoT
 
 Inclui instruções de criação, modelo de dados e script SQL completo.
@@ -190,7 +190,19 @@ CREATE TABLE IF NOT EXISTS alerts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     alert_id TEXT NOT NULL UNIQUE,
     device_id TEXT NOT NULL,
-    alert_type TEXT NOT NULL,
+    alert_type TEXT NOT NULL
+        CHECK (alert_type IN (
+            'LACRE_VIOLADO', 'LACRE_ABERTO_EM_TRANSITO', 'LACRE_ABERTO_SEM_AUTORIZACAO',
+            'DISPOSITIVO_SEM_LACRE', 'LACRE_SEM_CILINDRO', 'LACRE_SEM_DISPOSITIVO',
+            'LACRE_REVISAO_VENCIDA', 'LACRE_REPROVADO_EM_USO',
+            'CILINDRO_SEM_CLIENTE', 'CILINDRO_SEM_LACRE', 'TESTE_HIDROSTATICO_VENCIDO',
+            'CILINDRO_REPROVADO_EM_USO',
+            'GPS_INATIVO', 'GPS_SEM_SINAL', 'POSICAO_INVALIDA', 'SAIDA_GEOCERCA',
+            'SAIDA_ROTA', 'MOVIMENTACAO_SUSPEITA', 'PARADA_PROLONGADA',
+            'BATERIA_BAIXA', 'SEM_COMUNICACAO', 'GSM_SINAL_FRACO', 'DISPOSITIVO_FALHA',
+            'DISPOSITIVO_NAO_CADASTRADO', 'CHAVE_INVALIDA',
+            'COMANDO_FALHOU', 'COMANDO_SEM_RESPOSTA', 'COMANDO_DESCONTINUADO'
+        )),
     severity TEXT NOT NULL
         CHECK (severity IN ('BAIXA', 'MEDIA', 'ALTA', 'CRITICA')),
     status TEXT NOT NULL DEFAULT 'ABERTO'
@@ -199,6 +211,9 @@ CREATE TABLE IF NOT EXISTS alerts (
     description TEXT,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     resolved_at DATETIME,
+    resolved_by TEXT,
+    resolution_note TEXT,
+    CHECK ((status = 'ENCERRADO') = (resolved_at IS NOT NULL)),
     FOREIGN KEY (device_id) REFERENCES devices(device_id)
 );
 
@@ -325,15 +340,15 @@ Em `telemetry_queue` e `events`, `status` e `attempt_count` controlam a sincroni
 
 O campo da API `event_type` é gravado pela aplicação na coluna `events.message_type`. O endpoint valida `seal_status` para aceitar `LOCKED`, `UNLOCKED` ou `BROKEN`; essa lista é validada na aplicação, não por um `CHECK` na tabela.
 
-Tipos de alerta previstos: `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` e `COMMUNICATION_LOST`. O schema atual não inclui `CHECK` para restringir `alert_type` a essa lista.
+Tipos de alerta: os códigos em português do catálogo [Tipos-de-Erro.md](Tipos-de-Erro.md), garantidos por `CHECK`. Na transição, a API aceita os nomes antigos em inglês (`SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE`, `COMMUNICATION_LOST`) e grava o código em português. Alerta `ENCERRADO` sempre tem `resolved_at` (e só ele), com quem encerrou (`resolved_by`) e o motivo (`resolution_note`).
 
-> **Severidade e status do alerta:** usam texto com os mesmos valores do FluxID (`BAIXA`/`MEDIA`/`ALTA`/`CRITICA` e `ABERTO`/`EM_ANALISE`/`ENCERRADO`). Bancos criados antes disso tinham `status_id` e `severity_id` apontando para `status(id)`; a aplicação migra a tabela `alerts` automaticamente, preservando os alertas (severidade pelo tipo; alerta já resolvido vira `ENCERRADO`).
+> **Severidade e status do alerta:** usam texto com os mesmos valores do FluxID (`BAIXA`/`MEDIA`/`ALTA`/`CRITICA` e `ABERTO`/`EM_ANALISE`/`ENCERRADO`). Bancos criados antes disso tinham `status_id` e `severity_id` apontando para `status(id)`; a aplicação migra a tabela `alerts` automaticamente, preservando os alertas (severidade pelo tipo; alerta já resolvido vira `ENCERRADO`). Bancos com tipos em inglês também são migrados ao iniciar: os 6 nomes antigos viram os códigos em português e um tipo desconhecido vira `DISPOSITIVO_FALHA`, com o tipo original anotado na descrição.
 
 ## 9. Tabelas não existentes no banco atual
 
 - `sync_logs` e `sync_items`: planejadas para o Worker de sincronização, mas ainda não criadas na Oxide.db atual.
 - Não existe uma tabela `telemetries`; o nome real da fila é `telemetry_queue`.
-- `POST /api/v1/iot/alerts` cria alertas; ainda não existem rotas de consulta, atualização ou resolução de alertas.
+- `POST /api/v1/iot/alerts` cria alertas; `GET /api/v1/iot/alerts` lista; `PATCH /api/v1/iot/alerts/{alert_id}/status` passa para `EM_ANALISE` ou `ENCERRADO`.
 
 ## 10. Verificação do schema
 
