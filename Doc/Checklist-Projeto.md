@@ -206,7 +206,9 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ Scripts de ajuste de estrutura e de correção da massa de testes do FluxID (`sql/fluxid/`), validados em servidor temporário.
 - [ ] Aplicar os scripts no FluxID principal e versionar o novo dump.
 - ✅ Decisões P1 a P8 do plano de integração fechadas (06/10/2026).
-- [ ] Script `sql/fluxid/003`: data gravada na chegada (P1), quarentena da telemetria sem GPS (P2), tabela de eventos do dispositivo (P4) e tipos de alerta do catálogo em `alertas.tipo` (P5).
+- ✅ Script `sql/fluxid/003`: alerta com cilindro e lacre obrigatórios (vínculo da data do alerta), validado em servidor temporário (07/10/2026).
+- [ ] Gatilho no FluxID que confere se o par lacre + cilindro do alerta tinha vínculo naquela data.
+- [ ] Script `sql/fluxid/004`: data gravada na chegada (P1), quarentena da telemetria sem GPS (P2), tabela de eventos do dispositivo (P4) e tipos de alerta do catálogo em `alertas.tipo` (P5).
 - [ ] Regras do Worker: evento sem lacre espera o vínculo (P3), código do alerta = `alert_id` da Oxide (P7) e lacre só marcado como `SUSPEITA_VIOLACAO`, com confirmação do gestor (P8).
 - [ ] Oxide passar a guardar `api_key_hash` e comparar o SHA-256 da `X-API-Key`.
 - [ ] Definir configuração segura de conexão.

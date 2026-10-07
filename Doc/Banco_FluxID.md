@@ -2,7 +2,7 @@
 # FluxID  
 ### Especificação Atualizada do MVP e do Banco de Dados  
 **Segurança • Rastreabilidade • Controle Operacional**  
-**Versão 3.1 — revisada em 06/10/2026 (entrega E): análise do dump, ajustes de estrutura e correção da massa de testes**  
+**Versão 3.2 — revisada em 07/10/2026: alerta sempre ligado ao lacre e ao cilindro (script 003)**  
 Documento substitutivo da versão 1 anexada
 
 ---
@@ -17,7 +17,7 @@ Esta versão atualiza integralmente o documento *FluxID_Especificacao_MVP_v1.doc
 | Telemetria atual | Latitude e longitude em colunas NUMERIC |
 | PostGIS | Planejado para evolução de geocercas; ainda não refletido na tabela atual de telemetria |
 | Views e triggers | Adiados para depois dos testes CRUD da API |
-| Ajustes da entrega E | Scripts versionados em `sql/fluxid/` (seção 17), validados em servidor PostgreSQL temporário; aguardando aplicação no banco e novo dump |
+| Ajustes da entrega E e do script 003 | Scripts versionados em `sql/fluxid/` (seção 17), validados em servidor PostgreSQL temporário; aguardando aplicação no banco e novo dump |
 | Próxima fase | API NestJS + TypeScript conectada ao PostgreSQL |
 
 ---
@@ -358,10 +358,28 @@ Observações que continuam valendo (sem correção nesta entrega):
 ### 17.3 Como aplicar no banco
 
 1. Fazer backup do banco (pgAdmin > Backup).
-2. No `FluxID_db`, abrir o Query Tool e executar, nesta ordem, `sql/fluxid/001_ajustes_estrutura.sql` e `sql/fluxid/002_correcao_massa_de_testes.sql`.
+2. No `FluxID_db`, abrir o Query Tool e executar, nesta ordem, `sql/fluxid/001_ajustes_estrutura.sql`, `sql/fluxid/002_correcao_massa_de_testes.sql` e `sql/fluxid/003_alertas_cilindro_obrigatorio.sql` (seção 17.5).
 3. Gerar um novo dump no formato custom e substituir o `FluxID.sql` do projeto.
-4. Pedir a conferência do novo dump (contagens e verificações da seção 17.2).
+4. Pedir a conferência do novo dump (contagens e verificações das seções 17.2 e 17.5).
 
 ### 17.4 Integração com a Oxide
 
-O plano de como cada dado da Oxide vira um registro do FluxID, e as decisões ainda pendentes para o Worker, está em [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md).
+O plano de como cada dado da Oxide vira um registro do FluxID, e as decisões para o Worker, está em [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md).
+
+### 17.5 Alerta sempre ligado ao lacre e ao cilindro — `003_alertas_cilindro_obrigatorio.sql` (07/10/2026)
+
+Decisão de **Natã da Silva Baracho**: todo alerta tem **cilindro e lacre obrigatórios**, os do vínculo válido no momento do alarme (`aberto_em`). Exceções, só para códigos de cadastro: sem cilindro, `LACRE_SEM_CILINDRO`, `DISPOSITIVO_SEM_LACRE`, `DISPOSITIVO_NAO_CADASTRADO` e `CHAVE_INVALIDA`; sem lacre, só os três últimos.
+
+**Por quê:** o lacre está vinculado ao cilindro e o cilindro ao lacre, e essa ligação é uma das formas de provar que o cilindro pertence àquele cliente. Com o par lacre + cilindro gravado no alerta, a auditoria confere o cilindro físico e o lacre contra o cadastro. Se o lacre que disparou o alarme estiver em outro cilindro, não é o cilindro que o cliente comprou.
+
+| Passo do script | O que faz |
+| --- | --- |
+| (a) Preencher | Alertas sem cilindro recebem o cilindro do vínculo lacre → cilindro **válido em `aberto_em`** (`data_inicio <= aberto_em` e `data_fim` vazia ou depois). Nunca usa um vínculo de outro momento |
+| (b) Conferir | Se ainda sobrar alerta fora da regra, o script para e lista os códigos ("analisar antes de aplicar"); nada é alterado |
+| (c) Proteger | `CHECK alertas_cilindro_lacre_obrigatorio_check` com a regra e as exceções |
+
+Resultado no servidor temporário (dump + `001` + `002`): os 10 alertas de teste estavam sem cilindro; todos foram preenchidos pelo vínculo da data (`LCR-000001` → `CIL-000001` … `LCR-000010` → `CIL-000010`). Segunda execução sem alteração; demais tabelas sem mudança.
+
+**No Worker:** o cilindro e o lacre do alerta vêm do histórico de vínculos do FluxID na data do alerta da Oxide (`created_at`). Sem vínculo naquela data, o alerta não é enviado e fica na Oxide como erro, para o gestor resolver.
+
+**Para uma entrega futura (aprovado):** gatilho que confere se o par lacre + cilindro gravado no alerta tinha mesmo vínculo naquela data (hoje a garantia vem do script e do Worker; um alerta digitado à mão com o par errado ainda seria aceito).

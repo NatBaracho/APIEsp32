@@ -95,8 +95,9 @@ O que a Oxide faz hoje:
 - **Histórico definitivo** de telemetrias, eventos do lacre e alertas. A posição é obrigatória porque alimenta o mapa do dashboard, com os lacres e os cilindros pelo Brasil e os alertas como pontos e cores. A data é gravada na chegada, para auditoria e relatórios (P1).
 
 **FluxID — fará**
-- Aplicar no `FluxID_db` os scripts `sql/fluxid/001` e `002`, que já foram validados.
-- Com o Worker, receber o script `003`:
+- Aplicar no `FluxID_db` os scripts `sql/fluxid/001`, `002` e `003`, que já foram validados. O `003` torna obrigatórios o cilindro e o lacre de todo alerta (salvo códigos de cadastro), para a auditoria conferir se o lacre está no cilindro do cliente.
+- Ganhar um gatilho que confere se o par lacre + cilindro do alerta tinha vínculo naquela data.
+- Com o Worker, receber o script `004`:
   - datas automáticas;
   - tabela de quarentena;
   - tabela de eventos do dispositivo;
@@ -592,6 +593,11 @@ Decisões de Natã da Silva Baracho:
 
 Compilação aprovada, suíte com 86/86 (15 casos novos) em quatro rodadas, migração testada em cópias do banco (formato anterior à entrega C e formato das entregas C a B), BD-14 com 86/86 num banco criado só pelo script do `Oxidedb.md` e Roteiro de Teste v1.8 completo no `oxide.db` real, com checksum idêntico antes e depois e as demais seções idênticas à rodada da entrega B. Validação registrada em [Relatorio-de-Teste-2026-10-06-23h40.md](Doc_tese/Relatorio-de-Teste-2026-10-06-23h40.md), **aprovada por Natã da Silva Baracho**.
 
+### 7.21 FluxID: alerta sempre ligado ao lacre e ao cilindro (07/10/2026)
+Decisão de Natã da Silva Baracho, só no banco FluxID (a Oxide não muda): todo alerta tem **cilindro e lacre obrigatórios**, os do vínculo válido no momento do alarme (`aberto_em`). Exceções, só para códigos de cadastro: sem cilindro, `LACRE_SEM_CILINDRO`, `DISPOSITIVO_SEM_LACRE`, `DISPOSITIVO_NAO_CADASTRADO` e `CHAVE_INVALIDA`; sem lacre, só os três últimos. Motivo: o par lacre + cilindro gravado no alerta permite à auditoria descobrir se o lacre está num cilindro que não é o do cliente.
+
+O script `sql/fluxid/003_alertas_cilindro_obrigatorio.sql` preenche os alertas sem cilindro pelo vínculo da data, para tudo se sobrar algum alerta fora da regra e cria o `CHECK`. Foi validado num PostgreSQL 18.6 temporário (porta 54329, porque a 55432 caiu numa faixa reservada do Windows): os 10 alertas de teste foram preenchidos, a segunda execução não alterou nada, as regras foram confirmadas e a parada segura não alterou nada. O script das decisões P1 a P8 passa a ser o `004`. Validação registrada em [Relatorio-de-Teste-2026-10-07-00h15.md](Doc_tese/Relatorio-de-Teste-2026-10-07-00h15.md), **aprovada por Natã da Silva Baracho**.
+
 ## 9. Suíte de testes automatizados (`npm test`)
 
 A suíte `tests/api.test.ts` cobre hoje 86 casos de ponta a ponta:
@@ -646,7 +652,8 @@ Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **a
 | #5 e #6 | E — Correção | O #5 desfez a entrega E sem querer (botão "Revert"); o #6 a reaplicou com conteúdo idêntico |
 | #7 | D — Catálogo de erros | `Tipos-de-Erro.md`: catálogo em português com o equivalente de cada código no FluxID |
 | #8 | B — Associação | A cópia provisória da Oxide segue os mesmos códigos e estados de lacres, cilindros e vínculos do FluxID |
-| #9 | Decisões P1 a P8 | Data gravada na chegada, quarentena para telemetria sem GPS, tabela de eventos do dispositivo, tipos de alerta do catálogo (script `003` futuro) |
+| #9 | Decisões P1 a P8 | Data gravada na chegada, quarentena para telemetria sem GPS, tabela de eventos do dispositivo, tipos de alerta do catálogo (script `004` futuro) |
+| #13 | Alerta com cilindro e lacre | Script `003`: cilindro e lacre obrigatórios em `alertas` (salvo códigos de cadastro), com preenchimento dos 10 alertas de teste pelo vínculo da data e parada segura; validado em servidor temporário |
 | #12 | Alertas em português | A Oxide já usa os mesmos códigos de alerta que o FluxID vai aceitar (P5); `resolved_by` e `resolution_note` correspondem a `alertas.encerrado_por` e ao motivo do encerramento |
 
 ## 3.4 Worker
@@ -660,3 +667,4 @@ Ainda não implementado. O que já foi preparado:
 | #8 | B — Associação | Mapeamento dos vínculos da Oxide para os do FluxID |
 | #9 | Decisões P1 a P8 | Regras do Worker: data, quarentena, espera de vínculo, eventos do dispositivo, tipos de alerta, 5 tentativas, código do alerta e suspeita de violação |
 | #12 | Alertas em português | O tipo do alerta passa direto, sem conversão; falta mapear `resolved_by` (texto) para o usuário do FluxID |
+| #13 | Alerta com cilindro e lacre | O Worker busca o lacre e o cilindro do vínculo válido na data do alerta; sem vínculo, o alerta fica em erro na Oxide para o gestor |
