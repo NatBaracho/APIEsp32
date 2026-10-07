@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import path from "path";
+import { alertTypes, legacyAlertTypes } from "../models/Alert";
 
 // Caminho do banco
 const databasePath = path.resolve(process.cwd(), "oxide.db");
@@ -133,24 +134,42 @@ if (!commandsTable) {
   migrateCommands();
 }
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS alerts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    alert_id TEXT NOT NULL UNIQUE,
-    device_id TEXT NOT NULL,
-    alert_type TEXT NOT NULL,
-    severity TEXT NOT NULL
-      CHECK (severity IN ('BAIXA', 'MEDIA', 'ALTA', 'CRITICA')),
-    status TEXT NOT NULL DEFAULT 'ABERTO'
-      CHECK (status IN ('ABERTO', 'EM_ANALISE', 'ENCERRADO')),
-    title TEXT NOT NULL,
-    description TEXT,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    resolved_at DATETIME,
-    FOREIGN KEY (device_id)
-      REFERENCES devices(device_id)
-  )
-`);
+const alertTypeList = alertTypes.map(type => `'${type}'`).join(", ");
+
+// alert_type só aceita os códigos do catálogo Tipos-de-Erro.md; alerta
+// ENCERRADO sempre tem data de encerramento (e só ele tem)
+function alertsTableSql(tableName: string): string {
+  return `
+    CREATE TABLE ${tableName} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      alert_id TEXT NOT NULL UNIQUE,
+      device_id TEXT NOT NULL,
+      alert_type TEXT NOT NULL
+        CHECK (alert_type IN (${alertTypeList})),
+      severity TEXT NOT NULL
+        CHECK (severity IN ('BAIXA', 'MEDIA', 'ALTA', 'CRITICA')),
+      status TEXT NOT NULL DEFAULT 'ABERTO'
+        CHECK (status IN ('ABERTO', 'EM_ANALISE', 'ENCERRADO')),
+      title TEXT NOT NULL,
+      description TEXT,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      resolved_at DATETIME,
+      resolved_by TEXT,
+      resolution_note TEXT,
+      CHECK ((status = 'ENCERRADO') = (resolved_at IS NOT NULL)),
+      FOREIGN KEY (device_id)
+        REFERENCES devices(device_id)
+    )
+  `;
+}
+
+const alertsTableExists = db
+  .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'alerts'")
+  .get();
+
+if (!alertsTableExists) {
+  db.exec(alertsTableSql("alerts"));
+}
 
 // Bancos anteriores guardavam status_id/severity_id apontando para a tabela
 // status (estados de dispositivo/lacre). Recria a tabela com severity e status
@@ -215,6 +234,63 @@ function migrateLegacyAlerts(): void {
 }
 
 migrateLegacyAlerts();
+
+// Tabela anterior ao catálogo em português: recria com as regras novas,
+// convertendo os tipos em inglês. Tipo desconhecido vira DISPOSITIVO_FALHA,
+// com o tipo original registrado na descrição
+function migrateAlertTypes(): void {
+  const alertsTable = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'alerts'")
+    .get() as { sql: string };
+
+  if (alertsTable.sql.includes("LACRE_VIOLADO")) {
+    return;
+  }
+
+  const legacyCases = Object.entries(legacyAlertTypes)
+    .map(([legacy, type]) => `WHEN '${legacy}' THEN '${type}'`)
+    .join(" ");
+  const knownTypes = `${alertTypeList}, ${Object.keys(legacyAlertTypes)
+    .map(type => `'${type}'`)
+    .join(", ")}`;
+
+  const migrate = db.transaction(() => {
+    db.exec(alertsTableSql("alerts_migrated"));
+    db.exec(`
+      INSERT INTO alerts_migrated (
+        id, alert_id, device_id, alert_type, severity, status,
+        title, description, created_at, resolved_at
+      )
+      SELECT
+        id,
+        alert_id,
+        device_id,
+        CASE
+          WHEN alert_type IN (${alertTypeList}) THEN alert_type
+          ELSE CASE alert_type ${legacyCases} ELSE 'DISPOSITIVO_FALHA' END
+        END,
+        severity,
+        status,
+        title,
+        CASE
+          WHEN alert_type IN (${knownTypes}) THEN description
+          ELSE TRIM(COALESCE(description, '') || ' [tipo original: ' || alert_type || ']')
+        END,
+        created_at,
+        CASE
+          WHEN status = 'ENCERRADO' THEN COALESCE(resolved_at, CURRENT_TIMESTAMP)
+          ELSE NULL
+        END
+      FROM alerts
+    `);
+    db.exec("DROP TABLE alerts");
+    db.exec("ALTER TABLE alerts_migrated RENAME TO alerts");
+  });
+
+  migrate();
+}
+
+migrateAlertTypes();
 
 function addColumnIfMissing(
   tableName: string,

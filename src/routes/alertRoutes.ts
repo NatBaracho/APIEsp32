@@ -15,4 +15,13 @@ router.post(
   controller.create.bind(controller)
 );
 
+// Abertas e provisórias (como /devices) para a equipe acompanhar e o gestor
+// analisar e encerrar; o controle por perfil será o do FluxID
+router.get("/alerts", controller.list.bind(controller));
+
+router.patch(
+  "/alerts/:alertId/status",
+  controller.updateStatus.bind(controller)
+);
+
 export default router;
