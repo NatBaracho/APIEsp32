@@ -113,14 +113,16 @@ Respostas do middleware: `401` para chave ausente ou inválida; `403` para dispo
 ### 4.5 Alertas
 
 - `POST /api/v1/iot/alerts` exige `alert_id`, `device_id`, `alert_type` e `title`; `severity` e `description` são opcionais.
-- Os tipos aceitos são `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` e `COMMUNICATION_LOST`.
-- `severity` aceita `BAIXA`, `MEDIA`, `ALTA` ou `CRITICA`, os mesmos valores de `alertas.severidade` no FluxID; outro valor retorna `400`. Sem `severity`, vale o padrão do tipo: `SEAL_BROKEN` → `CRITICA`; `GEOFENCE_EXIT` e `COMMAND_FAILURE` → `ALTA`; `DEVICE_ERROR` e `COMMUNICATION_LOST` → `MEDIA`; `LOW_BATTERY` → `BAIXA`.
-- `status` do alerta usa os valores do FluxID (`ABERTO`, `EM_ANALISE`, `ENCERRADO`) e nasce sempre `ABERTO`, definido pelo servidor. Ainda não há rota para analisar ou encerrar.
+- Os tipos aceitos são os 28 códigos em português do catálogo [Tipos-de-Erro.md](Tipos-de-Erro.md); outro valor retorna `400`, e o banco também recusa (`CHECK`). Transição: os nomes antigos `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` e `COMMUNICATION_LOST` continuam aceitos e são gravados em português (`LACRE_VIOLADO`, `SAIDA_GEOCERCA`, `BATERIA_BAIXA`, `DISPOSITIVO_FALHA`, `COMANDO_FALHOU`, `SEM_COMUNICACAO`).
+- `severity` aceita `BAIXA`, `MEDIA`, `ALTA` ou `CRITICA`, os mesmos valores de `alertas.severidade` no FluxID; outro valor retorna `400`. Sem `severity`, vale a severidade sugerida no catálogo (ex.: `LACRE_VIOLADO` → `CRITICA`; `SEM_COMUNICACAO` e `COMANDO_FALHOU` → `ALTA`; `DISPOSITIVO_FALHA` → `MEDIA`; `BATERIA_BAIXA` → `BAIXA`).
+- `status` do alerta usa os valores do FluxID (`ABERTO`, `EM_ANALISE`, `ENCERRADO`) e nasce sempre `ABERTO`, definido pelo servidor.
 - Os campos antigos `status_id` e `severity_id`, se enviados, são ignorados.
 - `alert_id` é único; repetição retorna `409 Alerta duplicado`.
 - O alerta é associado ao dispositivo e retorna `201` quando criado. `created_at` usa `CURRENT_TIMESTAMP`; `resolved_at` permanece nulo na criação.
 - A rota valida que a API Key pertence ao `device_id` informado.
-- O tipo `GEOFENCE_EXIT` é aceito, mas não existe lógica de geofence que o gere automaticamente.
+- `GET /api/v1/iot/alerts` lista os alertas (filtros `status` e `device_id`), do mais recente ao mais antigo.
+- `PATCH /api/v1/iot/alerts/{alert_id}/status` muda o status: `ABERTO` → `EM_ANALISE` → `ENCERRADO`, ou `ABERTO` → `ENCERRADO`. Encerrar exige `resolved_by` (quem liberou) e `resolution_note` (motivo), e a data é preenchida pelo servidor. `ENCERRADO` é final (`409`): um problema novo gera um alerta novo. As duas rotas são abertas e provisórias, até o controle por perfil do FluxID.
+- Os tipos `SAIDA_GEOCERCA` e `SAIDA_ROTA` são aceitos, mas ainda não existe lógica de geofence ou rota que os gere automaticamente.
 
 ### 4.6 Associação dispositivo → lacre → cilindro
 
@@ -214,13 +216,15 @@ A inicialização insere, se estiverem ausentes, os códigos `ACTIVE`, `INACTIVE
 | `id` | Chave primária autoincremental. |
 | `alert_id` | `TEXT NOT NULL UNIQUE`. |
 | `device_id` | `TEXT NOT NULL`, FK para `devices.device_id`. |
-| `alert_type` | `TEXT NOT NULL`; lista aceita é validada pela API, não por `CHECK` SQLite. |
+| `alert_type` | `TEXT NOT NULL`, `CHECK` com os 28 códigos do catálogo `Tipos-de-Erro.md`. |
 | `severity` | `TEXT NOT NULL`, `CHECK` em `BAIXA`, `MEDIA`, `ALTA`, `CRITICA`. |
 | `status` | `TEXT NOT NULL DEFAULT 'ABERTO'`, `CHECK` em `ABERTO`, `EM_ANALISE`, `ENCERRADO`. |
 | `title` | `TEXT NOT NULL`. |
 | `description` | `TEXT`, opcional. |
 | `created_at` | `DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP`. |
-| `resolved_at` | `DATETIME`, opcional; não há rota atual para resolução. |
+| `resolved_at` | `DATETIME`; preenchido pelo servidor ao encerrar. `CHECK`: só alerta `ENCERRADO` tem data, e todo `ENCERRADO` tem. |
+| `resolved_by` | `TEXT`; quem encerrou (obrigatório na API ao encerrar). |
+| `resolution_note` | `TEXT`; motivo do encerramento (obrigatório na API ao encerrar). |
 
 ### `seals` (lacres — cópia provisória do FluxID)
 
@@ -314,7 +318,7 @@ O dump não contém tabela `commands`. No dump de 23/09/2026 os IDs UUID não ti
 | `commands` | Sem tabela no dump | Por enquanto ficam só na Oxide (entrega D); criar ou não uma entidade no PostgreSQL será decidido na fase do Worker. |
 | `telemetry_queue.lacre_id` / `cilindro_id` | Vínculos FluxID | No SQLite esses campos são texto opcional sem FK; não são suficientes para reconstruir os vínculos históricos do FluxID. Usar as tabelas `vinculos_*` com regras temporais próprias. |
 
-Mapeamentos semânticos candidatos de alertas que precisam ser aprovados: `SEAL_BROKEN` → `VIOLACAO_LACRE`, `GEOFENCE_EXIT` → `SAIDA_GEOCERCA`, `LOW_BATTERY` → `BATERIA_BAIXA` e `COMMUNICATION_LOST` → `SEM_COMUNICACAO`. `DEVICE_ERROR` e `COMMAND_FAILURE` não têm valor equivalente explícito no `CHECK` de `alertas.tipo` do dump. As severidades FluxID aceitas são `BAIXA`, `MEDIA`, `ALTA` e `CRITICA`; os estados aceitos são `ABERTO`, `EM_ANALISE` e `ENCERRADO`.
+Tipos de alerta: a Oxide já grava os códigos do catálogo `Tipos-de-Erro.md`, e pela decisão P5 o `CHECK` de `alertas.tipo` do FluxID passa a aceitar esses mesmos códigos (script `003`, na entrega do Worker). As severidades FluxID aceitas são `BAIXA`, `MEDIA`, `ALTA` e `CRITICA`; os estados aceitos são `ABERTO`, `EM_ANALISE` e `ENCERRADO`.
 
 ### 8.3 Preparação pendente para iniciar a sincronização
 

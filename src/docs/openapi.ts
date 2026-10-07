@@ -1,3 +1,5 @@
+import { alertTypes } from "../models/Alert";
+
 const jsonBody = (properties: object, required: string[]) => ({
   required: true,
   content: {
@@ -227,7 +229,7 @@ const openApiSpec = {
           id: { type: "integer", example: 1 },
           command_id: { type: "string", example: "CMD-000001" },
           device_id: { type: "string", example: "DSP-000001" },
-          command_type: { type: "string", example: "REBOOT" },
+          command_type: { type: "string", example: "TRAVAR_VALVULA" },
           status: { type: "string", example: "PENDENTE" },
           created_at: { type: "string", format: "date-time" },
           executed_at: { type: "string", format: "date-time", nullable: true },
@@ -242,14 +244,17 @@ const openApiSpec = {
           device_id: { type: "string", example: "DSP-000001" },
           alert_type: {
             type: "string",
-            enum: ["SEAL_BROKEN", "GEOFENCE_EXIT", "LOW_BATTERY", "DEVICE_ERROR", "COMMAND_FAILURE", "COMMUNICATION_LOST"]
+            enum: [...alertTypes],
+            example: "LACRE_VIOLADO"
           },
           severity: { type: "string", enum: ["BAIXA", "MEDIA", "ALTA", "CRITICA"], example: "CRITICA" },
           status: { type: "string", enum: ["ABERTO", "EM_ANALISE", "ENCERRADO"], example: "ABERTO" },
           title: { type: "string", example: "Lacre rompido" },
           description: { type: "string", nullable: true },
           created_at: { type: "string", format: "date-time" },
-          resolved_at: { type: "string", format: "date-time", nullable: true }
+          resolved_at: { type: "string", format: "date-time", nullable: true },
+          resolved_by: { type: "string", nullable: true, example: "Maria (gestora)" },
+          resolution_note: { type: "string", nullable: true, example: "Desvio justificado pelo motorista: obra na via" }
         }
       }
     }
@@ -570,12 +575,13 @@ const openApiSpec = {
                   device_id: { type: "string", example: "DSP-000001" },
                   alert_type: {
                     type: "string",
-                    enum: ["SEAL_BROKEN", "GEOFENCE_EXIT", "LOW_BATTERY", "DEVICE_ERROR", "COMMAND_FAILURE", "COMMUNICATION_LOST"]
+                    description: "Código do catálogo Tipos-de-Erro.md. Transição: os nomes antigos SEAL_BROKEN, GEOFENCE_EXIT, LOW_BATTERY, COMMUNICATION_LOST, DEVICE_ERROR e COMMAND_FAILURE continuam aceitos e são gravados no código em português",
+                    example: "LACRE_VIOLADO"
                   },
                   severity: {
                     type: "string",
                     enum: ["BAIXA", "MEDIA", "ALTA", "CRITICA"],
-                    description: "Opcional. Padrão por tipo: SEAL_BROKEN CRITICA; GEOFENCE_EXIT e COMMAND_FAILURE ALTA; DEVICE_ERROR e COMMUNICATION_LOST MEDIA; LOW_BATTERY BAIXA. O status nasce sempre ABERTO",
+                    description: "Opcional. Padrão: a severidade sugerida no catálogo para o tipo (ex.: LACRE_VIOLADO CRITICA, SEM_COMUNICACAO ALTA, BATERIA_BAIXA BAIXA). O status nasce sempre ABERTO",
                     example: "CRITICA"
                   },
                   title: { type: "string", example: "Lacre rompido" },
@@ -605,6 +611,75 @@ const openApiSpec = {
           "403": { description: "API Key não pertence ao dispositivo" },
           "404": { description: "Dispositivo não encontrado" },
           "409": { description: "alert_id já cadastrado" }
+        }
+      },
+      get: {
+        summary: "Listar alertas (aberta e provisória)",
+        parameters: [
+          { name: "status", in: "query", schema: { type: "string", enum: ["ABERTO", "EM_ANALISE", "ENCERRADO"] } },
+          { name: "device_id", in: "query", schema: { type: "string" } }
+        ],
+        responses: {
+          "200": {
+            description: "Alertas, do mais recente ao mais antigo",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    total: { type: "integer", example: 1 },
+                    alerts: { type: "array", items: { $ref: "#/components/schemas/Alert" } }
+                  }
+                }
+              }
+            }
+          },
+          "400": { description: "status inválido" }
+        }
+      }
+    },
+    "/api/v1/iot/alerts/{alertId}/status": {
+      patch: {
+        summary: "Analisar ou encerrar alerta (aberta e provisória)",
+        description: "Caminhos: ABERTO → EM_ANALISE → ENCERRADO, ou ABERTO → ENCERRADO. ENCERRADO é final: um problema novo gera um alerta novo",
+        parameters: [
+          { name: "alertId", in: "path", required: true, schema: { type: "string" }, example: "ALT-000001" }
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["status"],
+                properties: {
+                  status: { type: "string", enum: ["EM_ANALISE", "ENCERRADO"] },
+                  resolved_by: { type: "string", description: "Obrigatório para ENCERRADO: quem liberou", example: "Maria (gestora)" },
+                  resolution_note: { type: "string", description: "Obrigatório para ENCERRADO: motivo", example: "Desvio justificado pelo motorista: obra na via" }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          "200": {
+            description: "Status atualizado",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    alert: { $ref: "#/components/schemas/Alert" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { description: "status inválido, ou resolved_by/resolution_note ausentes ao encerrar" },
+          "404": { description: "Alerta não encontrado" },
+          "409": { description: "Transição não permitida (ex.: alerta já encerrado)" }
         }
       }
     },

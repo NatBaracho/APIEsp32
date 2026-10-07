@@ -1,6 +1,6 @@
 # Roteiro de Teste para IA — API Oxide (FluxID / Oxide IoT)
 
-**Versão:** 1.7
+**Versão:** 1.8
 **Data:** 06/10/2026
 **Uso:** instruções executáveis para uma IA (ou pessoa) testar a API Oxide e produzir um relatório padronizado.
 **Base:** `Doc/Doc_tese/PlanoDeTeste.md` (IDs dos casos entre colchetes, ex.: `[TEL-03]`).
@@ -36,8 +36,9 @@ Você é um executor de testes. Siga este roteiro na ordem, sem pular etapas.
 - Campos numéricos da telemetria precisam ser números; tipo inválido retorna `400` e dispositivo inexistente retorna `404`.
 - O `attempt_count` enviado pelo ESP32 (tentativas de envio, inteiro ≥ 0) é gravado em `device_attempt_count`. As colunas `status` e `attempt_count` da fila pertencem ao Worker e o servidor sempre grava `PENDING` e `0`.
 - Não existe endpoint HTTP para criar comandos; comandos de teste são inseridos direto no SQLite.
-- Tipos de alerta aceitos: `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE`, `COMMUNICATION_LOST`.
-- Alerta: `severity` opcional (`BAIXA`, `MEDIA`, `ALTA`, `CRITICA`, padrão pelo tipo) e `status` sempre `ABERTO` na criação, nos valores do FluxID. Campos antigos `status_id`/`severity_id` são ignorados.
+- Tipos de alerta aceitos: os códigos de `Doc/Tipos-de-Erro.md` (ex.: `LACRE_VIOLADO`, `SEM_COMUNICACAO`). Transição: os nomes antigos `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` e `COMMUNICATION_LOST` são aceitos e gravados em português.
+- Alerta: `severity` opcional (`BAIXA`, `MEDIA`, `ALTA`, `CRITICA`, padrão = severidade sugerida no catálogo) e `status` sempre `ABERTO` na criação, nos valores do FluxID. Campos antigos `status_id`/`severity_id` são ignorados.
+- Análise e encerramento (rota aberta e provisória): `PATCH /iot/alerts/{alert_id}/status` com `EM_ANALISE` ou `ENCERRADO` (este exige `resolved_by` e `resolution_note`); `ENCERRADO` não reabre. Listagem: `GET /iot/alerts?status=&device_id=`.
 - Telemetria: latitude e longitude vêm juntas, com latitude entre -90 e 90 e longitude entre -180 e 180 (`400` fora disso).
 - `seal_status` aceita: `LOCKED`, `UNLOCKED`, `BROKEN`.
 - Estados de comando na confirmação: `EXECUTADO`, `ERRO` (comando novo nasce `PENDENTE`).
@@ -81,6 +82,12 @@ get() { curl -s -w "\nHTTP:%{http_code}\n" "$API$1" ${2:+-H "X-API-Key: $2"}; }
 post() {
   curl -s -w "\nHTTP:%{http_code}\n" -X POST "$API$1" \
     -H "Content-Type: application/json" ${2:+-H "X-API-Key: $2"} -d "$3"
+}
+
+# PATCH JSON: patch <caminho> <corpo>
+patch() {
+  curl -s -w "\nHTTP:%{http_code}\n" -X PATCH "$API$1" \
+    -H "Content-Type: application/json" -d "$2"
 }
 
 # Uma instrução SQL; consultas imprimem uma linha JSON por registro
@@ -129,7 +136,7 @@ curl -s -o /dev/null -w "porta 3000: %{http_code}\n" "$BASE/"   # esperado: 000 
 npm test
 ```
 
-Registre: total, aprovados, reprovados. **Esperado:** 71 casos, 71 aprovados, saída com código `0`.
+Registre: total, aprovados, reprovados. **Esperado:** 86 casos, 86 aprovados, saída com código `0`.
 Se houver reprovação, copie o nome de cada teste que falhou para o relatório.
 
 > A suíte limpa registros `DSP-TEST%` no início e no fim. Os casos manuais abaixo usam `DSP-TEST-RT`, que **também** será limpo na seção 8.
@@ -331,7 +338,7 @@ post /iot/commands "$KEY" '{}'
 ```bash
 source ./roteiro-env.sh
 
-# [ALT-07] um alerta por tipo, sem severity. Esperado: 201 nos seis (severidade padrão do tipo)
+# [ALT-07] os 6 nomes antigos, sem severity. Esperado: 201 nos seis, gravados em português (ALT-12)
 i=1
 for T in SEAL_BROKEN GEOFENCE_EXIT LOW_BATTERY DEVICE_ERROR COMMAND_FAILURE COMMUNICATION_LOST; do
   post /iot/alerts "$KEY" "{\"alert_id\":\"ALT-RT-00$i\",\"device_id\":\"DSP-TEST-RT\",\"alert_type\":\"$T\",\"title\":\"Teste $T\"}"
@@ -354,11 +361,48 @@ post /iot/alerts "$KEY" '{"alert_id":"ALT-RT-007","device_id":"DSP-TEST-RT","ale
 # [ALT-06] repetir ALT-RT-001. Esperado: 409 "Alerta duplicado"
 post /iot/alerts "$KEY" '{"alert_id":"ALT-RT-001","device_id":"DSP-TEST-RT","alert_type":"SEAL_BROKEN","title":"Teste SEAL_BROKEN"}'
 
-# [ALT-12] severidade e status gravados
+# [ALT-13] código do catálogo em português. Esperado: 201; alert_type GPS_SEM_SINAL e severity MEDIA
+post /iot/alerts "$KEY" '{"alert_id":"ALT-RT-013","device_id":"DSP-TEST-RT","alert_type":"GPS_SEM_SINAL","title":"GPS sem sinal"}'
+
+# [ALT-03] tipo fora do catálogo e nome de propriedade do JavaScript. Esperado: 400 nos dois
+post /iot/alerts "$KEY" '{"alert_id":"ALT-RT-014","device_id":"DSP-TEST-RT","alert_type":"LIGAR_SIRENE","title":"x"}'
+post /iot/alerts "$KEY" '{"alert_id":"ALT-RT-015","device_id":"DSP-TEST-RT","alert_type":"constructor","title":"x"}'
+
+# [ALT-12] tipo, severidade e status gravados
 sql "SELECT alert_id, alert_type, severity, status FROM alerts WHERE device_id = 'DSP-TEST-RT' ORDER BY alert_id"
+
+# [ALT-14] listagem. Esperado: 200 e total 9; depois 400 "status deve ser ABERTO, EM_ANALISE ou ENCERRADO"
+get "/iot/alerts?device_id=DSP-TEST-RT" | grep -oE '"total":[0-9]+|HTTP:[0-9]+'
+get "/iot/alerts?status=FECHADO"
+
+# [ALT-20] status inválido e alerta inexistente. Esperado: 400 e 404 "Alerta não encontrado"
+patch /iot/alerts/ALT-RT-001/status '{"status":"ABERTO"}'
+patch /iot/alerts/ALT-RT-NAO-EXISTE/status '{"status":"EM_ANALISE"}'
+
+# [ALT-15] ABERTO → EM_ANALISE. Esperado: 200, status EM_ANALISE e resolved_at null
+patch /iot/alerts/ALT-RT-001/status '{"status":"EM_ANALISE"}'
+
+# [ALT-19] repetir. Esperado: 409 "Transição não permitida a partir de EM_ANALISE"
+patch /iot/alerts/ALT-RT-001/status '{"status":"EM_ANALISE"}'
+
+# [ALT-18] encerrar sem motivo. Esperado: 400 "Para encerrar, resolved_by e resolution_note são obrigatórios"
+patch /iot/alerts/ALT-RT-001/status '{"status":"ENCERRADO","resolved_by":"Gestor RT"}'
+
+# [ALT-16] EM_ANALISE → ENCERRADO. Esperado: 200; resolved_at preenchido, resolved_by e resolution_note gravados
+patch /iot/alerts/ALT-RT-001/status '{"status":"ENCERRADO","resolved_by":"Gestor RT","resolution_note":"Lacre conferido no local"}'
+
+# [ALT-19] reabrir. Esperado: 409 "Alerta já encerrado; um problema novo gera um alerta novo"
+patch /iot/alerts/ALT-RT-001/status '{"status":"EM_ANALISE"}'
+
+# [ALT-17] ABERTO → ENCERRADO direto. Esperado: 200
+patch /iot/alerts/ALT-RT-003/status '{"status":"ENCERRADO","resolved_by":"Gestor RT","resolution_note":"Bateria trocada"}'
+
+# [ALT-14] filtro por status. Esperado: 200 e total 2 (ALT-RT-001 e ALT-RT-003)
+get "/iot/alerts?device_id=DSP-TEST-RT&status=ENCERRADO" | grep -oE '"total":[0-9]+|HTTP:[0-9]+'
+sql "SELECT alert_id, status, resolved_at IS NOT NULL AS tem_data, resolved_by, resolution_note FROM alerts WHERE alert_id IN ('ALT-RT-001','ALT-RT-003')"
 ```
 
-**Esperado [ALT-12]:** `ALT-RT-001` `SEAL_BROKEN` → `CRITICA`; `002` `GEOFENCE_EXIT` → `ALTA`; `003` `LOW_BATTERY` → `BAIXA`; `004` `DEVICE_ERROR` → `MEDIA`; `005` `COMMAND_FAILURE` → `ALTA`; `006` `COMMUNICATION_LOST` → `MEDIA`; `007` → `BAIXA`; `009` → `ALTA`. Todos com `status = ABERTO`. `ALT-RT-008` e `ALT-RT-010` ausentes.
+**Esperado [ALT-12]:** `ALT-RT-001` `LACRE_VIOLADO` → `CRITICA`; `002` `SAIDA_GEOCERCA` → `ALTA`; `003` `BATERIA_BAIXA` → `BAIXA`; `004` `DISPOSITIVO_FALHA` → `MEDIA`; `005` `COMANDO_FALHOU` → `ALTA`; `006` `SEM_COMUNICACAO` → `ALTA`; `007` `BATERIA_BAIXA` → `BAIXA`; `009` `BATERIA_BAIXA` → `ALTA`; `013` `GPS_SEM_SINAL` → `MEDIA`. Todos com `status = ABERTO` (antes do `PATCH`). `ALT-RT-008`, `010`, `014` e `015` ausentes.
 
 ### 5.8 Segurança
 
@@ -503,6 +547,11 @@ sqlexec "INSERT INTO devices (device_id, api_key, active) VALUES ('DSP-TEST-CHK'
 # [BD-18] catálogo de comandos. Esperado: erro "CHECK constraint failed" (pendente com tipo fora da lista)
 sqlexec "INSERT INTO commands (command_id, device_id, command_type, status, created_at) VALUES ('CMD-RT-TIPO','DSP-TEST-RT','LIGAR_SIRENE','PENDENTE',datetime('now'));"
 
+# [BD-19] regras de alerts. Esperado: erro "CHECK constraint failed" nos dois
+# (tipo antigo em inglês direto no banco; ENCERRADO sem data de encerramento)
+sqlexec "INSERT INTO alerts (alert_id, device_id, alert_type, severity, title) VALUES ('ALT-RT-CHK','DSP-TEST-RT','SEAL_BROKEN','CRITICA','x');"
+sqlexec "UPDATE alerts SET status = 'ENCERRADO' WHERE alert_id = 'ALT-RT-002';"
+
 # [BD-16] índice único de api_key. Esperado: idx_devices_api_key com unique 1;
 # o INSERT falha com "UNIQUE constraint failed: devices.api_key"
 sql "SELECT name, \"unique\" FROM pragma_index_list('devices')"
@@ -540,7 +589,7 @@ grep -iE "erro|error" api.log || echo "sem erros no log"
 
 Marque como `NÃO EXECUTADO – funcionalidade pendente` no relatório (sem tentar simular):
 
-- Associação dispositivo/lacre/cilindro e histórico (`ASC-*`, `HIS-*`).
+- Reassociação do mesmo par lacre ↔ cilindro (`HIS-04`).
 - Geofence (`GEO-*`) e comandos automáticos (`AUT-C*`).
 - Worker SQLite → PostgreSQL (`SYN-*`) e API FluxID NestJS (`FLX-*`).
 - Rate limiting, hash/rotação de chaves e auditoria (`SEG-09` a `SEG-11`).
@@ -622,7 +671,7 @@ Gere o arquivo `Relatorio-de-Teste-AAAA-MM-DD-HHhMM.md` em `Doc/Doc_tese/` (ex.:
 | Indicador | Valor |
 | --- | --- |
 | Compilação | PASSOU/FALHOU |
-| Suíte automatizada | X/71 |
+| Suíte automatizada | X/86 |
 | Casos manuais executados | N |
 | PASSOU | N |
 | FALHOU | N |
@@ -678,3 +727,4 @@ marque NÃO EXECUTADO com o motivo.
 | 1.5 | 06/10/2026 | Entrega C: alertas com `severity`/`status` em texto (valores do FluxID) e severidade padrão por tipo; ALT-08, ALT-09 e ALT-12 reescritos; TEL-11 e TEL-13 passam a esperar `400`; BD-06 com 1 FK; suíte com 55 casos |
 | 1.6 | 06/10/2026 | Entrega D: comandos de teste com `TRAVAR_VALVULA`/`DESTRAVAR_VALVULA`; novo BD-18 (catálogo no banco); suíte com 57 casos |
 | 1.7 | 06/10/2026 | Entrega B: nova seção 5.9 (associação, troca, encerramento, histórico e `error_type`); limpeza inclui lacres, cilindros e vínculos de teste; suíte com 71 casos |
+| 1.8 | 06/10/2026 | Entrega de alertas: tipos do catálogo em português com transição dos nomes antigos, listagem, análise e encerramento (ALT-13 a ALT-20), regras do banco (BD-19), função `patch` no arquivo de ambiente; suíte com 86 casos |

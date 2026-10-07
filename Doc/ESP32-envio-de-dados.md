@@ -31,7 +31,7 @@ A persistência acontece no banco SQLite via backend. O banco tem tabelas como:
 - `events` — tabela de eventos do sistema. Serve para registrar ocorrências e alterações do módulo, como startup, falhas, alarmes e mensagens de status.
 - `telemetry_queue` — tabela de telemetria. Aqui ficam os dados de medição, GPS, bateria, sinal e outros valores coletados em tempo real.
 - `status` — catálogo de códigos e descrições para os estados do dispositivo e do lacre.
-- `alerts` — alertas associados a um dispositivo; os tipos previstos são `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` e `COMMUNICATION_LOST`.
+- `alerts` — alertas associados a um dispositivo; os tipos são os códigos em português do catálogo `Tipos-de-Erro.md` (ex.: `LACRE_VIOLADO`, `GPS_INATIVO`, `BATERIA_BAIXA`).
 
 > Observação importante: quando o código fala em `device_id`, ele se refere ao identificador do equipamento que está enviando os dados; `message_id` é o identificador único da mensagem daquele envio; `X-API-Key` é a chave de autenticação do dispositivo para acessar a API.
 
@@ -302,14 +302,14 @@ Content-Type: application/json
 {
   "alert_id": "ALT-000001",
   "device_id": "DSP-000001",
-  "alert_type": "SEAL_BROKEN",
+  "alert_type": "LACRE_VIOLADO",
   "severity": "CRITICA",
   "title": "Lacre rompido",
   "description": "Alerta enviado pelo dispositivo"
 }
 ```
 
-Os tipos aceitos são `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` e `COMMUNICATION_LOST`. `severity` é opcional e aceita `BAIXA`, `MEDIA`, `ALTA` ou `CRITICA`; sem ela, vale o padrão do tipo (`SEAL_BROKEN` → `CRITICA`; `GEOFENCE_EXIT` e `COMMAND_FAILURE` → `ALTA`; `DEVICE_ERROR` e `COMMUNICATION_LOST` → `MEDIA`; `LOW_BATTERY` → `BAIXA`). O alerta nasce sempre com `status` `ABERTO`. Firmwares antigos que ainda enviam `status_id` e `severity_id` continuam funcionando: esses campos são ignorados.
+Os tipos aceitos são os 28 códigos em português do catálogo [Tipos-de-Erro.md](Tipos-de-Erro.md). Os mais usados pelo firmware: `LACRE_VIOLADO`, `GPS_INATIVO`, `BATERIA_BAIXA`, `DISPOSITIVO_FALHA` e `GSM_SINAL_FRACO`. Outro valor retorna `400`. **Transição:** firmwares que ainda mandam `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` ou `COMMUNICATION_LOST` continuam funcionando, e a API grava o código em português; atualize o firmware quando puder. `severity` é opcional e aceita `BAIXA`, `MEDIA`, `ALTA` ou `CRITICA`; sem ela, vale a severidade sugerida no catálogo. O alerta nasce sempre com `status` `ABERTO`. Firmwares antigos que ainda enviam `status_id` e `severity_id` continuam funcionando: esses campos são ignorados.
 
 Em caso de sucesso, a API retorna `201 Created` com o alerta criado:
 
@@ -320,18 +320,20 @@ Em caso de sucesso, a API retorna `201 Created` com o alerta criado:
     "id": 1,
     "alert_id": "ALT-000001",
     "device_id": "DSP-000001",
-    "alert_type": "SEAL_BROKEN",
+    "alert_type": "LACRE_VIOLADO",
     "severity": "CRITICA",
     "status": "ABERTO",
     "title": "Lacre rompido",
     "description": "Alerta enviado pelo dispositivo",
     "created_at": "2026-10-05 00:00:00",
-    "resolved_at": null
+    "resolved_at": null,
+    "resolved_by": null,
+    "resolution_note": null
   }
 }
 ```
 
-O envio de `SEAL_BROKEN` foi validado por requisição HTTP: a API respondeu `201` e o alerta foi confirmado no SQLite.
+O envio de alertas foi validado por requisição HTTP, com os códigos em português e com os nomes antigos convertidos: a API respondeu `201` e o alerta foi confirmado no SQLite. A análise e o encerramento do alerta são feitos pelo gestor (`PATCH /api/v1/iot/alerts/{alert_id}/status`), não pelo firmware.
 
 ## 4. Estrutura recomendada para o firmware do ESP32
 

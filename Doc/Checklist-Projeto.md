@@ -94,7 +94,7 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ Catálogo de comandos (`TRAVAR_VALVULA`, `DESTRAVAR_VALVULA`) aplicado no banco, com migração dos comandos antigos (entrega D).
 - ✅ Catálogo de tipos de erro e ocorrências operacionais (`Doc/Tipos-de-Erro.md`).
 - [ ] Comandos automáticos (ex.: lacre rompido → `TRAVAR_VALVULA`).
-- [ ] `alert_type` da Oxide com os códigos em português do catálogo, aceitando os nomes antigos na transição.
+- ✅ `alert_type` da Oxide com os códigos em português do catálogo, aceitando os nomes antigos na transição (06/10/2026).
 - [ ] Fluxo de saída de rota: rota planejada, desvios justificados, justificativa do motorista e liberação pelo gestor.
 
 **Status:** fluxo manual de comandos implementado e testado, com catálogo de tipos.
@@ -103,15 +103,16 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 
 - ✅ Schema e persistência SQLite.
 - ✅ Endpoint autenticado de criação `POST /api/v1/iot/alerts`.
-- ✅ Validação dos tipos `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` e `COMMUNICATION_LOST`.
-- ✅ Severidade (`BAIXA`, `MEDIA`, `ALTA`, `CRITICA`) e status (`ABERTO`, `EM_ANALISE`, `ENCERRADO`) com os valores do FluxID; severidade padrão por tipo.
+- ✅ Tipos com os 28 códigos em português do catálogo, protegidos por `CHECK`; nomes antigos em inglês convertidos (transição).
+- ✅ Severidade (`BAIXA`, `MEDIA`, `ALTA`, `CRITICA`) e status (`ABERTO`, `EM_ANALISE`, `ENCERRADO`) com os valores do FluxID; severidade padrão sugerida no catálogo.
 - ✅ Prevenção de `alert_id` duplicado (`409`).
 - ✅ Validação da API Key e do vínculo da chave com o dispositivo.
 - ✅ Teste HTTP de `SEAL_BROKEN`: resposta `201` e persistência confirmada no SQLite.
-- ✅ Migração automática da tabela `alerts` antiga (`status_id`/`severity_id`), preservando os alertas.
-- [ ] Rotas para analisar e encerrar alertas (`EM_ANALISE`, `ENCERRADO`).
+- ✅ Migração automática da tabela `alerts` antiga (`status_id`/`severity_id` e tipos em inglês), preservando os alertas.
+- ✅ Listagem (`GET /api/v1/iot/alerts`) e rota para analisar e encerrar (`PATCH /api/v1/iot/alerts/{alert_id}/status`), com quem encerrou e o motivo.
+- [ ] Justificativa do motorista na saída de rota (entrega de geofence e rota).
 
-**Status:** criação de alertas concluída e validada, com severidade alinhada ao FluxID (entrega C).
+**Status:** criação, listagem, análise e encerramento de alertas concluídos e validados, com tipos, severidade e status alinhados ao FluxID.
 
 ## Banco de dados local
 
@@ -234,7 +235,7 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 | Segurança por API Key | Implementada para o MVP |
 | Dispositivos, estados, telemetria e eventos | Implementados e validados |
 | Comandos manuais | Implementados e validados |
-| Criação de alertas | Implementada e validada; severidade e status alinhados ao FluxID |
+| Alertas | Criação, listagem, análise e encerramento implementados e validados; tipos do catálogo em português, severidade e status alinhados ao FluxID |
 | Associação dispositivo/lacre/cilindro | Implementada e validada (cópia provisória do FluxID) |
 | Histórico de associações | Implementado e validado |
 | Geofence | Pendente |

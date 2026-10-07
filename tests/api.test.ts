@@ -910,7 +910,7 @@ async function main() {
     return { passed, status: res.status, expectedStatus: 400, details: json.message };
   });
 
-  await runTest("POST /api/v1/iot/alerts com payload válido -> 201", async () => {
+  await runTest("POST /api/v1/iot/alerts com nome antigo SEAL_BROKEN -> 201 gravado como LACRE_VIOLADO", async () => {
     const res = await fetch(`${BASE_URL}/api/v1/iot/alerts`, {
       method: "POST",
       headers: {
@@ -930,9 +930,10 @@ async function main() {
       res.status === 201 &&
       json.success === true &&
       json.alert?.alert_id === TEST_ALT_ID &&
+      json.alert?.alert_type === "LACRE_VIOLADO" &&
       json.alert?.severity === "CRITICA" &&
       json.alert?.status === "ABERTO";
-    return { passed, status: res.status, expectedStatus: 201, details: `severity=${json.alert?.severity} (padrão do tipo), status=${json.alert?.status}` };
+    return { passed, status: res.status, expectedStatus: 201, details: `alert_type=${json.alert?.alert_type}, severity=${json.alert?.severity} (padrão do tipo), status=${json.alert?.status}` };
   });
 
   await runTest("POST /api/v1/iot/alerts com severity informada e campos antigos ignorados -> 201", async () => {
@@ -956,6 +957,7 @@ async function main() {
     const json: any = await res.json();
     const passed =
       res.status === 201 &&
+      json.alert?.alert_type === "BATERIA_BAIXA" &&
       json.alert?.severity === "ALTA" &&
       json.alert?.status === "ABERTO" &&
       !("status_id" in json.alert) &&
@@ -980,6 +982,130 @@ async function main() {
     const json: any = await res.json();
     const passed = res.status === 409 && json.message === "Alerta duplicado";
     return { passed, status: res.status, expectedStatus: 409, details: json.message };
+  });
+
+  const alertCall = async (method: string, path: string, body?: unknown, key?: string) => {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (key) headers["X-API-Key"] = key;
+    const init: RequestInit = { method, headers };
+    if (body !== undefined) init.body = JSON.stringify(body);
+    const res = await fetch(`${BASE_URL}/api/v1/iot/alerts${path}`, init);
+    return { status: res.status, json: (await res.json()) as any };
+  };
+
+  await runTest("POST /api/v1/iot/alerts com código do catálogo SEM_COMUNICACAO -> 201 (severidade padrão ALTA)", async () => {
+    const r = await alertCall("POST", "", {
+      alert_id: "ALT-TEST-AUTORUN-003",
+      device_id: TEST_DEVICE_ID,
+      alert_type: "SEM_COMUNICACAO",
+      title: "Dispositivo sem comunicação"
+    }, TEST_API_KEY);
+    const passed = r.status === 201 && r.json.alert?.alert_type === "SEM_COMUNICACAO" && r.json.alert?.severity === "ALTA";
+    return { passed, status: r.status, expectedStatus: 201, details: `alert_type=${r.json.alert?.alert_type}, severity=${r.json.alert?.severity}` };
+  });
+
+  await runTest("POST /api/v1/iot/alerts com alert_type toString -> 400", async () => {
+    const r = await alertCall("POST", "", {
+      alert_id: "ALT-TEST-AUTORUN-004",
+      device_id: TEST_DEVICE_ID,
+      alert_type: "toString",
+      title: "Tipo inválido"
+    }, TEST_API_KEY);
+    return { passed: r.status === 400, status: r.status, expectedStatus: 400, details: r.json.message };
+  });
+
+  await runTest("Banco rejeita alerta com tipo fora do catálogo (CHECK)", async () => {
+    let rejected = false;
+    try {
+      db.prepare(`
+        INSERT INTO alerts (alert_id, device_id, alert_type, severity, status, title)
+        VALUES ('ALT-TEST-AUTORUN-DB', ?, 'SEAL_BROKEN', 'CRITICA', 'ABERTO', 'Tipo antigo direto no banco')
+      `).run(TEST_DEVICE_ID);
+    } catch (err: any) {
+      rejected = String(err.code).startsWith("SQLITE_CONSTRAINT");
+    }
+    return { passed: rejected, details: rejected ? "CHECK de alert_type barrou SEAL_BROKEN" : "inserção aceita" };
+  });
+
+  await runTest("GET /api/v1/iot/alerts?device_id= -> 200 com os 3 alertas, do mais recente ao mais antigo", async () => {
+    const r = await alertCall("GET", `?device_id=${TEST_DEVICE_ID}`);
+    const ids = (r.json.alerts ?? []).map((a: any) => a.alert_id);
+    const passed = r.status === 200 && r.json.total === 3 && ids[0] === "ALT-TEST-AUTORUN-003" && ids[2] === TEST_ALT_ID;
+    return { passed, status: r.status, expectedStatus: 200, details: `total=${r.json.total} [${ids.join(", ")}]` };
+  });
+
+  await runTest("GET /api/v1/iot/alerts?status=XYZ -> 400", async () => {
+    const r = await alertCall("GET", "?status=XYZ");
+    return { passed: r.status === 400, status: r.status, expectedStatus: 400, details: r.json.message };
+  });
+
+  await runTest("PATCH /alerts/:id/status em alerta inexistente -> 404", async () => {
+    const r = await alertCall("PATCH", "/ALT-TEST-NAO-EXISTE/status", { status: "EM_ANALISE" });
+    return { passed: r.status === 404, status: r.status, expectedStatus: 404, details: r.json.message };
+  });
+
+  await runTest("PATCH /alerts/:id/status com status ABERTO -> 400", async () => {
+    const r = await alertCall("PATCH", `/${TEST_ALT_ID}/status`, { status: "ABERTO" });
+    return { passed: r.status === 400, status: r.status, expectedStatus: 400, details: r.json.message };
+  });
+
+  await runTest("PATCH /alerts/:id/status ENCERRADO sem resolved_by/resolution_note -> 400", async () => {
+    const r = await alertCall("PATCH", `/${TEST_ALT_ID}/status`, { status: "ENCERRADO", resolved_by: "Gestor" });
+    return { passed: r.status === 400, status: r.status, expectedStatus: 400, details: r.json.message };
+  });
+
+  await runTest("PATCH /alerts/:id/status ABERTO -> EM_ANALISE -> 200", async () => {
+    const r = await alertCall("PATCH", `/${TEST_ALT_ID}/status`, { status: "EM_ANALISE" });
+    const passed = r.status === 200 && r.json.alert?.status === "EM_ANALISE" && r.json.alert?.resolved_at === null;
+    return { passed, status: r.status, expectedStatus: 200, details: `status=${r.json.alert?.status}` };
+  });
+
+  await runTest("PATCH /alerts/:id/status EM_ANALISE de novo -> 409", async () => {
+    const r = await alertCall("PATCH", `/${TEST_ALT_ID}/status`, { status: "EM_ANALISE" });
+    return { passed: r.status === 409, status: r.status, expectedStatus: 409, details: r.json.message };
+  });
+
+  await runTest("PATCH /alerts/:id/status EM_ANALISE -> ENCERRADO -> 200 com data, quem e motivo", async () => {
+    const r = await alertCall("PATCH", `/${TEST_ALT_ID}/status`, {
+      status: "ENCERRADO",
+      resolved_by: "Gestor de teste",
+      resolution_note: "Lacre substituído e cilindro conferido"
+    });
+    const a = r.json.alert;
+    const passed = r.status === 200 && a?.status === "ENCERRADO" && !!a?.resolved_at &&
+      a?.resolved_by === "Gestor de teste" && a?.resolution_note === "Lacre substituído e cilindro conferido";
+    return { passed, status: r.status, expectedStatus: 200, details: `status=${a?.status}, resolved_at=${a?.resolved_at}` };
+  });
+
+  await runTest("PATCH /alerts/:id/status em alerta ENCERRADO -> 409 (não reabre)", async () => {
+    const r = await alertCall("PATCH", `/${TEST_ALT_ID}/status`, { status: "EM_ANALISE" });
+    const passed = r.status === 409 && r.json.message === "Alerta já encerrado; um problema novo gera um alerta novo";
+    return { passed, status: r.status, expectedStatus: 409, details: r.json.message };
+  });
+
+  await runTest("PATCH /alerts/:id/status ABERTO -> ENCERRADO direto -> 200", async () => {
+    const r = await alertCall("PATCH", "/ALT-TEST-AUTORUN-002/status", {
+      status: "ENCERRADO",
+      resolved_by: "Gestor de teste",
+      resolution_note: "Bateria trocada"
+    });
+    return { passed: r.status === 200 && r.json.alert?.status === "ENCERRADO", status: r.status, expectedStatus: 200, details: `status=${r.json.alert?.status}` };
+  });
+
+  await runTest("Banco rejeita alerta ENCERRADO sem data de encerramento (CHECK)", async () => {
+    let rejected = false;
+    try {
+      db.prepare("UPDATE alerts SET status = 'ENCERRADO', resolved_at = NULL WHERE alert_id = 'ALT-TEST-AUTORUN-003'").run();
+    } catch (err: any) {
+      rejected = String(err.code).startsWith("SQLITE_CONSTRAINT");
+    }
+    return { passed: rejected, details: rejected ? "CHECK barrou ENCERRADO sem resolved_at" : "atualização aceita" };
+  });
+
+  await runTest("GET /api/v1/iot/alerts?status=ENCERRADO&device_id= -> 200 com os 2 encerrados", async () => {
+    const r = await alertCall("GET", `?status=ENCERRADO&device_id=${TEST_DEVICE_ID}`);
+    const passed = r.status === 200 && r.json.total === 2 && r.json.alerts.every((a: any) => a.status === "ENCERRADO");
+    return { passed, status: r.status, expectedStatus: 200, details: `total=${r.json.total}` };
   });
 
   // Group 9: Association device → seal → cylinder
