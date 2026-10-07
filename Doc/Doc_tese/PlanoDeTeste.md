@@ -368,7 +368,7 @@ Implementada na Oxide como cópia provisória do FluxID: rotas abertas `/seals`,
 
 ### 10.5 Worker SQLite → PostgreSQL
 
-> Implementado em 07/10/2026 (`src/worker/`, scripts `004` e `005`). A IA fez uma verificação técnica no FluxID de análise no Docker (relatório [Relatorio-de-Teste-2026-10-07-01h30.md](Relatorio-de-Teste-2026-10-07-01h30.md)); o **teste formal** destes casos e a validação humana ficaram para 08/10/2026. Os casos INT são automatizados na suíte.
+> Implementado em 07/10/2026 (`src/worker/`, scripts `004` e `005`). A IA fez uma verificação técnica no FluxID de análise no Docker (relatório [Relatorio-de-Teste-2026-10-07-01h30.md](Relatorio-de-Teste-2026-10-07-01h30.md)); o **teste formal** destes casos foi feito pela IA na mesma madrugada (Roteiro v1.10, seção 5.10, sem falhas); falta a validação humana. Os casos INT são automatizados na suíte.
 
 | ID | Caso | Esperado |
 | --- | --- | --- |
@@ -487,7 +487,7 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 
 | Indicador | Valor |
 | --- | --- |
-| Suíte automatizada (`npm test`) | 96 casos (95 testes e 1 de teardown), 96 aprovados em 07/10/2026 (verificação técnica da IA; teste formal em 08/10/2026) |
+| Suíte automatizada (`npm test`) | 96 casos (95 testes e 1 de teardown), 96 aprovados em 07/10/2026 (teste formal da IA com o Roteiro v1.10; aguarda validação) |
 | Compilação (`npx tsc --noEmit`) | Aprovada em 06/10/2026 |
 | Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas); [Relatorio-de-Teste-2026-10-06-20h00.md](Relatorio-de-Teste-2026-10-06-20h00.md): entrega E (banco FluxID); [Relatorio-de-Teste-2026-10-06-20h35.md](Relatorio-de-Teste-2026-10-06-20h35.md): entrega D (catálogo de comandos e tipos de erro); [Relatorio-de-Teste-2026-10-06-21h31.md](Relatorio-de-Teste-2026-10-06-21h31.md): entrega B (associação); [Relatorio-de-Teste-2026-10-06-23h40.md](Relatorio-de-Teste-2026-10-06-23h40.md): alertas em português, análise e encerramento; [Relatorio-de-Teste-2026-10-07-00h15.md](Relatorio-de-Teste-2026-10-07-00h15.md): FluxID, alerta com cilindro e lacre obrigatórios; [Relatorio-de-Teste-2026-10-07-00h45.md](Relatorio-de-Teste-2026-10-07-00h45.md): grupos do Swagger e FluxID no Docker; [Relatorio-de-Teste-2026-10-07-01h30.md](Relatorio-de-Teste-2026-10-07-01h30.md): integração Oxide ⇄ FluxID (verificação técnica, **aguardando validação**). Os demais, **aprovados por Natã da Silva Baracho** |
 | Cobertura da suíte | Dispositivos, autenticação, telemetria, eventos, comandos, alertas (criação, listagem, análise e encerramento) e associação |
@@ -550,4 +550,4 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | 1.8 | 06/10/2026 | Entrega de alertas, decisões de Natã da Silva Baracho: `alert_type` com os códigos do catálogo em português (nomes antigos convertidos), severidade padrão do catálogo, listagem e rota para analisar e encerrar alertas; ALT-03, ALT-05, ALT-07, ALT-08 e BD-06 revisados; novos ALT-13 a ALT-21 e BD-19; suíte com 86 casos |
 | 1.9 | 07/10/2026 | FluxID, decisão de Natã da Silva Baracho: alerta com cilindro e lacre obrigatórios (script `003`); novos FLX-23 a FLX-25 executados num servidor PostgreSQL temporário e FLX-26 (gatilho) pendente; SYN-09 passa a citar o script `004` |
 | 1.10 | 07/10/2026 | Swagger organizado em grupos (novo GER-06); FluxID de análise no Docker; dump em `sql/fluxid/FluxID.sql`; suíte com 87 casos |
-| 1.11 | 07/10/2026 | Integração Oxide ⇄ FluxID implementada: SYN-01 a SYN-16 revistos com as regras aprovadas, novos SYN-17 a SYN-24 e INT-01 a INT-07; BD-01 e BD-02 com `sync_logs`; página `/api-docs-fluxid` com a proposta da API do frontend (GER-07, GER-08); suíte com 96 casos. Teste formal em 08/10/2026 |
+| 1.11 | 07/10/2026 | Integração Oxide ⇄ FluxID implementada: SYN-01 a SYN-16 revistos com as regras aprovadas, novos SYN-17 a SYN-24 e INT-01 a INT-07; BD-01 e BD-02 com `sync_logs`; página `/api-docs-fluxid` com a proposta da API do frontend (GER-07, GER-08); suíte com 96 casos. Teste formal da IA em 07/10/2026, sem falhas |

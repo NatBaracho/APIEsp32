@@ -395,7 +395,7 @@ Resultado no servidor temporário (dump + `001` + `002`): os 10 alertas de teste
 
 ### 17.6 Integração com a Oxide — `004_integracao_oxide.sql` (07/10/2026)
 
-Aplica no banco as decisões P1 a P8 (`Integracao-Oxide-FluxID.md`, seção 5) e o gatilho FLX-26. **Aguardando o teste formal e a validação de Natã da Silva Baracho (08/10/2026).**
+Aplica no banco as decisões P1 a P8 (`Integracao-Oxide-FluxID.md`, seção 5) e o gatilho FLX-26. Testado pela IA no Docker em 07/10/2026 (Roteiro v1.10, sem falhas). **Aguardando a validação de Natã da Silva Baracho.**
 
 | Passo | O que muda | Decisão |
 | --- | --- | --- |

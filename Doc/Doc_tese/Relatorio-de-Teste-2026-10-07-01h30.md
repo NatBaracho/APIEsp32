@@ -4,7 +4,7 @@
 **Executor:** IA (Claude Code, modelo Claude Opus 5.5)
 **Pedido de:** Natã da Silva Baracho, em 07/10/2026: "deixe tudo pronto sobre o lacre e a integração da API com os dois bancos [...] usando o banco de dados FluxID como banco principal. Se for necessário replicar o banco que ele [o frontend] está fazendo, faça, mas que fique integrado com a Oxide. [...] no final gere um relatório para eu validar depois [...] deixe para fazer o teste amanhã antes da integração API e front."
 **Branch:** `feat/integracao-oxide-fluxid`, a partir da `main` `387a18e` (merge do PR #14). **Nada foi enviado ao GitHub:** o envio acontece depois da sua validação.
-**Situação:** ⏳ **Aguardando o teste formal e a validação de Natã da Silva Baracho (08/10/2026).**
+**Situação:** teste formal da IA **executado em 07/10/2026, 01:39 às 01:40** (seção 12): 0 falhas. ⏳ **Aguardando a validação de Natã da Silva Baracho.**
 
 ---
 
@@ -228,3 +228,36 @@ Também a seu pedido, o contrato ganhou uma página no formato do Swagger, separ
 - A suíte ganhou 2 casos (GER-07 e GER-08) e passou de 94 para **96/96**, em duas rodadas, numa cópia do banco. O teste novo achou um erro meu na própria proposta (a indicação "sem token" do login no lugar errado), corrigido antes desta versão.
 
 Pergunta extra: **15.** A página `/api-docs-fluxid` pode ficar no projeto até a API do frontend ser implementada?
+
+## 12. Teste formal executado (07/10/2026, 01:39 às 01:40)
+
+A seu pedido ("vamos deixar isto em 100%"), o teste formal foi adiantado e feito na mesma madrugada: **Roteiro de Teste v1.10 completo** no `oxide.db` real, com backup e restauração, incluindo a seção 5.10 do Worker contra o FluxID de análise no Docker (`FluxID_db` do container, com `001` a `005`).
+
+| Verificação | Resultado |
+| --- | --- |
+| 18 blocos do roteiro | Todos executados sem interrupção |
+| Suíte (seção 4) | **96/96** |
+| Seções 5.1 a 5.9 | 98 respostas HTTP **idênticas** às da rodada anterior (sem regressão) |
+| BD-01 e BD-02 | Tabelas esperadas, com `sync_logs` e sem `sync_items` |
+| Regras do banco (seção 6) | 6 recusas esperadas (chave estrangeira, `active`, catálogo de comandos, duas de alertas, chave repetida) |
+| Inicialização repetida (BD-11) e limpeza (BD-15) | Sem erro; 0 registros de teste |
+| `oxide.db` real | Restaurado, **idêntico** (SHA-256 `2dde46bc…` antes e depois) |
+
+Seção 5.10 (Worker):
+
+| ID | Esperado | Obtido | Resultado |
+| --- | --- | --- | --- |
+| SYN-21 | Cadastro trazido; `DSP-000011` com hash e vínculo com `LCR-000011` | 50 dispositivos, 50 lacres, 50 cilindros, 60 vínculos, sem conflitos; `tem_hash = 1`; vínculo ativo | PASSOU |
+| SYN-22 | Chave certa aceita | `202` | PASSOU |
+| SYN-01 | Telemetria com lacre e cilindro | `MSG-RT-SYN-1 \| LCR-000011 \| CIL-000011` | PASSOU |
+| SYN-06 | Sem posição na quarentena | `MSG-RT-SYN-2 \| SEM_POSICAO` | PASSOU |
+| SYN-18 | Eventos com e sem estado do lacre | `VIOLACAO` em `eventos_lacre`; `startup` em `eventos_dispositivo` | PASSOU |
+| SYN-19 | Suspeita de violação | `LCR-000011` → `SUSPEITA_VIOLACAO` | PASSOU |
+| SYN-20 | Alerta com o par da hora e encerramento | `ALT-RT-SYN-1 \| LCR-000011 \| CIL-000011`; depois `ENCERRADO \| Gestor RT \| Lacre conferido`; histórico `ALERTA_REGISTRADO` e `ALERTA_ENCERRADO` com origem `OXIDE` | PASSOU |
+| SYN-07 | Dispositivo fora do FluxID | "dispositivo não cadastrado no FluxID", com nova tentativa agendada (também as linhas de teste `DSP-TEST-RT` das seções anteriores) | PASSOU |
+| SYN-02 | Reenvio sem duplicar | 1 linha | PASSOU |
+| SYN-03 | FluxID fora do ar | Rodada `FALHOU`; linha `PENDING` com 0 tentativas | PASSOU |
+| SYN-23 | Gatilho do par lacre + cilindro | Recusado: "o lacre não estava vinculado a este cilindro" | PASSOU |
+| SYN-14 | Rodadas registradas | `PARCIAL`, `PARCIAL`, `OK`, `OK`, `FALHOU` | PASSOU |
+
+**Falhas: 0. Achados: 0.**

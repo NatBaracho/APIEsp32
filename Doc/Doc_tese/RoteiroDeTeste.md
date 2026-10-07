@@ -803,4 +803,4 @@ marque NÃO EXECUTADO com o motivo.
 | 1.7 | 06/10/2026 | Entrega B: nova seção 5.9 (associação, troca, encerramento, histórico e `error_type`); limpeza inclui lacres, cilindros e vínculos de teste; suíte com 71 casos |
 | 1.8 | 06/10/2026 | Entrega de alertas: tipos do catálogo em português com transição dos nomes antigos, listagem, análise e encerramento (ALT-13 a ALT-20), regras do banco (BD-19), função `patch` no arquivo de ambiente; suíte com 86 casos |
 | 1.9 | 07/10/2026 | Swagger em grupos (GER-06 na suíte); dump em `sql/fluxid/FluxID.sql` e banco de análise no Docker; suíte com 87 casos |
-| 1.10 | 07/10/2026 | Nova seção 5.10 (Worker contra o FluxID de análise no Docker: SYN-01 a SYN-23); BD-01 e BD-02 com `sync_logs`; suíte com 96 casos (inclui a página `/api-docs-fluxid`). Preparado para o teste formal de 08/10/2026 |
+| 1.10 | 07/10/2026 | Nova seção 5.10 (Worker contra o FluxID de análise no Docker: SYN-01 a SYN-23); BD-01 e BD-02 com `sync_logs`; suíte com 96 casos (inclui a página `/api-docs-fluxid`). Executado em 07/10/2026, 01:39 às 01:40, sem falhas |

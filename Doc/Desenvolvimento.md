@@ -73,7 +73,7 @@ O que a Oxide faz hoje:
 
 **API — fará**
 - Alertas e comandos automáticos a partir do `error_type`: geofence, saída de rota (alerta ao motorista e ao gestor), lacre aberto → `TRAVAR_VALVULA`.
-- Atender o frontend com o FluxID como banco principal (próxima etapa, a partir de 08/10/2026).
+- Atender o frontend com o FluxID como banco principal (próxima etapa, depois da validação da integração).
 
 **Oxide — faz hoje**
 - É a **fila local**: `telemetry_queue` e `events` ficam com `status = PENDING` até o Worker sincronizar. Se o FluxID estiver fora do ar, nada se perde.
@@ -84,7 +84,7 @@ O que a Oxide faz hoje:
 - Recebe do Worker o cadastro oficial, os vínculos e o hash da chave do FluxID. O FluxID manda; o cadastro provisório local é mantido e nada é apagado.
 - Registra cada rodada do Worker em `sync_logs`.
 
-**Worker — faz hoje** (regras em [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md); teste formal em 08/10/2026)
+**Worker — faz hoje** (regras em [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md); teste formal da IA em 07/10/2026, sem falhas; aguarda validação)
 - Envia telemetria, eventos e alertas ao FluxID, cada linha numa transação, sem duplicar (`message_id`/`alert_id`).
 - Tentativas: envio inicial e mais 5, esperando 1 min, 5 min, 15 min, 1 h e 6 h; depois deixa a linha parada para o gestor (P6). FluxID fora do ar não gasta tentativa.
 - Telemetria sem GPS vai para a quarentena (P2). Evento do lacre de dispositivo sem lacre espera o vínculo (P3). Eventos sem estado de lacre vão para `eventos_dispositivo` (P4).
@@ -321,7 +321,7 @@ PATCH /api/v1/iot/alerts/ALT-000001/status   { "status": "ENCERRADO", "resolved_
 
 ## 1.9 O que ainda não existe
 
-- API do frontend sobre o FluxID (próxima etapa, a partir de 08/10/2026).
+- API do frontend sobre o FluxID (próxima etapa, depois da validação da integração).
 - Controle por perfil nas rotas abertas da equipe (`/devices`, `/seals`, `/cylinders`, `/assignments`, `/iot/alerts` de análise e `/sync`).
 - Criação automática de comandos e verificação dos tipos de erro do catálogo (`Tipos-de-Erro.md`), como saída de rota e GPS sem sinal.
 - Justificativa do motorista na saída de rota (fica para a entrega de geofence e rota).
@@ -330,7 +330,7 @@ PATCH /api/v1/iot/alerts/ALT-000001/status   { "status": "ENCERRADO", "resolved_
 ## 1.10 Estado atual
 
 - API em funcionamento, validada pela suíte automatizada (`npm test`, 96/96) e pelo Roteiro de Teste completo no `oxide.db` real (até a versão anterior ao Worker).
-- Worker e integração com o FluxID implementados em 07/10/2026; teste formal e validação marcados para 08/10/2026 (seção 7.23).
+- Worker e integração com o FluxID implementados e testados pela IA em 07/10/2026 (Roteiro v1.10, sem falhas); aguardam a validação de Natã da Silva Baracho (seção 7.23).
 - Próximas entregas: API do frontend sobre o FluxID; geofence e rota; regras e alertas automáticos (incluindo comandos automáticos).
 - Pendências conhecidas: firmware do ESP32 precisa enviar `seal_status` e `attempt_count` e tratar as respostas da seção 1.5; `nodemon` com vulnerabilidade apenas em desenvolvimento.
 
@@ -626,7 +626,7 @@ O script `sql/fluxid/003_alertas_cilindro_obrigatorio.sql` preenche os alertas s
 Compilação aprovada, suíte com 87/87 em duas rodadas e teste negativo da regra de grupos. Validação registrada em [Relatorio-de-Teste-2026-10-07-00h45.md](Doc_tese/Relatorio-de-Teste-2026-10-07-00h45.md), **aprovada por Natã da Silva Baracho**.
 
 ### 7.23 Integração Oxide ⇄ FluxID: Worker, chave por hash e estruturas do frontend (07/10/2026)
-Pedido de Natã da Silva Baracho: deixar pronto tudo do lacre e da integração da API com os dois bancos, com o `FluxID_db` como banco definitivo; replicar no FluxID o que o frontend usa, integrado com a Oxide; atualizar os documentos e gerar um relatório para validação. Teste formal e validação humana ficaram para 08/10/2026.
+Pedido de Natã da Silva Baracho: deixar pronto tudo do lacre e da integração da API com os dois bancos, com o `FluxID_db` como banco definitivo; replicar no FluxID o que o frontend usa, integrado com a Oxide; atualizar os documentos e gerar um relatório para validação. O teste formal da IA foi adiantado para a mesma madrugada (Roteiro v1.10 completo, sem falhas); falta a validação humana.
 
 | Parte | O que foi feito |
 | --- | --- |
