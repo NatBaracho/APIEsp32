@@ -250,7 +250,7 @@ Rotas de apoio para a equipe: `GET /iot/telemetries` (lista as telemetrias de to
 ## 1.10 Estado atual
 
 - API em funcionamento, validada pela suíte automatizada (`npm test`, 71/71) e pelo Roteiro de Teste completo no `oxide.db` real.
-- Próximas entregas: `alert_type` da Oxide com os códigos em português do catálogo de erros; regras e alertas automáticos (incluindo comandos automáticos); Worker (depois das decisões P1 a P8 do plano de integração).
+- Próximas entregas: `alert_type` da Oxide com os códigos em português do catálogo de erros; regras e alertas automáticos (incluindo comandos automáticos); Worker (decisões P1 a P8 já fechadas na seção 5 do plano de integração).
 - Pendências conhecidas: firmware do ESP32 precisa enviar `seal_status` e `attempt_count` e tratar as respostas da seção 1.5; `nodemon` com vulnerabilidade apenas em desenvolvimento.
 
 ---
@@ -501,6 +501,21 @@ Decisões de Natã da Silva Baracho:
 | Erros do catálogo | Só registrar, sem alerta | Coluna `error_type` em `telemetry_queue` e `events`; novo código `DISPOSITIVO_SEM_LACRE` |
 
 Compilação aprovada, suíte com 71/71 (14 casos novos) executada duas vezes seguidas e Roteiro de Teste v1.7 executado por completo no `oxide.db` real: as 67 respostas anteriores idênticas à rodada da entrega D e as 17 da nova seção 5.9 conforme, com checksum idêntico antes e depois. Validação registrada em [Relatorio-de-Teste-2026-10-06-21h31.md](Doc_tese/Relatorio-de-Teste-2026-10-06-21h31.md), **aprovada por Natã da Silva Baracho**.
+
+### 7.19 Decisões P1 a P8 da integração com o FluxID (06/10/2026)
+Natã da Silva Baracho fechou as decisões pendentes do plano de integração (seção 5 de [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md), v1.1):
+
+- **P1:** a Oxide não envia data; o FluxID grava sempre a hora de chegada.
+- **P2:** telemetria sem GPS vai para uma quarentena separada no FluxID, só armazenada. A tabela principal continua exigindo posição, porque alimenta o mapa do dashboard.
+- **P3:** evento sem lacre vinculado espera o vínculo.
+- **P4:** eventos sem estado de lacre vão para uma tabela de eventos do dispositivo.
+- **P5:** o FluxID aceita todos os códigos do catálogo de erros como tipo de alerta.
+- **P6:** o Worker faz 5 tentativas com espera crescente e depois deixa o dado para o gestor.
+- **P7:** a API Oxide gera o alerta e o código.
+- **P8:** o Worker só marca suspeita de violação, e o gestor confirma.
+- O alerta aparece no mapa na posição atual do lacre.
+
+Nenhum código foi alterado: as decisões orientam a entrega do Worker. Registro conferido por questionário (6/6 sim), **aprovado por Natã da Silva Baracho** em 06/10/2026.
 
 ## 9. Suíte de testes automatizados (`npm test`)
 

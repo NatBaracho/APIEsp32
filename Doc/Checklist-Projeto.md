@@ -204,7 +204,7 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ Análise do dump FluxID e plano de integração com tabelas de conversão (`Doc/Integracao-Oxide-FluxID.md`, entrega E).
 - ✅ Scripts de ajuste de estrutura e de correção da massa de testes do FluxID (`sql/fluxid/`), validados em servidor temporário.
 - [ ] Aplicar os scripts no FluxID principal e versionar o novo dump.
-- [ ] Fechar as decisões P1 a P8 do plano de integração.
+- ✅ Decisões P1 a P8 do plano de integração fechadas (06/10/2026).
 - [ ] Oxide passar a guardar `api_key_hash` e comparar o SHA-256 da `X-API-Key`.
 - [ ] Definir configuração segura de conexão.
 - [ ] Implementar leitura de pendências e envio ao PostgreSQL.

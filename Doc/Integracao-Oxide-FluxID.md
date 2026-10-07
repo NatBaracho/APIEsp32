@@ -1,10 +1,10 @@
 # Plano de Integração Oxide → FluxID
 
-**Versão:** 1.0 — 06/10/2026 (entrega E)
+**Versão:** 1.1 — 06/10/2026 (decisões P1 a P8 fechadas por Natã da Silva Baracho)
 **Público:** equipe do projeto e quem for implementar o Worker de sincronização.
 **Base:** API Oxide após as entregas A e C, `oxide.db` atual e dump `FluxID.sql` de 23/09/2026 com os ajustes de `sql/fluxid/001_ajustes_estrutura.sql`.
 
-Este documento diz **como cada dado da Oxide vira um registro do FluxID** e lista **o que ainda precisa ser decidido** antes de implementar o Worker. Nada aqui está implementado ainda.
+Este documento diz **como cada dado da Oxide vira um registro do FluxID** e registra as **decisões** que orientam o Worker (seção 5). Nada aqui está implementado ainda.
 
 ---
 
@@ -21,7 +21,8 @@ ESP32 → Oxide API → oxide.db (status PENDING)
 
 - As colunas `status`, `attempt_count` e `last_error` de `telemetry_queue` e `events` existem para isso e são controladas só pelo servidor.
 - **Idempotência:** o Worker grava usando o `message_id`. No FluxID, `telemetrias.message_id` é único, e `eventos_lacre.message_id` passou a existir (único quando informado). Reprocessar a mesma linha não duplica nada.
-- Linhas em `ERROR` são tentadas de novo depois; o limite de tentativas ainda será definido (decisão P6).
+- Linhas em `ERROR` são tentadas de novo até **5 vezes**, com espera crescente (1 min, 5 min, 15 min, 1 h, 6 h). Depois disso ficam paradas em erro e aparecem para o gestor resolver (decisão P6). O dado nunca é apagado da Oxide.
+- Linhas que **esperam** uma condição combinada (ex.: evento de dispositivo sem lacre, decisão P3) não contam como tentativa.
 
 ## 2. Identificação: quem é quem
 
@@ -44,16 +45,18 @@ Dispositivo da Oxide sem correspondente em `dispositivos` não é sincronizado: 
 | --- | --- | --- |
 | `message_id` | `message_id` | Direto |
 | `device_id` | `dispositivo_id` | Seção 2 |
-| `latitude`, `longitude` | `latitude`, `longitude` | Direto. O FluxID exige as duas: telemetria sem posição segue a decisão P2 |
+| `latitude`, `longitude` | `latitude`, `longitude` | Direto e **obrigatórias**: alimentam o mapa do dashboard. Telemetria sem posição vai para a quarentena (decisão P2) |
 | `speed_kmh` | `velocidade_kmh` | Direto |
 | `battery_percent` | `bateria_percentual` | Direto |
 | `gsm_signal` | `sinal_gsm` | Direto |
 | `payload_json` | `payload_raw` (JSONB) | Direto; inclui `seal_status` e `attempt_count` enviados pelo ESP32 |
-| `last_seen_at` ou hora de recebimento | `data_coleta` (obrigatória) | **Decisão P1** |
+| — | `data_coleta` (obrigatória) | Gerada pelo FluxID na chegada (`DEFAULT now()`), decisão P1. A Oxide não envia data |
 | `seal_status`, `device_attempt_count` | — | Sem coluna no FluxID; ficam em `payload_raw` |
 | `last_repeat_message_id` | — | Não sincroniza: é só controle de reenvio da Oxide |
 
 Posições repetidas não geram linha nova na Oxide; por isso só a primeira telemetria de uma sequência repetida chega ao FluxID.
+
+**Telemetria sem GPS (decisão P2):** vai para uma tabela separada de quarentena no FluxID (ex.: `telemetrias_quarentena`, mesmos campos sem a obrigatoriedade de posição), **só armazenada** para análise quando for preciso. Não gera alerta automático. No mapa, o lacre continua na **última posição conhecida** da tabela `telemetrias`.
 
 ### 3.2 Estado do lacre: `seal_status` e eventos → `eventos_lacre` e `lacres.status`
 
@@ -66,13 +69,15 @@ Posições repetidas não geram linha nova na Oxide; por isso só a primeira tel
 | Oxide (`events`) | FluxID (`eventos_lacre`) | Regra |
 | --- | --- | --- |
 | `message_id` | `message_id` | Novo campo do script 001 |
-| `device_id` | `lacre_id` (obrigatório) | Pelo vínculo ativo dispositivo → lacre. Sem vínculo: decisão P3 |
+| `device_id` | `lacre_id` (obrigatório) | Pelo vínculo ativo dispositivo → lacre. Sem vínculo, o evento **espera** na Oxide até o vínculo existir (decisão P3) |
 | `seal_status` | `tipo` | Tabela acima |
 | `event_type`, `payload_json` | `descricao` | Texto do tipo e resumo do payload |
-| — | `ocorrido_em` (obrigatório) | **Decisão P1** (a tabela `events` não tem data) |
+| — | `ocorrido_em` (obrigatório) | Gerada pelo FluxID na chegada (`DEFAULT now()`), decisão P1 |
 | — | `telemetria_id` | Opcional: telemetria do mesmo dispositivo mais próxima no tempo |
 
-Eventos **sem** `seal_status` (ex.: `startup`, falha de hardware) não têm tipo equivalente em `eventos_lacre`: decisão P4.
+Eventos **sem** `seal_status` (ex.: `startup`, falha de hardware) vão para uma **nova tabela de eventos do dispositivo** no FluxID (decisão P4): o evento mostra como o lacre e o cilindro se comportam (ativo, violado, abertura não autorizada).
+
+**Estado do lacre (decisão P8):** o Worker só marca `SUSPEITA_VIOLACAO`; a mudança para `ROMPIDO` (ou a liberação) é confirmada pelo gestor.
 
 ### 3.3 Alertas: `alerts` → `alertas`
 
@@ -82,14 +87,16 @@ Eventos **sem** `seal_status` (ex.: `startup`, falha de hardware) não têm tipo
 | `GEOFENCE_EXIT` | `SAIDA_GEOCERCA` | Conversão |
 | `LOW_BATTERY` | `BATERIA_BAIXA` | Conversão |
 | `COMMUNICATION_LOST` | `SEM_COMUNICACAO` | Conversão |
-| `DEVICE_ERROR`, `COMMAND_FAILURE` | — | Sem equivalente no `CHECK`: decisão P5 |
+| `DEVICE_ERROR`, `COMMAND_FAILURE` e demais códigos | Código do catálogo | O FluxID passa a aceitar **todos os códigos** de [Tipos-de-Erro.md](Tipos-de-Erro.md) em `alertas.tipo` (decisão P5) |
 | `severity` | `severidade` | **Direto** (entrega C: mesmos valores) |
 | `status` | `status` | **Direto** (entrega C: mesmos valores) |
 | `title`, `description` | `titulo`, `descricao` | Direto |
 | `created_at` | `aberto_em` | Direto |
 | `resolved_at` | `encerrado_em` | Direto |
-| `alert_id` | `codigo` | Direto se seguir o padrão `ALT-000001` e não colidir; senão, o FluxID gera (decisão P7) |
+| `alert_id` | `codigo` | **Direto** (decisão P7): a API Oxide gera o alerta e o envia; o FluxID não cria outro código |
 | `device_id` | `organizacao_id`, `lacre_id`, `cilindro_id` | Seção 2 |
+
+**Alerta no mapa:** o alerta não guarda posição; o dashboard o desenha como ponto/cor na **posição atual** do lacre (última telemetria válida).
 
 ### 3.4 Comandos
 
@@ -108,23 +115,30 @@ Consequências para implementar junto com o Worker:
 3. A Oxide passa a guardar `api_key_hash` e a comparar `SHA-256(X-API-Key)` com ele, em vez da chave em texto. É uma mudança na API Oxide, a ser feita na entrega do Worker.
 4. Até lá, o `POST /api/v1/devices` da Oxide continua como cadastro provisório.
 
-## 5. Decisões pendentes
+## 5. Decisões (fechadas em 06/10/2026)
 
-| # | Decisão | Opções principais |
+Decididas por **Natã da Silva Baracho**. Registro conferido por questionário (6/6 sim) e **aprovado por Natã da Silva Baracho** em 06/10/2026.
+
+| # | Tema | Decisão |
 | --- | --- | --- |
-| P1 | Data da telemetria e do evento | (a) Oxide passa a gravar `received_at` ao receber; `data_coleta` = `last_seen_at` do ESP32 ou `received_at`. (b) ESP32 passa a enviar sempre a data da leitura |
-| P2 | Telemetria sem GPS | (a) Não sincroniza (fica só na Oxide). (b) Quarentena para análise. (c) FluxID passa a aceitar coordenadas nulas |
-| P3 | Evento de dispositivo sem lacre vinculado | (a) Fica em `ERROR` até haver vínculo. (b) Só registra na Oxide |
-| P4 | Eventos sem estado de lacre (`startup`, falhas) | (a) Ficam só na Oxide. (b) Nova tabela de eventos do dispositivo no FluxID |
-| P5 | Alertas `DEVICE_ERROR` e `COMMAND_FAILURE` | (a) Acrescentar ao `CHECK` de `alertas.tipo`. (b) Ficam só na Oxide |
-| P6 | Limite de tentativas do Worker | Ex.: 5 tentativas com intervalo crescente; depois exige ação manual |
-| P7 | Código do alerta no FluxID | (a) Usar o `alert_id` da Oxide. (b) FluxID gera `ALT-xxxxxx` e guarda o `alert_id` como referência |
-| P8 | Atualização de `lacres.status` pelo Worker | (a) Worker atualiza conforme a seção 3.2. (b) Só a API do FluxID/operador altera |
+| P1 | Data da telemetria e do evento | A Oxide não envia data. O FluxID grava **sempre a hora de chegada** (`DEFAULT now()` em `telemetrias.data_coleta` e `eventos_lacre.ocorrido_em`), para auditoria e relatórios |
+| P2 | Telemetria sem GPS | Quarentena em **tabela separada** no FluxID, só armazenada para análise. A tabela `telemetrias` continua exigindo latitude e longitude, porque alimenta o mapa do dashboard |
+| P3 | Evento de dispositivo sem lacre vinculado | Espera na Oxide até haver vínculo; o lacre fica disponível para receber cilindro, cliente e endereço |
+| P4 | Eventos sem estado de lacre (`startup`, falhas) | Nova tabela de eventos do dispositivo no FluxID |
+| P5 | Tipos de alerta | `alertas.tipo` passa a aceitar todos os códigos do catálogo `Tipos-de-Erro.md` |
+| P6 | Limite de tentativas do Worker | 5 tentativas (1 min, 5 min, 15 min, 1 h, 6 h); depois fica em erro para o gestor resolver |
+| P7 | Código do alerta | A API Oxide gera o alerta; o FluxID usa o `alert_id` como `codigo` |
+| P8 | `lacres.status` pelo Worker | Worker só marca `SUSPEITA_VIOLACAO`; o gestor confirma |
+| — | Alerta no mapa | Desenhado na posição atual do lacre (o alerta não guarda posição) |
+
+**Consequência a observar (P1 + P6):** como a data é a da chegada ao FluxID, um dado que demorou a ser enviado (Oxide sem internet ou novas tentativas do Worker) fica com a hora em que chegou, não com a hora da leitura.
+
+**Mudanças no FluxID que essas decisões pedem** (script `sql/fluxid/003`, na entrega do Worker): `DEFAULT now()` nas duas datas; tabela de quarentena; tabela de eventos do dispositivo; `CHECK` de `alertas.tipo` com os códigos do catálogo.
 
 ## 6. Ordem sugerida
 
 1. Aplicar `sql/fluxid/001_ajustes_estrutura.sql` e `002_correcao_massa_de_testes.sql` no FluxID e gerar um novo dump.
 2. Entrega D (catálogo de comandos), já decidindo a seção 3.4.
 3. ✅ Entrega B (associação): cópia provisória na Oxide no mesmo modelo do FluxID, com `error_type` registrando dispositivo sem lacre, lacre sem cilindro e lacre aberto em trânsito.
-4. Fechar as decisões P1 a P8.
+4. ✅ Decisões P1 a P8 fechadas (seção 5).
 5. Implementar o Worker e a chave por hash na Oxide (seção 4), testando primeiro num FluxID de análise (Docker).
