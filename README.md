@@ -47,6 +47,10 @@ Use **Try it out** para executar as requisições. Para telemetrias e eventos, c
 | `GET` | `/api/v1/iot/commands/:deviceId` | Buscar comandos pendentes do dispositivo |
 | `POST` | `/api/v1/iot/commands/confirm` | Confirmar execução ou erro de comando |
 | `POST` | `/api/v1/iot/alerts` | Registrar alerta do dispositivo |
+| `GET`/`POST` | `/api/v1/seals` | Listar e cadastrar lacres (provisório) |
+| `GET`/`POST` | `/api/v1/cylinders` | Listar e cadastrar cilindros (provisório) |
+| `GET`/`POST` | `/api/v1/assignments/device-seal` | Histórico e vínculo dispositivo ↔ lacre |
+| `GET`/`POST` | `/api/v1/assignments/seal-cylinder` | Histórico e vínculo lacre ↔ cilindro |
 
 Os POSTs de telemetria, eventos e alertas exigem `X-API-Key` do próprio `device_id` enviado (`403` se for de outro). O dispositivo precisa estar cadastrado em `POST /api/v1/devices` (provisório até o cadastro vir do FluxID); não há criação automática (`404`). As rotas de dispositivos são abertas, mas não mostram a `api_key`. Os campos `device_id` e `message_id` identificam os registros; `message_id` deve ser único por mensagem. Dispositivo repetido retorna `409 Dispositivo duplicado` e API Key já usada por outro dispositivo retorna `409 API Key já está em uso`; mensagem repetida retorna `409 Mensagem duplicada` e não cria outro registro. `status` e `attempt_count` da fila são sempre definidos pelo servidor; o `attempt_count` enviado pelo ESP32 (tentativas de envio) é gravado em `device_attempt_count`.
 
@@ -61,6 +65,8 @@ A tabela `status` cataloga esses códigos com nomes e descrições. Ela é separ
 Comandos são consultados por dispositivo e só podem ser acessados pela API Key daquele dispositivo. A confirmação aceita `EXECUTADO` ou `ERRO`; comandos confirmados deixam de aparecer na lista de pendentes.
 
 A tabela `devices` também possui `device_status_id`, `valve_status_id` e `seal_status_id`, colunas opcionais para guardar os IDs de estado associados. Dispositivos já cadastrados mantêm `NULL` nesses campos até serem atualizados.
+
+A associação dispositivo → lacre → cilindro fica numa cópia provisória do cadastro do FluxID (`seals`, `cylinders` e vínculos com histórico). Um lacre tem um cilindro e um dispositivo ativos por vez; a troca usa `replace: true`; nada é apagado. A telemetria recebe `lacre_id` e `cilindro_id` do vínculo ativo, e `error_type` registra dispositivo sem lacre, lacre sem cilindro e lacre aberto em trânsito.
 
 A tabela `alerts` armazena alertas associados a dispositivos. `POST /api/v1/iot/alerts` exige a API Key do dispositivo e aceita `SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE` ou `COMMUNICATION_LOST`. `severity` é opcional e aceita `BAIXA`, `MEDIA`, `ALTA` ou `CRITICA` (os mesmos valores do FluxID); sem ela, a API usa o padrão do tipo (`SEAL_BROKEN` → `CRITICA`; `GEOFENCE_EXIT` e `COMMAND_FAILURE` → `ALTA`; `DEVICE_ERROR` e `COMMUNICATION_LOST` → `MEDIA`; `LOW_BATTERY` → `BAIXA`). Todo alerta nasce com `status` `ABERTO`. Os campos antigos `status_id` e `severity_id` são ignorados.
 

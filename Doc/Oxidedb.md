@@ -4,7 +4,7 @@
 
 **Buffer temporário de ingestão para dispositivos ESP32**
 
-**Versão:** 1.4  
+**Versão:** 1.5  
 **Projeto:** FluxID / Oxide IoT
 
 Inclui instruções de criação, modelo de dados e script SQL completo.
@@ -70,6 +70,8 @@ Worker de sincronização (futuro)
 | devices | events | 1:N | `events.device_id → devices.device_id` |
 | devices | commands | 1:N | `commands.device_id → devices.device_id` |
 | devices | alerts | 1:N | `alerts.device_id → devices.device_id` |
+| devices / seals | seal_assignments | 1:N | `seal_assignments.device_id → devices.device_id`; `seal_assignments.seal_code → seals.seal_code` |
+| seals / cylinders | cylinder_assignments | 1:N | `cylinder_assignments.seal_code → seals.seal_code`; `cylinder_assignments.cylinder_code → cylinders.cylinder_code` |
 
 `device_status_id`, `valve_status_id` e `seal_status_id` são colunas opcionais em `devices`; atualmente não possuem constraints de chave estrangeira para `status`.
 
@@ -85,6 +87,8 @@ Worker de sincronização (futuro)
 | events | Fila temporária de eventos; `seal_status` representa o estado do lacre |
 | commands | Comandos destinados aos dispositivos e estado de execução |
 | alerts | Alertas associados a dispositivos, com tipo, estado, severidade e resolução |
+| seals / cylinders | Lacres e cilindros (cópia provisória do cadastro do FluxID) |
+| seal_assignments / cylinder_assignments | Histórico de vínculos dispositivo ↔ lacre e lacre ↔ cilindro; ativo = `ended_at` nulo |
 | sync_logs / sync_items | Ainda não existem no banco atual; previstos para o Worker futuro |
 
 ---
@@ -214,6 +218,7 @@ CREATE TABLE IF NOT EXISTS telemetry_queue (
     seal_status TEXT,
     device_attempt_count INTEGER,
     last_repeat_message_id TEXT,
+    error_type TEXT,
     status TEXT NOT NULL DEFAULT 'PENDING',
     attempt_count INTEGER NOT NULL DEFAULT 0,
     last_error TEXT,
@@ -241,6 +246,8 @@ CREATE TABLE IF NOT EXISTS events (
 
     device_attempt_count INTEGER,
 
+    error_type TEXT,
+
     status TEXT DEFAULT 'PENDING',
 
     attempt_count INTEGER NOT NULL DEFAULT 0,
@@ -253,6 +260,61 @@ CREATE TABLE IF NOT EXISTS events (
 );
 
 -- events.status tracks synchronization; seal_status tracks the seal state.
+
+-- Associação dispositivo → lacre → cilindro (cópia provisória do FluxID)
+CREATE TABLE IF NOT EXISTS seals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    seal_code TEXT NOT NULL UNIQUE,
+    nfc_uid TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'EM_ESTOQUE'
+        CHECK (status IN ('EM_ESTOQUE', 'INSTALADO', 'SUSPEITA_VIOLACAO', 'ROMPIDO',
+                          'REMOVIDO', 'DANIFICADO', 'INUTILIZADO')),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS cylinders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cylinder_code TEXT NOT NULL UNIQUE,
+    serial_number TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'DISPONIVEL'
+        CHECK (status IN ('DISPONIVEL', 'EM_TRANSITO', 'COM_CLIENTE',
+                          'MANUTENCAO', 'EXTRAVIADO', 'INATIVO')),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS seal_assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id TEXT NOT NULL,
+    seal_code TEXT NOT NULL,
+    started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ended_at DATETIME,
+    end_reason TEXT,
+    FOREIGN KEY (device_id) REFERENCES devices(device_id) ON UPDATE CASCADE ON DELETE RESTRICT,
+    FOREIGN KEY (seal_code) REFERENCES seals(seal_code) ON UPDATE CASCADE ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS cylinder_assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    seal_code TEXT NOT NULL,
+    cylinder_code TEXT NOT NULL,
+    started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ended_at DATETIME,
+    end_reason TEXT,
+    FOREIGN KEY (seal_code) REFERENCES seals(seal_code) ON UPDATE CASCADE ON DELETE RESTRICT,
+    FOREIGN KEY (cylinder_code) REFERENCES cylinders(cylinder_code) ON UPDATE CASCADE ON DELETE RESTRICT
+);
+
+-- Um vínculo ativo por vez (RN04, RN05)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_seal_assignment_device_active
+    ON seal_assignments (device_id) WHERE ended_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_seal_assignment_seal_active
+    ON seal_assignments (seal_code) WHERE ended_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cylinder_assignment_seal_active
+    ON cylinder_assignments (seal_code) WHERE ended_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cylinder_assignment_cylinder_active
+    ON cylinder_assignments (cylinder_code) WHERE ended_at IS NULL;
 
 COMMIT;
 ```
@@ -290,6 +352,10 @@ PRAGMA table_info(alerts);
 PRAGMA table_info(events);
 PRAGMA table_info(telemetry_queue);
 PRAGMA index_list(telemetry_queue);
+PRAGMA table_info(seals);
+PRAGMA table_info(cylinders);
+PRAGMA index_list(seal_assignments);
+PRAGMA index_list(cylinder_assignments);
 PRAGMA index_list(devices);
 
 SELECT name FROM sqlite_master WHERE type = 'trigger';

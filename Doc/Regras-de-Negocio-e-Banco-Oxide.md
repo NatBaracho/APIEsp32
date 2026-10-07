@@ -26,6 +26,10 @@ Este documento descreve as regras implementadas na API, o schema do SQLite Oxide
 | `GET /api/v1/iot/commands/:deviceId` | Lista comandos pendentes do dispositivo. | `200` |
 | `POST /api/v1/iot/commands/confirm` | Confirma execução ou erro de comando. | `200`; `400`, `404` ou `409` conforme a falha |
 | `POST /api/v1/iot/alerts` | Registra alerta para o dispositivo. | `201`; `400` inválido; `409` duplicado |
+| `GET/POST /api/v1/seals`, `GET /seals/:sealCode`, `POST /seals/:sealCode/status` | Cadastro e estado de lacres (provisório). | `200`/`201`; `400`; `404`; `409` |
+| `GET/POST /api/v1/cylinders`, `GET /cylinders/:cylinderCode`, `POST /cylinders/:cylinderCode/status` | Cadastro e estado de cilindros (provisório). | `200`/`201`; `400`; `404`; `409` |
+| `GET/POST /api/v1/assignments/device-seal`, `POST /device-seal/:id/end` | Vínculo dispositivo ↔ lacre e histórico. | `200`/`201`; `400`; `404`; `409` |
+| `GET/POST /api/v1/assignments/seal-cylinder`, `POST /seal-cylinder/:id/end` | Vínculo lacre ↔ cilindro e histórico. | `200`/`201`; `400`; `404`; `409` |
 
 Não existe endpoint HTTP para criar/enfileirar comandos, nem para consultar, resolver ou atualizar alertas.
 
@@ -118,6 +122,17 @@ Respostas do middleware: `401` para chave ausente ou inválida; `403` para dispo
 - A rota valida que a API Key pertence ao `device_id` informado.
 - O tipo `GEOFENCE_EXIT` é aceito, mas não existe lógica de geofence que o gere automaticamente.
 
+### 4.6 Associação dispositivo → lacre → cilindro
+
+- O cadastro oficial está no FluxID; a Oxide mantém uma **cópia provisória** (mesmos códigos `LCR-…`/`CIL-…` e mesmos estados) até o Worker sincronizar os dados. As rotas são abertas, como `/devices`.
+- Lacre: `seal_code` e `nfc_uid` únicos; nasce `EM_ESTOQUE`; não pode ser cadastrado como `INSTALADO`.
+- Cilindro: `cylinder_code` e `serial_number` únicos; nasce `DISPONIVEL`; estado alterado por `POST /cylinders/:cylinderCode/status`.
+- Um lacre tem um cilindro ativo e um cilindro um lacre ativo (RN04); um lacre tem um dispositivo ativo e um dispositivo um lacre ativo (RN05). Conflito → `409`; entidade inexistente → `404`.
+- `replace: true` faz a **troca** numa transação: encerra os vínculos em conflito com motivo "Substituído por novo vínculo" e cria o novo.
+- Encerrar um vínculo preenche `ended_at` e `end_reason`; nada é apagado (RN21). Encerrar de novo → `409`.
+- O estado do lacre segue o vínculo com o cilindro: vira `INSTALADO` ao ser instalado (só a partir de `EM_ESTOQUE` ou `REMOVIDO`, senão `409`) e `REMOVIDO` ao sair; lacre `SUSPEITA_VIOLACAO` ou `ROMPIDO` mantém o estado. `INSTALADO` não pode ser definido manualmente, e `EM_ESTOQUE`/`REMOVIDO` não podem ser definidos com cilindro ativo.
+- Ao receber telemetria, a API preenche `lacre_id` e `cilindro_id` pelo vínculo ativo do dispositivo (valores do payload são ignorados) e registra em `error_type`, sem gerar alerta: `LACRE_ABERTO_EM_TRANSITO` (lacre `UNLOCKED`/`BROKEN` com cilindro `EM_TRANSITO`), `DISPOSITIVO_SEM_LACRE` ou `LACRE_SEM_CILINDRO`. Eventos registram o mesmo `error_type`.
+
 ## 5. Modelo do banco SQLite
 
 Os nomes e constraints abaixo correspondem ao `oxide.db` inspecionado e ao schema mantido pela aplicação. Campos opcionais aceitam `NULL`; `id` é chave primária autoincremental nas tabelas de domínio.
@@ -151,7 +166,8 @@ A inicialização insere, se estiverem ausentes, os códigos `ACTIVE`, `INACTIVE
 | `id` | Chave primária autoincremental. |
 | `message_id` | `TEXT NOT NULL UNIQUE`. |
 | `device_id` | `TEXT NOT NULL`, FK para `devices.device_id`. |
-| `lacre_id`, `cilindro_id` | `TEXT`, opcionais, ainda sem FK ou regra de associação. |
+| `lacre_id`, `cilindro_id` | `TEXT`, opcionais; preenchidos pela API com o vínculo ativo do dispositivo no recebimento. |
+| `error_type` | `TEXT`, opcional; código do catálogo `Tipos-de-Erro.md` detectado no recebimento. |
 | `latitude`, `longitude`, `speed_kmh`, `battery_percent` | `REAL`, opcionais. |
 | `gsm_signal` | `INTEGER`, opcional. |
 | `payload_json` | `TEXT`, opcional. |
@@ -206,11 +222,41 @@ A inicialização insere, se estiverem ausentes, os códigos `ACTIVE`, `INACTIVE
 | `created_at` | `DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP`. |
 | `resolved_at` | `DATETIME`, opcional; não há rota atual para resolução. |
 
+### `seals` (lacres — cópia provisória do FluxID)
+
+| Coluna | Regra |
+| --- | --- |
+| `seal_code` | `TEXT NOT NULL UNIQUE` (ex.: `LCR-000001`). |
+| `nfc_uid` | `TEXT NOT NULL UNIQUE`. |
+| `status` | `TEXT NOT NULL DEFAULT 'EM_ESTOQUE'`, `CHECK` com os estados de `lacres` do FluxID. |
+| `created_at`, `updated_at` | `DATETIME`, preenchidos pelo banco. |
+
+### `cylinders` (cilindros — cópia provisória do FluxID)
+
+| Coluna | Regra |
+| --- | --- |
+| `cylinder_code` | `TEXT NOT NULL UNIQUE` (ex.: `CIL-000001`). |
+| `serial_number` | `TEXT NOT NULL UNIQUE`. |
+| `status` | `TEXT NOT NULL DEFAULT 'DISPONIVEL'`, `CHECK` com os estados de `cilindros` do FluxID. |
+| `created_at`, `updated_at` | `DATETIME`, preenchidos pelo banco. |
+
+### `seal_assignments` (dispositivo ↔ lacre) e `cylinder_assignments` (lacre ↔ cilindro)
+
+| Coluna | Regra |
+| --- | --- |
+| `device_id` / `seal_code` | FKs para `devices` e `seals` (`seal_assignments`). |
+| `seal_code` / `cylinder_code` | FKs para `seals` e `cylinders` (`cylinder_assignments`). |
+| `started_at` | `DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP`. |
+| `ended_at`, `end_reason` | Preenchidos ao encerrar; vínculo ativo = `ended_at` nulo. |
+
+Índices únicos parciais (`WHERE ended_at IS NULL`) garantem um vínculo ativo por dispositivo, por lacre e por cilindro (RN04, RN05). As FKs usam `ON DELETE RESTRICT`: nada do histórico é apagado (RN21).
+
 ### Relacionamentos e integridade
 
 - `devices.device_id` é a referência das FKs de `telemetry_queue`, `events`, `commands` e `alerts`.
 - `device_status_id`, `valve_status_id` e `seal_status_id` não possuem FKs no schema atual.
-- `lacre_id` e `cilindro_id` na telemetria são texto livre opcional; não representam ainda as associações do roadmap.
+- `lacre_id` e `cilindro_id` na telemetria guardam os códigos do vínculo ativo no momento do recebimento (registro histórico, sem FK).
+- `seal_assignments` referencia `devices` e `seals`; `cylinder_assignments` referencia `seals` e `cylinders`, todas com `ON DELETE RESTRICT`.
 - `message_id`, `device_id`, `api_key`, `command_id`, `alert_id` e `status.code` têm restrições de unicidade conforme descrito nas tabelas.
 - As FKs de eventos, telemetrias e alertas usam o comportamento padrão do SQLite; comandos usam `ON UPDATE CASCADE` e `ON DELETE RESTRICT`.
 
@@ -226,11 +272,11 @@ A inicialização insere, se estiverem ausentes, os códigos `ACTIVE`, `INACTIVE
 - Se a tabela `alerts` ainda tiver `status_id`/`severity_id`, recria a tabela de forma transacional com `severity` e `status` em texto, preservando os alertas (severidade pelo tipo; alerta já resolvido vira `ENCERRADO`).
 - Cria os triggers que restringem `devices.active` a `0`/`1`; bancos antigos não têm o `CHECK` e o SQLite não permite adicioná-lo sem recriar a tabela.
 - Cria o índice único `idx_devices_api_key` quando não há chaves duplicadas; se houver, a aplicação sobe normalmente e registra um aviso no console.
+- Cria `seals`, `cylinders`, `seal_assignments` e `cylinder_assignments` com os índices únicos parciais, e adiciona `error_type` a `telemetry_queue` e `events`, quando ausentes.
 - `sync_logs` e `sync_items` não fazem parte do schema atual da `oxide.db`.
 
 ## 7. Funcionalidades ainda fora do escopo implementado
 
-- Associação relacional de dispositivo, lacre e cilindro e respectivo histórico.
 - Geofence: configuração de áreas e detecção de entrada/saída.
 - Geração automática de comandos.
 - Worker de sincronização, tabelas operacionais de sync e integração com PostgreSQL.

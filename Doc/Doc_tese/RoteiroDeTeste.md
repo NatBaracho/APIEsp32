@@ -1,6 +1,6 @@
 # Roteiro de Teste para IA — API Oxide (FluxID / Oxide IoT)
 
-**Versão:** 1.6
+**Versão:** 1.7
 **Data:** 06/10/2026
 **Uso:** instruções executáveis para uma IA (ou pessoa) testar a API Oxide e produzir um relatório padronizado.
 **Base:** `Doc/Doc_tese/PlanoDeTeste.md` (IDs dos casos entre colchetes, ex.: `[TEL-03]`).
@@ -129,7 +129,7 @@ curl -s -o /dev/null -w "porta 3000: %{http_code}\n" "$BASE/"   # esperado: 000 
 npm test
 ```
 
-Registre: total, aprovados, reprovados. **Esperado:** 57 casos, 57 aprovados, saída com código `0`.
+Registre: total, aprovados, reprovados. **Esperado:** 71 casos, 71 aprovados, saída com código `0`.
 Se houver reprovação, copie o nome de cada teste que falhou para o relatório.
 
 > A suíte limpa registros `DSP-TEST%` no início e no fim. Os casos manuais abaixo usam `DSP-TEST-RT`, que **também** será limpo na seção 8.
@@ -388,6 +388,59 @@ get "/iot/telemetries?api_key=$KEY"
 
 ---
 
+### 5.9 Associação dispositivo → lacre → cilindro
+
+```bash
+source ./roteiro-env.sh
+
+# Cadastro. Esperado: 201, 201, 201
+post /seals '' '{"seal_code":"LCR-RT-1","nfc_uid":"NFC-RT-1"}'
+post /seals '' '{"seal_code":"LCR-RT-2","nfc_uid":"NFC-RT-2"}'
+post /cylinders '' '{"cylinder_code":"CIL-RT-1","serial_number":"SER-RT-1"}'
+
+# [ASC-01] vínculos dispositivo → lacre → cilindro. Esperado: 201 e 201; lacre INSTALADO
+post /assignments/device-seal '' '{"device_id":"DSP-TEST-RT","seal_code":"LCR-RT-1"}'
+post /assignments/seal-cylinder '' '{"seal_code":"LCR-RT-1","cylinder_code":"CIL-RT-1"}'
+get /seals/LCR-RT-1
+
+# [ASC-02] cilindro já tem lacre ativo. Esperado: 409
+post /assignments/seal-cylinder '' '{"seal_code":"LCR-RT-2","cylinder_code":"CIL-RT-1"}'
+
+# [ASC-04] lacre já tem dispositivo ativo. Esperado: 409
+post /assignments/device-seal '' '{"device_id":"DSP-000001","seal_code":"LCR-RT-1"}'
+
+# [ASC-05] lacre inexistente. Esperado: 404
+post /assignments/seal-cylinder '' '{"seal_code":"LCR-RT-9","cylinder_code":"CIL-RT-1"}'
+
+# [ASC-09] telemetria recebe lacre e cilindro do vínculo. Esperado: 202; lacre_id LCR-RT-1,
+# cilindro_id CIL-RT-1 e error_type nulo (o lacre_id enviado é ignorado)
+post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-ASC1","device_id":"DSP-TEST-RT","latitude":-8.95,"longitude":-35.05,"lacre_id":"LCR-FALSO"}'
+sql "SELECT message_id, lacre_id, cilindro_id, error_type FROM telemetry_queue WHERE message_id = 'MSG-RT-ASC1'"
+
+# [ASC-10] lacre aberto em trânsito. Esperado: 200 e 202; error_type LACRE_ABERTO_EM_TRANSITO
+post /cylinders/CIL-RT-1/status '' '{"status":"EM_TRANSITO"}'
+post /iot/events "$KEY" '{"message_id":"EVT-RT-ASC1","device_id":"DSP-TEST-RT","event_type":"seal_changed","seal_status":"UNLOCKED"}'
+sql "SELECT message_id, error_type FROM events WHERE message_id = 'EVT-RT-ASC1'"
+
+# [ASC-06] troca do lacre do cilindro. Esperado: 201; LCR-RT-1 REMOVIDO e LCR-RT-2 INSTALADO
+post /assignments/seal-cylinder '' '{"seal_code":"LCR-RT-2","cylinder_code":"CIL-RT-1","replace":true}'
+sql "SELECT seal_code, status FROM seals WHERE seal_code LIKE 'LCR-RT-%' ORDER BY seal_code"
+
+# [ASC-11] lacre sem cilindro. Esperado: 202; error_type LACRE_SEM_CILINDRO
+post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-ASC2","device_id":"DSP-TEST-RT","latitude":-8.96,"longitude":-35.06}'
+sql "SELECT message_id, lacre_id, cilindro_id, error_type FROM telemetry_queue WHERE message_id = 'MSG-RT-ASC2'"
+
+# [ASC-07] encerrar vínculo. Esperado: 200 e depois 409 (já encerrado); LCR-RT-2 REMOVIDO
+ID=$(sql "SELECT id FROM cylinder_assignments WHERE seal_code = 'LCR-RT-2' AND ended_at IS NULL" | sed 's/[^0-9]//g')
+post "/assignments/seal-cylinder/$ID/end" '' '{"reason":"Teste do roteiro"}'
+post "/assignments/seal-cylinder/$ID/end" '' '{}'
+
+# [HIS-02, HIS-03] histórico do cilindro. Esperado: 200; LCR-RT-2 e depois LCR-RT-1, ambos encerrados
+get "/assignments/seal-cylinder?cylinder_code=CIL-RT-1"
+```
+
+---
+
 ## 6. Verificações no banco (SQLite)
 
 Execute após as seções 4 e 5, com a API ainda no ar.
@@ -409,7 +462,8 @@ sql "SELECT message_id, latitude, longitude, seal_status, last_seen_at, last_rep
 ```
 
 **Esperado nas telemetrias:**
-- Presentes: `MSG-RT-001`, `003`, `004`, `005`, `006`, `011` (uma única vez), `012`, `016` e `017`.
+- Presentes: `MSG-RT-001`, `003`, `004`, `005`, `006`, `011` (uma única vez), `012`, `016`, `017`, `ASC1` e `ASC2` (seção 5.9).
+- As telemetrias da seção 5.4, enviadas antes do vínculo, ficam com `error_type = DISPOSITIVO_SEM_LACRE`.
 - Ausentes: `MSG-RT-A08` [AUT-08], `MSG-RT-002`, `007` [TEL-11], `008`, `009` [TEL-13], `010`, `013`, `014`, `015`, `018` e `019`.
 - `MSG-RT-001` com `last_seen_at` preenchido pelo servidor, no formato `AAAA-MM-DD HH:MM:SS` [TEL-10].
 - `MSG-RT-006` com `last_seen_at = 2026-10-04T15:30:00.000Z`.
@@ -504,6 +558,10 @@ api_stop
 
 # Remover resíduos (útil mesmo antes de restaurar, para conferir BD-15)
 sqlexec "
+DELETE FROM cylinder_assignments WHERE seal_code LIKE 'LCR-RT-%' OR cylinder_code LIKE 'CIL-RT-%';
+DELETE FROM seal_assignments WHERE device_id LIKE 'DSP-TEST%' OR seal_code LIKE 'LCR-RT-%';
+DELETE FROM seals WHERE seal_code LIKE 'LCR-RT-%';
+DELETE FROM cylinders WHERE cylinder_code LIKE 'CIL-RT-%';
 DELETE FROM alerts WHERE device_id LIKE 'DSP-TEST%';
 DELETE FROM commands WHERE device_id LIKE 'DSP-TEST%';
 DELETE FROM telemetry_queue WHERE device_id LIKE 'DSP-TEST%';
@@ -564,7 +622,7 @@ Gere o arquivo `Relatorio-de-Teste-AAAA-MM-DD-HHhMM.md` em `Doc/Doc_tese/` (ex.:
 | Indicador | Valor |
 | --- | --- |
 | Compilação | PASSOU/FALHOU |
-| Suíte automatizada | X/57 |
+| Suíte automatizada | X/71 |
 | Casos manuais executados | N |
 | PASSOU | N |
 | FALHOU | N |
@@ -619,3 +677,4 @@ marque NÃO EXECUTADO com o motivo.
 | 1.4 | 06/10/2026 | Entrega A (segurança): AUT-08, AUT-09 e SEG-04 passam a esperar `403`/`404` e SEG-01 a ausência de `api_key`; suíte com 52 casos |
 | 1.5 | 06/10/2026 | Entrega C: alertas com `severity`/`status` em texto (valores do FluxID) e severidade padrão por tipo; ALT-08, ALT-09 e ALT-12 reescritos; TEL-11 e TEL-13 passam a esperar `400`; BD-06 com 1 FK; suíte com 55 casos |
 | 1.6 | 06/10/2026 | Entrega D: comandos de teste com `TRAVAR_VALVULA`/`DESTRAVAR_VALVULA`; novo BD-18 (catálogo no banco); suíte com 57 casos |
+| 1.7 | 06/10/2026 | Entrega B: nova seção 5.9 (associação, troca, encerramento, histórico e `error_type`); limpeza inclui lacres, cilindros e vínculos de teste; suíte com 71 casos |

@@ -56,6 +56,8 @@ A chave deve ser a **do próprio dispositivo** informado em `device_id`. Com a c
 
 O dispositivo precisa estar **cadastrado antes** de enviar dados. O cadastro oficial fica no FluxID; até o Worker trazer esse cadastro, ele é feito uma vez em `POST /api/v1/devices` com `device_id` e `api_key` (veja a seção 1.3 do [Desenvolvimento.md](Desenvolvimento.md)). Dispositivo não cadastrado recebe `404` com `{"success":false,"message":"Dispositivo não encontrado"}`; a API não cria dispositivos automaticamente.
 
+O lacre e o cilindro do dispositivo também são cadastrados e vinculados pela equipe (rotas `/api/v1/seals`, `/api/v1/cylinders` e `/api/v1/assignments`, seção 1.3 do Desenvolvimento). O firmware **não precisa enviar** `lacre_id` nem `cilindro_id`: a API preenche esses campos pelo vínculo ativo e ignora o que vier no payload. Se o dispositivo enviar sem lacre vinculado, a telemetria é aceita normalmente e fica marcada com `error_type = DISPOSITIVO_SEM_LACRE` para a equipe corrigir o cadastro.
+
 O header `X-API-Key` é exigido nos POSTs de telemetria e eventos. As rotas de dispositivos (`/api/v1/devices`) são abertas, mas não mostram a `api_key`: guarde a chave no momento do cadastro.
 O GET de telemetrias também exige `X-API-Key`, pois retorna dados armazenados dos dispositivos.
 As rotas de comandos exigem a chave do próprio dispositivo consultado ou informado na confirmação.

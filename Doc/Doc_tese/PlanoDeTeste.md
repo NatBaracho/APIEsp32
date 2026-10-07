@@ -1,11 +1,11 @@
 # Plano de Teste — FluxID / Oxide IoT
 
-**Versão:** 1.6
+**Versão:** 1.7
 **Data:** 06/10/2026
 **Escopo:** API Oxide (Node.js + TypeScript + Express + SQLite), sincronização com o PostgreSQL FluxID e API FluxID (NestJS) planejada
 **Validação humana:** Natã da Silva Baracho
 
-> Este plano consolida o que já foi implementado e testado (suíte `tests/api.test.ts`, 57 casos) e o que ainda precisa ser testado conforme o `Checklist-Projeto.md`, o `Banco_FluxID.md` (v3.0) e o `Regras-de-Negocio-e-Banco-Oxide.md`. Cada caso indica sua situação: **Automatizado**, **Manual executado** ou **Pendente**.
+> Este plano consolida o que já foi implementado e testado (suíte `tests/api.test.ts`, 71 casos) e o que ainda precisa ser testado conforme o `Checklist-Projeto.md`, o `Banco_FluxID.md` (v3.0) e o `Regras-de-Negocio-e-Banco-Oxide.md`. Cada caso indica sua situação: **Automatizado**, **Manual executado** ou **Pendente**.
 
 ---
 
@@ -93,7 +93,7 @@ Pré-condição para toda execução: banco com schema criado pelo script do `Ox
 **Saída (aprovação)**
 - 100% dos casos de severidade Alta aprovados.
 - Nenhum defeito crítico ou alto aberto.
-- Suíte automatizada sem falhas (hoje 57/57).
+- Suíte automatizada sem falhas (hoje 71/71).
 - Banco limpo após o teardown (zero registros `DSP-TEST%`).
 
 **Suspensão**
@@ -255,7 +255,7 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 | BD-11 | Inicialização idempotente | Subir a aplicação duas vezes não duplica `status` nem falha | Alta | P |
 | BD-12 | Colunas de status em `devices` | `device_status_id`, `valve_status_id`, `seal_status_id` existem e permanecem `NULL` | Média | M |
 | BD-13 | Seed de `status` | 5 códigos inseridos uma única vez | Média | P |
-| BD-14 | Criação do banco pelo script do `Oxidedb.md` em arquivo vazio | Schema equivalente ao criado pela aplicação | Média | P |
+| BD-14 | Criação do banco pelo script do `Oxidedb.md` em arquivo vazio | Schema equivalente ao criado pela aplicação: suíte 71/71 num banco criado só pelo script, mais o dispositivo semente (**executado na entrega B**) | Média | M |
 | BD-15 | Teardown | Zero registros `DSP-TEST%` após a suíte | Alta | A |
 | BD-16 | Índice único `idx_devices_api_key` | Existe quando não há chaves duplicadas; inserir chave repetida falha. Com duplicatas pré-existentes, a aplicação sobe e registra aviso | Alta | P |
 | BD-18 | `CHECK` de `commands` | `status` em `PENDENTE`/`EXECUTADO`/`ERRO`; `command_type` do catálogo quando `PENDENTE` | Alta | A |
@@ -297,29 +297,36 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 
 ## 10. Testes das próximas entregas (roadmap)
 
-### 10.1 Associação Dispositivo → Lacre → Cilindro
+### 10.1 Associação Dispositivo → Lacre → Cilindro (entrega B)
 
-| ID | Caso | Esperado |
-| --- | --- | --- |
-| ASC-01 | Associar dispositivo a lacre e lacre a cilindro | Vínculos ativos criados |
-| ASC-02 | Lacre com mais de um cilindro ativo (RN04) | Conflito (`409`) |
-| ASC-03 | Cilindro com mais de um lacre ativo (RN04) | Conflito |
-| ASC-04 | Lacre com mais de um dispositivo ativo (RN05) | Conflito |
-| ASC-05 | Entidades inexistentes | `404` |
-| ASC-06 | Troca de dispositivo/lacre | Vínculo anterior encerrado, novo aberto, histórico preservado |
-| ASC-07 | Desassociação | Vínculo encerrado (sem `DELETE` físico, RN21) |
-| ASC-08 | Ownership | Chave de um dispositivo não altera vínculos de outro |
-| ASC-09 | Telemetria passa a preencher `lacre_id`/`cilindro_id` a partir do vínculo ativo | Valores coerentes |
+Implementada na Oxide como cópia provisória do FluxID: rotas abertas `/seals`, `/cylinders` e `/assignments`. Situação: **A** automatizado, **M** no Roteiro, **P** pendente.
+
+| ID | Caso | Esperado | Sit. |
+| --- | --- | --- | --- |
+| ASC-01 | Associar dispositivo a lacre e lacre a cilindro | `201` nos dois; lacre passa a `INSTALADO` | A |
+| ASC-02 | Lacre com mais de um cilindro ativo (RN04) | `409` (use `replace: true` para trocar) | A |
+| ASC-03 | Cilindro com mais de um lacre ativo (RN04) | `409` | A |
+| ASC-04 | Lacre com mais de um dispositivo ativo; dispositivo com mais de um lacre ativo (RN05) | `409` | A |
+| ASC-05 | Dispositivo, lacre ou cilindro inexistente | `404` | M |
+| ASC-06 | Troca (`replace: true`) | Vínculo anterior encerrado com motivo "Substituído por novo vínculo", novo aberto; lacre substituído `REMOVIDO`, novo `INSTALADO`; histórico preservado | A |
+| ASC-07 | Encerrar vínculo | `200`, `ended_at` e motivo preenchidos (sem `DELETE`, RN21); lacre `INSTALADO` vira `REMOVIDO`; encerrar de novo `409` | A |
+| ASC-08 | Ownership | **Decisão aceita:** rotas de associação abertas e provisórias, como `/devices` | Decidido |
+| ASC-09 | Telemetria com dispositivo vinculado | `lacre_id`/`cilindro_id` preenchidos pelo vínculo ativo; valores do payload ignorados | A |
+| ASC-10 | Lacre aberto (`UNLOCKED`/`BROKEN`) com cilindro `EM_TRANSITO` | `error_type = LACRE_ABERTO_EM_TRANSITO`, sem alerta | A |
+| ASC-11 | Telemetria de dispositivo sem lacre / lacre sem cilindro | `error_type` `DISPOSITIVO_SEM_LACRE` / `LACRE_SEM_CILINDRO` | A |
+| ASC-12 | Lacre fora de `EM_ESTOQUE`/`REMOVIDO` instalado num cilindro | `409` | A |
+| ASC-13 | Cadastro de lacre/cilindro duplicado (código, UID NFC, número de série) e lacre cadastrado como `INSTALADO` | `409` / `400` | A |
+| ASC-14 | Estado `INSTALADO` manual | `409` (só pelo vínculo) | A |
 
 ### 10.2 Histórico de associações
 
-| ID | Caso | Esperado |
-| --- | --- | --- |
-| HIS-01 | Associações sucessivas | Linhas com início e fim, sem sobrescrita |
-| HIS-02 | Consulta por dispositivo, por lacre e por cilindro | Resultados corretos e completos |
-| HIS-03 | Ordenação temporal | Mais recente primeiro (ou conforme contrato) |
-| HIS-04 | Associar, desassociar e reassociar o mesmo par | Três registros distintos |
-| HIS-05 | Períodos sem sobreposição para o mesmo ativo | Garantido por constraint ou serviço |
+| ID | Caso | Esperado | Sit. |
+| --- | --- | --- | --- |
+| HIS-01 | Associações sucessivas | Linhas com início e fim, sem sobrescrita | A |
+| HIS-02 | Consulta por dispositivo, por lacre e por cilindro (`?device_id=`, `?seal_code=`, `?cylinder_code=`, `?active=true`) | Resultados corretos e completos | A |
+| HIS-03 | Ordenação temporal | Mais recente primeiro | A |
+| HIS-04 | Associar, desassociar e reassociar o mesmo par | Três registros distintos | P |
+| HIS-05 | Períodos sem sobreposição para o mesmo ativo | Garantido pelos índices únicos parciais (`ended_at IS NULL`) | A |
 
 ### 10.3 Geofence (RN10 e RN11)
 
@@ -441,9 +448,9 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 
 | Indicador | Valor |
 | --- | --- |
-| Suíte automatizada (`npm test`) | 57 casos (56 testes e 1 de teardown), 57 aprovados em 06/10/2026 |
+| Suíte automatizada (`npm test`) | 71 casos (70 testes e 1 de teardown), 71 aprovados em 06/10/2026 |
 | Compilação (`npx tsc --noEmit`) | Aprovada em 06/10/2026 |
-| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas); [Relatorio-de-Teste-2026-10-06-20h00.md](Relatorio-de-Teste-2026-10-06-20h00.md): entrega E (banco FluxID); [Relatorio-de-Teste-2026-10-06-20h35.md](Relatorio-de-Teste-2026-10-06-20h35.md): entrega D (catálogo de comandos e tipos de erro). Todos **aprovados por Natã da Silva Baracho** |
+| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas); [Relatorio-de-Teste-2026-10-06-20h00.md](Relatorio-de-Teste-2026-10-06-20h00.md): entrega E (banco FluxID); [Relatorio-de-Teste-2026-10-06-20h35.md](Relatorio-de-Teste-2026-10-06-20h35.md): entrega D (catálogo de comandos e tipos de erro); [Relatorio-de-Teste-2026-10-06-21h31.md](Relatorio-de-Teste-2026-10-06-21h31.md): entrega B (associação). Todos **aprovados por Natã da Silva Baracho** |
 | Cobertura da suíte | Dispositivos, autenticação, telemetria, eventos, comandos e alertas (fluxo principal e erros mais comuns) |
 | Lacunas prioritárias | SEG-05, TEL-19, ALT-07/08/12, EVT-05, BD-04/06/11/16 (fora da suíte; cobertos pelo Roteiro) |
 | Entregas futuras | Todos os casos da seção 10 pendentes (funcionalidades ainda não implementadas) |
@@ -500,3 +507,4 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | 1.4 | 06/10/2026 | Entrega C, decisões de Natã da Silva Baracho: severidade e status do alerta em texto com os valores do FluxID, severidade padrão por tipo, campos antigos ignorados; latitude e longitude juntas e dentro da faixa. ALT-04, ALT-05, ALT-07 a ALT-09, ALT-12, TEL-11, TEL-13 e BD-06 revisados; R3 e R6 resolvidos; suíte com 55 casos |
 | 1.5 | 06/10/2026 | Entrega E (FluxID): FLX-11 e FLX-12 confirmados no dump; novos casos FLX-18 a FLX-22 executados num servidor PostgreSQL temporário |
 | 1.6 | 06/10/2026 | Entrega D, decisões de Natã da Silva Baracho: catálogo de comandos (`TRAVAR_VALVULA`, `DESTRAVAR_VALVULA`) aplicado no banco, sem rota de criação; novos casos CMD-14, CMD-15 e BD-18; suíte com 57 casos |
+| 1.7 | 06/10/2026 | Entrega B, decisões de Natã da Silva Baracho: associação dispositivo → lacre → cilindro na Oxide (cópia provisória do FluxID), rotas abertas, regras RN04/RN05, troca, histórico e `error_type`; ASC-01 a ASC-14 e HIS-01 a HIS-05 revisados; suíte com 71 casos |
