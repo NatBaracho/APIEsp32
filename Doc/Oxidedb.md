@@ -4,7 +4,7 @@
 
 **Buffer temporário de ingestão para dispositivos ESP32**
 
-**Versão:** 1.6  
+**Versão:** 1.7  
 **Projeto:** FluxID / Oxide IoT
 
 Inclui instruções de criação, modelo de dados e script SQL completo.
@@ -15,7 +15,7 @@ Inclui instruções de criação, modelo de dados e script SQL completo.
 
 Este documento descreve o schema atual do banco SQLite `oxide.db`, explica o papel das tabelas existentes e fornece um script de criação compatível com esse schema.
 
-O banco atua como armazenamento local da API e fila persistente. O Worker e as tabelas `sync_logs`/`sync_items` ainda são etapas futuras e não fazem parte do arquivo atual.
+O banco atua como armazenamento local da API e fila persistente. O Worker (`npm run worker`) envia a fila ao FluxID e traz de volta o cadastro oficial; cada rodada fica registrada em `sync_logs`.
 
 ---
 
@@ -54,7 +54,7 @@ Worker de sincronização (futuro)
 | Banco oficial | PostgreSQL FluxID |
 | Datas | Geradas/controladas pela API ou Worker |
 
-> **Importante:** `sync_logs` e `sync_items` não existem na Oxide.db atual. Seus repositórios e o Worker de sincronização permanecem planejados para uma etapa futura.
+> **Sincronização:** o estado de cada linha fica na própria fila (`status`, `attempt_count`, `last_error`, `next_attempt_at`; nos alertas, as colunas `sync_*`). `sync_logs` registra cada rodada do Worker. A tabela `sync_items` não foi criada: o estado por item já está na fila (decisão a validar).
 
 > **Por que existe a tabela `status`:** `events.status` representa o processamento da fila (`PENDING`, `PROCESSING`, `SYNCED`, `ERROR`). Os códigos `ACTIVE`/`INACTIVE` representam o dispositivo (`devices.active` igual a `1`/`0`), e `LOCKED`/`UNLOCKED`/`BROKEN` representam o lacre em `events.seal_status`. O catálogo separado guarda os nomes e descrições sem misturar esses conceitos.
 
@@ -89,7 +89,7 @@ Worker de sincronização (futuro)
 | alerts | Alertas associados a dispositivos, com tipo, estado, severidade e resolução |
 | seals / cylinders | Lacres e cilindros (cópia provisória do cadastro do FluxID) |
 | seal_assignments / cylinder_assignments | Histórico de vínculos dispositivo ↔ lacre e lacre ↔ cilindro; ativo = `ended_at` nulo |
-| sync_logs / sync_items | Ainda não existem no banco atual; previstos para o Worker futuro |
+| sync_logs | Uma linha por rodada do Worker: início, fim, resultado (`OK`, `PARCIAL`, `FALHOU`) e resumo em JSON |
 
 ---
 
@@ -144,12 +144,16 @@ CREATE TABLE IF NOT EXISTS devices (
         CHECK (active IN (0,1)),
     device_status_id INTEGER,
     valve_status_id INTEGER,
-    seal_status_id INTEGER
+    seal_status_id INTEGER,
+    -- SHA-256 da chave, vindo do FluxID; quando existe, a chave em texto deixa de valer
+    api_key_hash TEXT
 );
 
 -- Cada dispositivo tem uma API Key exclusiva
 CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_api_key
     ON devices(api_key);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_api_key_hash
+    ON devices(api_key_hash) WHERE api_key_hash IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS status (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -213,6 +217,11 @@ CREATE TABLE IF NOT EXISTS alerts (
     resolved_at DATETIME,
     resolved_by TEXT,
     resolution_note TEXT,
+    -- Sincronização com o FluxID (separada do status de negócio)
+    sync_status TEXT NOT NULL DEFAULT 'PENDING',
+    sync_attempt_count INTEGER NOT NULL DEFAULT 0,
+    sync_last_error TEXT,
+    sync_next_attempt_at DATETIME,
     CHECK ((status = 'ENCERRADO') = (resolved_at IS NOT NULL)),
     FOREIGN KEY (device_id) REFERENCES devices(device_id)
 );
@@ -237,6 +246,7 @@ CREATE TABLE IF NOT EXISTS telemetry_queue (
     status TEXT NOT NULL DEFAULT 'PENDING',
     attempt_count INTEGER NOT NULL DEFAULT 0,
     last_error TEXT,
+    next_attempt_at DATETIME,
 
     FOREIGN KEY(device_id)
     REFERENCES devices(device_id)
@@ -267,6 +277,7 @@ CREATE TABLE IF NOT EXISTS events (
 
     attempt_count INTEGER NOT NULL DEFAULT 0,
     last_error TEXT,
+    next_attempt_at DATETIME,
 
     FOREIGN KEY(device_id)
     REFERENCES devices(device_id)
@@ -306,6 +317,7 @@ CREATE TABLE IF NOT EXISTS seal_assignments (
     started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     ended_at DATETIME,
     end_reason TEXT,
+    fluxid_id TEXT,
     FOREIGN KEY (device_id) REFERENCES devices(device_id) ON UPDATE CASCADE ON DELETE RESTRICT,
     FOREIGN KEY (seal_code) REFERENCES seals(seal_code) ON UPDATE CASCADE ON DELETE RESTRICT
 );
@@ -317,6 +329,7 @@ CREATE TABLE IF NOT EXISTS cylinder_assignments (
     started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     ended_at DATETIME,
     end_reason TEXT,
+    fluxid_id TEXT,
     FOREIGN KEY (seal_code) REFERENCES seals(seal_code) ON UPDATE CASCADE ON DELETE RESTRICT,
     FOREIGN KEY (cylinder_code) REFERENCES cylinders(cylinder_code) ON UPDATE CASCADE ON DELETE RESTRICT
 );
@@ -330,6 +343,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_cylinder_assignment_seal_active
     ON cylinder_assignments (seal_code) WHERE ended_at IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_cylinder_assignment_cylinder_active
     ON cylinder_assignments (cylinder_code) WHERE ended_at IS NULL;
+
+-- Vínculos trazidos do FluxID: id do vínculo lá
+CREATE UNIQUE INDEX IF NOT EXISTS uq_seal_assignment_fluxid
+    ON seal_assignments (fluxid_id) WHERE fluxid_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cylinder_assignment_fluxid
+    ON cylinder_assignments (fluxid_id) WHERE fluxid_id IS NOT NULL;
+
+-- Uma linha por rodada do Worker
+CREATE TABLE IF NOT EXISTS sync_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at DATETIME,
+    status TEXT NOT NULL DEFAULT 'RUNNING'
+        CHECK (status IN ('RUNNING', 'OK', 'PARCIAL', 'FALHOU')),
+    log_message TEXT
+);
 
 COMMIT;
 ```
@@ -346,7 +375,7 @@ Tipos de alerta: os códigos em português do catálogo [Tipos-de-Erro.md](Tipos
 
 ## 9. Tabelas não existentes no banco atual
 
-- `sync_logs` e `sync_items`: planejadas para o Worker de sincronização, mas ainda não criadas na Oxide.db atual.
+- `sync_items`: não criada. O estado de cada item já fica na própria fila (`status`, tentativas, erro e próxima tentativa); a criação ou não é decisão a validar.
 - Não existe uma tabela `telemetries`; o nome real da fila é `telemetry_queue`.
 - `POST /api/v1/iot/alerts` cria alertas; `GET /api/v1/iot/alerts` lista; `PATCH /api/v1/iot/alerts/{alert_id}/status` passa para `EM_ANALISE` ou `ENCERRADO`.
 

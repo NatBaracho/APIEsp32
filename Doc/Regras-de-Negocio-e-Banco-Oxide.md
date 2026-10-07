@@ -35,7 +35,7 @@ Não existe endpoint HTTP para criar/enfileirar comandos, nem para consultar, re
 
 ## 3. Autenticação e autorização atuais
 
-O header usado é `X-API-Key`. O middleware genérico busca o dispositivo pela chave (`api_key` é única) e exige que o dispositivo dono da chave esteja ativo.
+O header usado é `X-API-Key`. O middleware genérico busca o dispositivo pela chave e exige que o dispositivo dono da chave esteja ativo. Quando o dispositivo tem `api_key_hash` (vindo do FluxID), a chave só vale se o SHA-256 dela for igual ao hash, e a chave em texto guardada deixa de valer. Sem hash, vale a chave em texto do cadastro provisório (`api_key` é única).
 
 | Rotas | Comportamento de autenticação implementado |
 | --- | --- |
@@ -44,6 +44,8 @@ O header usado é `X-API-Key`. O middleware genérico busca o dispositivo pela c
 | `GET /api/v1/iot/telemetries` | Exige uma API Key válida e retorna as telemetrias de todos os dispositivos (decisão aceita, para acompanhamento dos testes). |
 | Rotas de comandos | Exigem API Key válida e conferem se pertence ao `device_id` consultado ou informado na confirmação. |
 | `POST /api/v1/iot/alerts` | Exige API Key válida e confere se pertence ao `device_id` do alerta. |
+| `GET /api/v1/iot/alerts` e `PATCH /api/v1/iot/alerts/{alert_id}/status` | Abertas e provisórias, para a equipe e o gestor, até o controle por perfil. |
+| `GET /api/v1/sync/status`, `GET /api/v1/sync/problems`, `POST /api/v1/sync/retry` | Abertas e provisórias: acompanhamento do Worker e nova tentativa de um item parado. |
 
 Respostas do middleware: `401` para chave ausente ou inválida; `403` para dispositivo inativo ou chave que não pertence ao dispositivo-alvo; `404` quando o dispositivo-alvo de uma rota protegida não existe.
 
@@ -51,7 +53,7 @@ Respostas do middleware: `401` para chave ausente ou inválida; `403` para dispo
 
 - As rotas de dispositivos são abertas por decisão do responsável; para não expor credenciais, as respostas de `GET` não incluem `api_key` (entrega A, 06/10/2026).
 - `POST /api/v1/devices` não exige credencial administrativa e a listagem de telemetrias é geral; são decisões aceitas enquanto a API roda em ambiente de testes. Antes de produção, reavaliar.
-- As chaves são armazenadas como texto e comparadas diretamente. Não há hash, rotação, rate limiting ou trilha de auditoria implementados.
+- Chaves do cadastro provisório ficam em texto; chaves do cadastro oficial vêm do FluxID só como hash (SHA-256) e são comparadas em tempo constante. Dispositivo criado pelo Worker recebe uma chave em texto aleatória e inutilizável. Não há rotação, rate limiting nem trilha de auditoria implementados.
 
 ## 4. Regras de negócio por recurso
 
@@ -64,7 +66,8 @@ Respostas do middleware: `401` para chave ausente ou inválida; `403` para dispo
 - `api_key` é exclusiva por dispositivo: uma chave já usada retorna `409 API Key já está em uso`. O banco reforça a regra com o índice único `idx_devices_api_key`.
 - `active`, quando informado, deve ser `0` ou `1`; outro valor retorna `400`. `firmware_version`, quando informado, deve ser texto.
 - A criação de dispositivo não exige API Key.
-- O cadastro oficial de dispositivo, lacre e cilindro fica no FluxID. Até o Worker trazer esse cadastro, o dispositivo é cadastrado na Oxide por `POST /api/v1/devices` (provisório).
+- O cadastro oficial de dispositivo, lacre e cilindro fica no FluxID. O Worker traz esse cadastro (com o hash da chave) a cada 5 minutos; o FluxID prevalece sobre a cópia local, e nada é apagado. `POST /api/v1/devices` continua como cadastro provisório para testes sem o FluxID.
+- As respostas de `GET /api/v1/devices` não mostram `api_key` nem `api_key_hash`.
 - Não há criação automática: telemetria ou evento de um `device_id` não cadastrado retorna `404 Dispositivo não encontrado`.
 - `device_status_id`, `valve_status_id` e `seal_status_id` existem como colunas opcionais, mas não têm FK para `status` nem são preenchidas automaticamente pelo evento.
 
@@ -283,14 +286,14 @@ A inicialização insere, se estiverem ausentes, os códigos `ACTIVE`, `INACTIVE
 
 - Geofence: configuração de áreas e detecção de entrada/saída.
 - Geração automática de comandos.
-- Worker de sincronização, tabelas operacionais de sync e integração com PostgreSQL.
+- Teste formal do Worker e da integração com o PostgreSQL (implementados em 07/10/2026; teste e validação em 08/10/2026).
 
 ## 8. Banco principal PostgreSQL FluxID
 
 - FluxID é o banco PostgreSQL principal; `oxide.db` é o armazenamento local/buffer usado atualmente pela API.
 - `FluxID.sql` é um dump PostgreSQL em formato custom (`PGDMP`), não um script SQL texto. Ele deve ser inspecionado/restaurado com `pg_restore`, não com `sqlite3` nem `psql -f`.
 - O catálogo do dump identifica o banco `FluxID_db`, PostgreSQL/`pg_dump` 18.6, 214 entradas e as extensões `pgcrypto` e `postgis`.
-- A API ainda grava somente no SQLite. A integração e o Worker SQLite → PostgreSQL continuam pendentes.
+- A API grava no SQLite; o Worker (`npm run worker`) envia a fila ao FluxID e traz o cadastro oficial de volta. As regras completas estão em [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md) (v2.0). Teste formal e validação marcados para 08/10/2026.
 
 ### 8.1 Tabelas FluxID relevantes
 
@@ -298,16 +301,18 @@ A inicialização insere, se estiverem ausentes, os códigos `ACTIVE`, `INACTIVE
 | --- | --- |
 | `organizacoes` | Identificador UUID e dados da organização/tenant. |
 | `dispositivos` | `id` UUID, `organizacao_id` obrigatório, `codigo` único, `identificador_hardware` único, `versao_firmware` e `ativo`. O `codigo` segue o mesmo padrão do `device_id` da Oxide. A chave de API fica em `api_key_hash` (SHA-256), criada pelo script `sql/fluxid/001_ajustes_estrutura.sql`. |
-| `telemetrias` | `id` UUID, `dispositivo_id` UUID, `message_id` único, `data_coleta` obrigatória e latitude/longitude obrigatórias; inclui velocidade, bateria, GSM e `payload_raw JSONB`. |
-| `eventos_lacre` | Evento ligado a `lacre_id` obrigatório; `telemetria_id` opcional; tipo limitado a um catálogo de eventos de lacre. |
-| `alertas` | `organizacao_id`, código, tipo, severidade, status e `aberto_em` obrigatórios; lacre/cilindro/evento relacionados são opcionais. Tipo, severidade e status têm `CHECK` com valores permitidos. |
+| `telemetrias` | `id` UUID, `dispositivo_id` UUID, `message_id` único, `data_coleta` obrigatória (hora de chegada, `DEFAULT now()` no `004`) e latitude/longitude obrigatórias; inclui velocidade, bateria, GSM, `payload_raw JSONB` e, desde o `004`, `lacre_id` e `cilindro_id`. Sem posição, a telemetria vai para `telemetrias_quarentena`. |
+| `eventos_lacre` | Evento ligado a `lacre_id` obrigatório; `telemetria_id` opcional; tipo limitado a um catálogo de eventos de lacre. Eventos sem estado de lacre vão para `eventos_dispositivo` (`004`). |
+| `alertas` | `organizacao_id`, código, tipo, severidade, status e `aberto_em` obrigatórios. Lacre e cilindro obrigatórios, salvo códigos de cadastro (`003`), e o par precisa ter vínculo na data do alerta (gatilho do `004`). Tipo com os códigos do catálogo (`004`). |
 | `lacres`, `cilindros` | Entidades próprias com UUID, organização, código e status com catálogo limitado. |
 | `vinculos_dispositivo_lacre` | Relação dispositivo/lacre com início, fim e dados de vínculo/desvínculo, permitindo registrar períodos. |
 | `vinculos_cilindro_lacre` | Relação cilindro/lacre com início, fim e dados de instalação/remoção, permitindo registrar períodos. |
 
 O dump não contém tabela `commands`. No dump de 23/09/2026 os IDs UUID não tinham valor padrão; o script `001_ajustes_estrutura.sql` acrescenta `DEFAULT gen_random_uuid()` às 21 tabelas, além de `eventos_lacre.message_id`, `dispositivos.api_key_hash`, índice de última posição e `CHECK` de coordenadas (ver `Banco_FluxID.md`, seção 17).
 
-### 8.2 Mapeamento preliminar Oxide → FluxID
+### 8.2 Mapeamento Oxide → FluxID (antes da implementação)
+
+> Tabela histórica, da fase de análise. As decisões foram fechadas (P1 a P8) e o mapeamento implementado está em [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md), seções 2 a 4.
 
 | Origem Oxide | Destino FluxID | Diferença/decisão necessária |
 | --- | --- | --- |
@@ -320,16 +325,16 @@ O dump não contém tabela `commands`. No dump de 23/09/2026 os IDs UUID não ti
 
 Tipos de alerta: a Oxide já grava os códigos do catálogo `Tipos-de-Erro.md`, e pela decisão P5 o `CHECK` de `alertas.tipo` do FluxID passa a aceitar esses mesmos códigos (script `004`, na entrega do Worker). As severidades FluxID aceitas são `BAIXA`, `MEDIA`, `ALTA` e `CRITICA`; os estados aceitos são `ABERTO`, `EM_ANALISE` e `ENCERRADO`.
 
-### 8.3 Preparação pendente para iniciar a sincronização
+### 8.3 Situação da sincronização
 
-O plano completo, com as tabelas de conversão e as decisões P1 a P8 (fechadas em 06/10/2026), está em [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md).
+O fluxo completo, com as tabelas de conversão, as decisões P1 a P8 e as escolhas de implementação a validar, está em [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md).
 
-- ✅ Dump restaurado e analisado num servidor PostgreSQL temporário, separado do banco principal (entrega E).
-- Aplicar os scripts de `sql/fluxid/` no banco principal e gerar um novo dump.
-- Obter acesso autorizado ao PostgreSQL: o serviço aceita conexões, mas uma tentativa sem senha retornou `fe_sendauth: no password supplied`. Credenciais devem ser fornecidas diretamente no terminal ou por configuração segura, nunca registradas neste documento.
-- Definir `organizacao_id` padrão/por dispositivo e a correspondência entre os identificadores Oxide e os UUIDs FluxID.
-- Aprovar políticas para telemetrias sem GPS ou sem timestamp de coleta, eventos sem lacre relacionado, comandos e idempotência/reprocessamento.
-- Implementar a sincronização somente depois dessas decisões e validar primeiro em banco local de análise.
-- Ao implementar o Worker, a Oxide passa a guardar `api_key_hash` e a comparar o SHA-256 da `X-API-Key` (decisão da entrega E).
+- ✅ Dump restaurado e analisado num servidor PostgreSQL temporário e no Docker (container `fluxid-analise`).
+- ✅ `organizacao_id` e UUIDs: obtidos pelo `codigo` do dispositivo, lacre e cilindro no FluxID.
+- ✅ Políticas aprovadas (P1 a P8) e implementadas no Worker e no script `004`.
+- ✅ A Oxide guarda `api_key_hash` e compara o SHA-256 da `X-API-Key`.
+- ⏳ Teste formal e validação do Worker (08/10/2026).
+- ⏳ Aplicar `001` a `005` no banco principal e gerar um novo dump.
+- Credenciais do PostgreSQL: só no `.env` (fora do git), nunca registradas em documento.
 
 Para o script de criação do banco e instruções do DB Browser, consulte [Oxidedb.md](Oxidedb.md). Para payloads do firmware, consulte [ESP32-envio-de-dados.md](ESP32-envio-de-dados.md).

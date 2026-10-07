@@ -1,11 +1,11 @@
 # Plano de Teste — FluxID / Oxide IoT
 
-**Versão:** 1.10
+**Versão:** 1.11
 **Data:** 06/10/2026
 **Escopo:** API Oxide (Node.js + TypeScript + Express + SQLite), sincronização com o PostgreSQL FluxID e API FluxID (NestJS) planejada
 **Validação humana:** Natã da Silva Baracho
 
-> Este plano consolida o que já foi implementado e testado (suíte `tests/api.test.ts`, 87 casos) e o que ainda precisa ser testado conforme o `Checklist-Projeto.md`, o `Banco_FluxID.md` (v3.0) e o `Regras-de-Negocio-e-Banco-Oxide.md`. Cada caso indica sua situação: **Automatizado**, **Manual executado** ou **Pendente**.
+> Este plano consolida o que já foi implementado e testado (suíte `tests/api.test.ts`, 94 casos) e o que ainda precisa ser testado conforme o `Checklist-Projeto.md`, o `Banco_FluxID.md` (v3.0) e o `Regras-de-Negocio-e-Banco-Oxide.md`. Cada caso indica sua situação: **Automatizado**, **Manual executado** ou **Pendente**.
 
 ---
 
@@ -93,7 +93,7 @@ Pré-condição para toda execução: banco com schema criado pelo script do `Ox
 **Saída (aprovação)**
 - 100% dos casos de severidade Alta aprovados.
 - Nenhum defeito crítico ou alto aberto.
-- Suíte automatizada sem falhas (hoje 87/87).
+- Suíte automatizada sem falhas (hoje 94/94).
 - Banco limpo após o teardown (zero registros `DSP-TEST%`).
 
 **Suspensão**
@@ -252,8 +252,8 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 
 | ID | Caso | Verificação | Prior. | Sit. |
 | --- | --- | --- | --- | --- |
-| BD-01 | Tabelas existentes | `SELECT name FROM sqlite_master` retorna `devices`, `status`, `telemetry_queue`, `events`, `commands`, `alerts` | Alta | M |
-| BD-02 | Tabelas `sync_logs`/`sync_items` | Inexistentes até a entrega do Worker | Média | M |
+| BD-01 | Tabelas existentes | `SELECT name FROM sqlite_master` retorna `devices`, `status`, `telemetry_queue`, `events`, `commands`, `alerts`, `seals`, `cylinders`, `seal_assignments`, `cylinder_assignments` e `sync_logs` | Alta | M |
+| BD-02 | Tabelas de sincronização | `sync_logs` existe (uma linha por rodada do Worker); `sync_items` não existe (o estado fica na fila) | Média | M |
 | BD-03 | Unicidade | `device_id`, `message_id` (eventos e telemetrias), `command_id`, `alert_id`, `status.code` rejeitam duplicatas | Alta | M |
 | BD-04 | FKs ativas | `PRAGMA foreign_keys` = 1; inserir evento/telemetria/alerta com `device_id` inexistente falha | Alta | P |
 | BD-05 | `commands` FK | `ON UPDATE CASCADE`, `ON DELETE RESTRICT`; apagar dispositivo com comandos falha | Alta | M |
@@ -366,24 +366,46 @@ Implementada na Oxide como cópia provisória do FluxID: rotas abertas `/seals`,
 
 ### 10.5 Worker SQLite → PostgreSQL
 
+> Implementado em 07/10/2026 (`src/worker/`, scripts `004` e `005`). A IA fez uma verificação técnica no FluxID de análise no Docker (relatório [Relatorio-de-Teste-2026-10-07-01h30.md](Relatorio-de-Teste-2026-10-07-01h30.md)); o **teste formal** destes casos e a validação humana ficaram para 08/10/2026. Os casos INT são automatizados na suíte.
+
 | ID | Caso | Esperado |
 | --- | --- | --- |
 | SYN-01 | Sincronização de itens `PENDING` | Marcados `SYNCED`; dados corretos no destino |
 | SYN-02 | Reprocessamento do mesmo lote | Sem duplicar (idempotência por `message_id`) |
-| SYN-03 | PostgreSQL indisponível | Itens permanecem pendentes ou `ERROR`, `attempt_count` incrementa, retry posterior |
+| SYN-03 | PostgreSQL indisponível | Rodada `FALHOU` em `sync_logs`; itens continuam `PENDING` **sem gastar tentativa** (escolha I2, a validar) |
 | SYN-04 | Recuperação após queda | Sem perda e sem duplicidade |
 | SYN-05 | Falha no meio do lote | Transação garante consistência |
-| SYN-06 | Telemetria sem GPS ou sem data de coleta | Política aprovada: rejeição, quarentena ou ajuste; destino exige `data_coleta`, latitude e longitude |
-| SYN-07 | Mapeamento `device_id` → `dispositivo_id` (UUID) e `organizacao_id` | Resolvido conforme regra aprovada |
-| SYN-08 | Evento sem lacre relacionado | Política definida (destino exige `lacre_id`) |
+| SYN-06 | Telemetria sem GPS | Vai para `telemetrias_quarentena` (P2); `data_coleta` é a hora de chegada (P1) |
+| SYN-07 | Mapeamento `device_id` → `dispositivo_id` (UUID) e `organizacao_id` | Pelo `codigo`; dispositivo ausente no FluxID → `ERROR` "dispositivo não cadastrado no FluxID" com novas tentativas |
+| SYN-08 | Evento do lacre de dispositivo sem lacre vinculado | Espera (`PENDING` com próxima tentativa), sem gastar tentativa (P3) |
 | SYN-09 | Alertas: tipos do catálogo (ex.: `LACRE_VIOLADO`, `SAIDA_GEOCERCA`, `BATERIA_BAIXA`, `SEM_COMUNICACAO`) gravados direto em `alertas.tipo` após o script `004` (decisão P5) | Satisfazem os `CHECK` do destino |
-| SYN-10 | `DEVICE_ERROR` e `COMMAND_FAILURE` | Sem equivalente explícito: comportamento definido (mapear, ajustar `CHECK` ou manter local) |
+| SYN-10 | Alerta sem lacre ou sem cilindro na data, ou com código já usado no FluxID | Fica parado na Oxide (`ERROR` sem próxima tentativa) com a explicação; exceções de cadastro seguem sem cilindro/lacre |
 | SYN-11 | Severidade e estado | Somente `BAIXA/MEDIA/ALTA/CRITICA` e `ABERTO/EM_ANALISE/ENCERRADO` |
-| SYN-12 | Comandos | Decisão: permanecem locais ou entidade criada no PostgreSQL |
-| SYN-13 | Geração de UUIDs | Estratégia explícita (o dump não define default) |
-| SYN-14 | Registro em `sync_logs`/`sync_items` | Cada tentativa registrada |
+| SYN-12 | Comandos | Permanecem só na Oxide (decisão da entrega D) |
+| SYN-13 | Geração de UUIDs | `DEFAULT gen_random_uuid()` (script `001`); o Worker não gera UUID |
+| SYN-14 | Registro em `sync_logs` | Cada rodada registrada com `OK`, `PARCIAL` ou `FALHOU` e resumo |
 | SYN-15 | Inicialização e encerramento do Worker | Sem perda de itens em processamento |
-| SYN-16 | Credenciais do PostgreSQL | Fornecidas por configuração segura, nunca registradas em documentos |
+| SYN-16 | Credenciais do PostgreSQL | Só no `.env` (fora do git); `.env.example` sem senha; nada em documentos |
+| SYN-17 | Novas tentativas | Envio inicial + 5 tentativas (1 min, 5 min, 15 min, 1 h, 6 h); depois `ERROR` parado (P6, escolha I1) |
+| SYN-18 | Eventos com e sem estado do lacre | `LOCKED`/`UNLOCKED`/`BROKEN` → `eventos_lacre` (`FECHAMENTO`/`ABERTURA_NAO_AUTORIZADA`/`VIOLACAO`); sem estado → `eventos_dispositivo` (P4) |
+| SYN-19 | Suspeita de violação (P8) | Evento novo de violação ou abertura não autorizada passa o lacre de `INSTALADO` a `SUSPEITA_VIOLACAO`; nada além disso |
+| SYN-20 | Alerta: lacre e cilindro da hora | Par do vínculo válido em `created_at`; alerta encerrado na Oxide atualiza o mesmo alerta no FluxID |
+| SYN-21 | Cadastro FluxID → Oxide | Dispositivos (com hash), lacres, cilindros e vínculos chegam; o FluxID prevalece; nada é apagado; vínculo local contraditório é encerrado |
+| SYN-22 | Chave por hash | Dispositivo com `api_key_hash` autentica só com a chave que gera o hash |
+| SYN-23 | Gatilho FLX-26 | O FluxID recusa alerta cujo par lacre + cilindro não tinha vínculo na data |
+| SYN-24 | Script `005` | Estruturas do frontend criadas; histórico do cilindro imutável e alimentado por vínculos e alertas |
+
+### 10.6 Integração com o FluxID na suíte (`npm test`, grupo 10)
+
+| ID | Caso | Esperado | Sit. |
+| --- | --- | --- | --- |
+| INT-01 | `GET /api/v1/sync/status` | `200` com as filas `telemetry`, `events` e `alerts` e as últimas rodadas | A |
+| INT-02 | `GET /api/v1/sync/problems` | Fila inválida `400`; fila válida `200` | A |
+| INT-03 | `POST /api/v1/sync/retry` | Sem dados `400`; item inexistente `404` | A |
+| INT-04 | Nova tentativa pedida pelo gestor | Item parado volta a `PENDING` com tentativas zeradas | A |
+| INT-05 | Mudança de status do alerta | Alerta volta à fila do Worker (`sync_status = PENDING`) | A |
+| INT-06 | Chave por hash | Chave certa `202`; chave em texto guardada `401` | A |
+| INT-07 | `GET /devices` | Sem `api_key` e sem `api_key_hash` | A |
 
 ---
 
@@ -463,9 +485,9 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 
 | Indicador | Valor |
 | --- | --- |
-| Suíte automatizada (`npm test`) | 87 casos (86 testes e 1 de teardown), 87 aprovados em 07/10/2026 |
+| Suíte automatizada (`npm test`) | 94 casos (93 testes e 1 de teardown), 94 aprovados em 07/10/2026 (verificação técnica da IA; teste formal em 08/10/2026) |
 | Compilação (`npx tsc --noEmit`) | Aprovada em 06/10/2026 |
-| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas); [Relatorio-de-Teste-2026-10-06-20h00.md](Relatorio-de-Teste-2026-10-06-20h00.md): entrega E (banco FluxID); [Relatorio-de-Teste-2026-10-06-20h35.md](Relatorio-de-Teste-2026-10-06-20h35.md): entrega D (catálogo de comandos e tipos de erro); [Relatorio-de-Teste-2026-10-06-21h31.md](Relatorio-de-Teste-2026-10-06-21h31.md): entrega B (associação); [Relatorio-de-Teste-2026-10-06-23h40.md](Relatorio-de-Teste-2026-10-06-23h40.md): alertas em português, análise e encerramento; [Relatorio-de-Teste-2026-10-07-00h15.md](Relatorio-de-Teste-2026-10-07-00h15.md): FluxID, alerta com cilindro e lacre obrigatórios; [Relatorio-de-Teste-2026-10-07-00h45.md](Relatorio-de-Teste-2026-10-07-00h45.md): grupos do Swagger e FluxID no Docker. Todos **aprovados por Natã da Silva Baracho** |
+| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas); [Relatorio-de-Teste-2026-10-06-20h00.md](Relatorio-de-Teste-2026-10-06-20h00.md): entrega E (banco FluxID); [Relatorio-de-Teste-2026-10-06-20h35.md](Relatorio-de-Teste-2026-10-06-20h35.md): entrega D (catálogo de comandos e tipos de erro); [Relatorio-de-Teste-2026-10-06-21h31.md](Relatorio-de-Teste-2026-10-06-21h31.md): entrega B (associação); [Relatorio-de-Teste-2026-10-06-23h40.md](Relatorio-de-Teste-2026-10-06-23h40.md): alertas em português, análise e encerramento; [Relatorio-de-Teste-2026-10-07-00h15.md](Relatorio-de-Teste-2026-10-07-00h15.md): FluxID, alerta com cilindro e lacre obrigatórios; [Relatorio-de-Teste-2026-10-07-00h45.md](Relatorio-de-Teste-2026-10-07-00h45.md): grupos do Swagger e FluxID no Docker; [Relatorio-de-Teste-2026-10-07-01h30.md](Relatorio-de-Teste-2026-10-07-01h30.md): integração Oxide ⇄ FluxID (verificação técnica, **aguardando validação**). Os demais, **aprovados por Natã da Silva Baracho** |
 | Cobertura da suíte | Dispositivos, autenticação, telemetria, eventos, comandos, alertas (criação, listagem, análise e encerramento) e associação |
 | Lacunas prioritárias | SEG-05, TEL-19, ALT-07/08/12, EVT-05, BD-04/06/11/16 (fora da suíte; cobertos pelo Roteiro) |
 | Entregas futuras | Todos os casos da seção 10 pendentes (funcionalidades ainda não implementadas) |
@@ -526,3 +548,4 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | 1.8 | 06/10/2026 | Entrega de alertas, decisões de Natã da Silva Baracho: `alert_type` com os códigos do catálogo em português (nomes antigos convertidos), severidade padrão do catálogo, listagem e rota para analisar e encerrar alertas; ALT-03, ALT-05, ALT-07, ALT-08 e BD-06 revisados; novos ALT-13 a ALT-21 e BD-19; suíte com 86 casos |
 | 1.9 | 07/10/2026 | FluxID, decisão de Natã da Silva Baracho: alerta com cilindro e lacre obrigatórios (script `003`); novos FLX-23 a FLX-25 executados num servidor PostgreSQL temporário e FLX-26 (gatilho) pendente; SYN-09 passa a citar o script `004` |
 | 1.10 | 07/10/2026 | Swagger organizado em grupos (novo GER-06); FluxID de análise no Docker; dump em `sql/fluxid/FluxID.sql`; suíte com 87 casos |
+| 1.11 | 07/10/2026 | Integração Oxide ⇄ FluxID implementada: SYN-01 a SYN-16 revistos com as regras aprovadas, novos SYN-17 a SYN-24 e INT-01 a INT-07; BD-01 e BD-02 com `sync_logs`; suíte com 94 casos. Teste formal em 08/10/2026 |

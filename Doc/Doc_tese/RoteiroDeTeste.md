@@ -1,6 +1,6 @@
 # Roteiro de Teste para IA — API Oxide (FluxID / Oxide IoT)
 
-**Versão:** 1.9
+**Versão:** 1.10
 **Data:** 06/10/2026
 **Uso:** instruções executáveis para uma IA (ou pessoa) testar a API Oxide e produzir um relatório padronizado.
 **Base:** `Doc/Doc_tese/PlanoDeTeste.md` (IDs dos casos entre colchetes, ex.: `[TEL-03]`).
@@ -136,7 +136,7 @@ curl -s -o /dev/null -w "porta 3000: %{http_code}\n" "$BASE/"   # esperado: 000 
 npm test
 ```
 
-Registre: total, aprovados, reprovados. **Esperado:** 87 casos, 87 aprovados, saída com código `0`.
+Registre: total, aprovados, reprovados. **Esperado:** 94 casos, 94 aprovados, saída com código `0`.
 Se houver reprovação, copie o nome de cada teste que falhou para o relatório.
 
 > A suíte limpa registros `DSP-TEST%` no início e no fim. Os casos manuais abaixo usam `DSP-TEST-RT`, que **também** será limpo na seção 8.
@@ -483,6 +483,80 @@ post "/assignments/seal-cylinder/$ID/end" '' '{}'
 get "/assignments/seal-cylinder?cylinder_code=CIL-RT-1"
 ```
 
+### 5.10 Integração com o FluxID (Worker) — FluxID de análise no Docker
+
+**Pré-condições** (se faltar alguma, marque `SYN-*` como `NÃO EXECUTADO` com o motivo):
+
+- Docker Desktop com o container `fluxid-analise` rodando e o banco `FluxID_db` dele com os scripts `sql/fluxid/001` a `005` aplicados. **Nunca use o banco principal.**
+- Arquivo `.env` na raiz do projeto com `FLUXID_DATABASE_URL` apontando para esse banco (`127.0.0.1:54329`). O `.env` fica fora do git; **não registre a senha** no relatório.
+- Os dados de teste gravados no FluxID de análise ficam lá (é um banco de análise). Para recomeçar do zero, recrie o banco a partir do dump.
+
+```bash
+source ./roteiro-env.sh
+export MSYS_NO_PATHCONV=1
+# Consulta no FluxID de análise, pelo socket do próprio container (sem senha)
+fx() { docker exec fluxid-analise psql -U postgres -d FluxID_db -At -c "$1"; }
+worker() { node --env-file-if-exists=.env --require ts-node/register src/worker/index.ts --once | tail -1; }
+
+# Preparação: chave do DSP-000011 só como hash no FluxID de análise (SHA-256 de "key-rt-fluxid")
+fx "UPDATE dispositivos SET api_key_hash = encode(sha256('key-rt-fluxid'::bytea), 'hex') WHERE codigo = 'DSP-000011'"
+
+# [SYN-21] cadastro FluxID → Oxide. Esperado: status OK; cadastro com 50 dispositivos, lacres e cilindros
+worker
+sql "SELECT device_id, api_key_hash IS NOT NULL AS tem_hash FROM devices WHERE device_id = 'DSP-000011'"
+sql "SELECT seal_code, ended_at FROM seal_assignments WHERE device_id = 'DSP-000011'"
+
+# [SYN-22] chave por hash. Esperado: 202 com a chave certa
+post /iot/telemetries key-rt-fluxid '{"message_id":"MSG-RT-SYN-1","device_id":"DSP-000011","latitude":-7.21,"longitude":-39.31,"battery_percent":80,"seal_status":"LOCKED"}'
+
+# [SYN-06] sem posição. Esperado: 202 (vai para a quarentena no envio)
+post /iot/telemetries key-rt-fluxid '{"message_id":"MSG-RT-SYN-2","device_id":"DSP-000011","battery_percent":79}'
+
+# [SYN-18, SYN-19] eventos. Esperado: 202 e 202
+post /iot/events key-rt-fluxid '{"message_id":"EVT-RT-SYN-1","device_id":"DSP-000011","event_type":"seal_changed","seal_status":"BROKEN"}'
+post /iot/events key-rt-fluxid '{"message_id":"EVT-RT-SYN-2","device_id":"DSP-000011","event_type":"startup"}'
+
+# [SYN-20] alerta. Esperado: 201
+post /iot/alerts key-rt-fluxid '{"alert_id":"ALT-RT-SYN-1","device_id":"DSP-000011","alert_type":"LACRE_VIOLADO","title":"Lacre rompido"}'
+
+# [SYN-07] dispositivo que não existe no FluxID. Esperado: 202 aqui; no envio, ERROR "dispositivo não cadastrado no FluxID"
+post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-SYN-3","device_id":"DSP-TEST-RT","latitude":-7.3,"longitude":-39.3}'
+
+# [SYN-01] envio. Esperado: telemetry enviados >= 2 e com_erro >= 1; events enviados 2; alerts enviados 1
+worker
+fx "SELECT t.message_id, l.codigo, c.codigo FROM telemetrias t LEFT JOIN lacres l ON l.id = t.lacre_id LEFT JOIN cilindros c ON c.id = t.cilindro_id WHERE t.message_id = 'MSG-RT-SYN-1'"
+fx "SELECT message_id, motivo FROM telemetrias_quarentena WHERE message_id = 'MSG-RT-SYN-2'"
+fx "SELECT message_id, tipo FROM eventos_lacre WHERE message_id = 'EVT-RT-SYN-1'"
+fx "SELECT message_id, tipo FROM eventos_dispositivo WHERE message_id = 'EVT-RT-SYN-2'"
+fx "SELECT status FROM lacres WHERE codigo = 'LCR-000011'"
+fx "SELECT a.codigo, l.codigo, c.codigo, a.status FROM alertas a JOIN lacres l ON l.id = a.lacre_id JOIN cilindros c ON c.id = a.cilindro_id WHERE a.codigo = 'ALT-RT-SYN-1'"
+get "/sync/problems?queue=telemetry"
+
+# [SYN-20] encerramento chega ao FluxID. Esperado: 200; depois ENCERRADO com quem e motivo
+patch /iot/alerts/ALT-RT-SYN-1/status '{"status":"ENCERRADO","resolved_by":"Gestor RT","resolution_note":"Lacre conferido"}'
+worker
+fx "SELECT status, encerrado_por_nome, motivo_encerramento FROM alertas WHERE codigo = 'ALT-RT-SYN-1'"
+fx "SELECT h.tipo_evento, h.origem FROM historico_cilindro h JOIN cilindros c ON c.id = h.cilindro_id WHERE c.codigo = 'CIL-000011' ORDER BY h.sequencia DESC LIMIT 2"
+
+# [SYN-02] reenvio. Esperado: nenhuma linha nova (1 em cada consulta)
+sqlexec "UPDATE telemetry_queue SET status = 'PENDING' WHERE message_id = 'MSG-RT-SYN-1';"
+worker
+fx "SELECT count(*) FROM telemetrias WHERE message_id = 'MSG-RT-SYN-1'"
+
+# [SYN-03] FluxID fora do ar (porta errada só nesta chamada). Esperado: status FALHOU; MSG-RT-SYN-4 continua PENDING com 0 tentativas
+post /iot/telemetries key-rt-fluxid '{"message_id":"MSG-RT-SYN-4","device_id":"DSP-000011","latitude":-7.22,"longitude":-39.32}'
+FLUXID_DATABASE_URL="postgres://x:x@127.0.0.1:54398/x" node --require ts-node/register src/worker/index.ts --once | tail -1
+sql "SELECT status, attempt_count, next_attempt_at FROM telemetry_queue WHERE message_id = 'MSG-RT-SYN-4'"
+
+# [SYN-23] gatilho do par lacre + cilindro. Esperado: erro "o lacre não estava vinculado a este cilindro"
+fx "INSERT INTO alertas (codigo, organizacao_id, lacre_id, cilindro_id, tipo, severidade, status, titulo, aberto_em) SELECT 'ALT-RT-PAR', l.organizacao_id, l.id, (SELECT id FROM cilindros WHERE codigo = 'CIL-000012'), 'LACRE_VIOLADO', 'CRITICA', 'ABERTO', 'x', now() FROM lacres l WHERE l.codigo = 'LCR-000011'"
+
+# [SYN-14] registro das rodadas. Esperado: OK/PARCIAL e um FALHOU
+sql "SELECT id, status FROM sync_logs ORDER BY id DESC LIMIT 5"
+```
+
+**Esperado em resumo:** `MSG-RT-SYN-1` no FluxID com `LCR-000011` e `CIL-000011`; `MSG-RT-SYN-2` na quarentena (`SEM_POSICAO`); `EVT-RT-SYN-1` como `VIOLACAO` e lacre `SUSPEITA_VIOLACAO`; `EVT-RT-SYN-2` em `eventos_dispositivo`; `ALT-RT-SYN-1` com o par lacre + cilindro e, depois do `PATCH`, `ENCERRADO`, "Gestor RT" e "Lacre conferido", com `ALERTA_REGISTRADO` e `ALERTA_ENCERRADO` de origem `OXIDE` no histórico do cilindro; `MSG-RT-SYN-3` com "dispositivo não cadastrado no FluxID".
+
 ---
 
 ## 6. Verificações no banco (SQLite)
@@ -492,8 +566,8 @@ Execute após as seções 4 e 5, com a API ainda no ar.
 ```bash
 source ./roteiro-env.sh
 
-# [BD-01, BD-02] Esperado: alerts, commands, devices, events, sqlite_sequence, status,
-# telemetry_queue; SEM sync_logs e sync_items
+# [BD-01, BD-02] Esperado: alerts, commands, cylinder_assignments, cylinders, devices, events,
+# seal_assignments, seals, sqlite_sequence, status, sync_logs, telemetry_queue; SEM sync_items
 sql "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
 
 # [BD-05, BD-06] Esperado: alerts com 1 FK (devices; severidade e status são texto com CHECK);
@@ -591,7 +665,7 @@ Marque como `NÃO EXECUTADO – funcionalidade pendente` no relatório (sem tent
 
 - Reassociação do mesmo par lacre ↔ cilindro (`HIS-04`).
 - Geofence (`GEO-*`) e comandos automáticos (`AUT-C*`).
-- Worker SQLite → PostgreSQL (`SYN-*`) e API FluxID NestJS (`FLX-*`).
+- API FluxID para o frontend (`FLX-*`). O Worker (`SYN-*`) é testado na seção 5.10, que exige o FluxID de análise no Docker.
 - Rate limiting, hash/rotação de chaves e auditoria (`SEG-09` a `SEG-11`).
 - Testes com hardware (`ESP-03`, `ESP-05`, `ESP-06`) e operação (`OPE-*`).
 
@@ -671,7 +745,7 @@ Gere o arquivo `Relatorio-de-Teste-AAAA-MM-DD-HHhMM.md` em `Doc/Doc_tese/` (ex.:
 | Indicador | Valor |
 | --- | --- |
 | Compilação | PASSOU/FALHOU |
-| Suíte automatizada | X/87 |
+| Suíte automatizada | X/94 |
 | Casos manuais executados | N |
 | PASSOU | N |
 | FALHOU | N |
@@ -729,3 +803,4 @@ marque NÃO EXECUTADO com o motivo.
 | 1.7 | 06/10/2026 | Entrega B: nova seção 5.9 (associação, troca, encerramento, histórico e `error_type`); limpeza inclui lacres, cilindros e vínculos de teste; suíte com 71 casos |
 | 1.8 | 06/10/2026 | Entrega de alertas: tipos do catálogo em português com transição dos nomes antigos, listagem, análise e encerramento (ALT-13 a ALT-20), regras do banco (BD-19), função `patch` no arquivo de ambiente; suíte com 86 casos |
 | 1.9 | 07/10/2026 | Swagger em grupos (GER-06 na suíte); dump em `sql/fluxid/FluxID.sql` e banco de análise no Docker; suíte com 87 casos |
+| 1.10 | 07/10/2026 | Nova seção 5.10 (Worker contra o FluxID de análise no Docker: SYN-01 a SYN-23); BD-01 e BD-02 com `sync_logs`; suíte com 94 casos. Preparado para o teste formal de 08/10/2026 |
