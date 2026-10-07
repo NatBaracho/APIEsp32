@@ -1177,12 +1177,14 @@ async function main() {
     return { passed, details: `${dup.status} / ${nfc.status} / ${inst.status}` };
   });
 
-  await runTest("POST /cylinders cadastra -> 201; número de série repetido -> 409", async () => {
+  await runTest("POST /cylinders cadastra -> 201; série repetida (outra empresa) -> 201; código repetido -> 409", async () => {
     const a = await api("POST", "/cylinders", { cylinder_code: "CIL-TEST-1", serial_number: "SER-TEST-1" });
     const b = await api("POST", "/cylinders", { cylinder_code: "CIL-TEST-2", serial_number: "SER-TEST-2" });
-    const dup = await api("POST", "/cylinders", { cylinder_code: "CIL-TEST-9", serial_number: "SER-TEST-1" });
-    const passed = a.status === 201 && b.status === 201 && a.json.cylinder?.status === "DISPONIVEL" && dup.status === 409;
-    return { passed, details: `${a.status} / ${b.status} / ${dup.status}` };
+    const mesmaSerie = await api("POST", "/cylinders", { cylinder_code: "CIL-TEST-9", serial_number: "SER-TEST-1" });
+    const mesmoCodigo = await api("POST", "/cylinders", { cylinder_code: "CIL-TEST-1", serial_number: "SER-TEST-X" });
+    const passed = a.status === 201 && b.status === 201 && a.json.cylinder?.status === "DISPONIVEL" &&
+      mesmaSerie.status === 201 && mesmoCodigo.status === 409;
+    return { passed, details: `${a.status} / ${b.status} / série repetida ${mesmaSerie.status} / código repetido ${mesmoCodigo.status}` };
   });
 
   await runTest("POST /assignments/device-seal vincula -> 201; dispositivo com lacre ativo -> 409", async () => {

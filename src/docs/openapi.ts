@@ -94,7 +94,7 @@ const assetPaths = {
       responses: {
         "201": { description: "Cilindro cadastrado (DISPONIVEL por padrão)" },
         "400": { description: "Campos obrigatórios ou status inválido" },
-        "409": { description: "Código ou número de série já cadastrado" }
+        "409": { description: "Código do cilindro já cadastrado (o número de série pode repetir entre empresas; a regra por empresa é do FluxID)" }
       }
     }
   },

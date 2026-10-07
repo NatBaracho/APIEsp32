@@ -3,8 +3,7 @@ import { CylinderRepository } from "../repositories/CylinderRepository";
 
 export type CreateCylinderResult =
   | { kind: "created"; cylinder: Cylinder }
-  | { kind: "duplicate_code" }
-  | { kind: "duplicate_serial" };
+  | { kind: "duplicate_code" };
 
 export class CylinderService {
 
@@ -21,10 +20,6 @@ export class CylinderService {
   create(cylinder: Cylinder): CreateCylinderResult {
     if (this.repository.findByCode(cylinder.cylinder_code)) {
       return { kind: "duplicate_code" };
-    }
-
-    if (this.repository.findBySerialNumber(cylinder.serial_number)) {
-      return { kind: "duplicate_serial" };
     }
 
     return { kind: "created", cylinder: this.repository.create(cylinder) };
