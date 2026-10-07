@@ -1,11 +1,11 @@
 # Plano de Teste — FluxID / Oxide IoT
 
-**Versão:** 1.9
+**Versão:** 1.10
 **Data:** 06/10/2026
 **Escopo:** API Oxide (Node.js + TypeScript + Express + SQLite), sincronização com o PostgreSQL FluxID e API FluxID (NestJS) planejada
 **Validação humana:** Natã da Silva Baracho
 
-> Este plano consolida o que já foi implementado e testado (suíte `tests/api.test.ts`, 86 casos) e o que ainda precisa ser testado conforme o `Checklist-Projeto.md`, o `Banco_FluxID.md` (v3.0) e o `Regras-de-Negocio-e-Banco-Oxide.md`. Cada caso indica sua situação: **Automatizado**, **Manual executado** ou **Pendente**.
+> Este plano consolida o que já foi implementado e testado (suíte `tests/api.test.ts`, 87 casos) e o que ainda precisa ser testado conforme o `Checklist-Projeto.md`, o `Banco_FluxID.md` (v3.0) e o `Regras-de-Negocio-e-Banco-Oxide.md`. Cada caso indica sua situação: **Automatizado**, **Manual executado** ou **Pendente**.
 
 ---
 
@@ -76,7 +76,7 @@ Princípios:
 | Dispositivo semente | `DSP-000001`, chave `auto-DSP-000001` |
 | Dispositivos de teste | `DSP-TEST-AUTORUN`, `DSP-TEST-INACTIVE` (`active = 0`); `DSP-TEST-AUTOCREATE` é usado só para confirmar que **não** há criação automática |
 | Catálogo `status` | `ACTIVE`, `INACTIVE`, `LOCKED`, `UNLOCKED`, `BROKEN` (IDs não devem ser assumidos) |
-| PostgreSQL | Dump `FluxID.sql` (formato custom, `PGDMP`) restaurado em banco local separado via `pg_restore` |
+| PostgreSQL | Dump `sql/fluxid/FluxID.sql` (formato custom, `PGDMP`) restaurado em banco separado via `pg_restore`: servidor temporário ou container Docker `fluxid-analise` (`postgis/postgis:18-3.6`, só `127.0.0.1:54329`) |
 | Massa FluxID | 3 organizações, 3 usuários, 20 destinatários, 50 cilindros/lacres/dispositivos, 200 telemetrias, 10 eventos, 10 alertas (sintética) |
 
 Pré-condição para toda execução: banco com schema criado pelo script do `Oxidedb.md` ou pela inicialização da aplicação; backup antes de alterações estruturais.
@@ -93,7 +93,7 @@ Pré-condição para toda execução: banco com schema criado pelo script do `Ox
 **Saída (aprovação)**
 - 100% dos casos de severidade Alta aprovados.
 - Nenhum defeito crítico ou alto aberto.
-- Suíte automatizada sem falhas (hoje 86/86).
+- Suíte automatizada sem falhas (hoje 87/87).
 - Banco limpo após o teardown (zero registros `DSP-TEST%`).
 
 **Suspensão**
@@ -116,6 +116,7 @@ Legenda de situação: **A** = Automatizado, **M** = Manual executado, **P** = P
 | GER-03 | `GET /api-docs/swagger-ui-init.js` | `200`, contém título "API ESP32" e `X-API-Key` | Média | A |
 | GER-04 | Rota inexistente | `404` sem detalhes internos | Média | P |
 | GER-05 | Corpo JSON literal `null` | `400` (rejeitado pelo parser) | Baixa | M |
+| GER-06 | Grupos do Swagger | Toda rota tem um grupo declarado (Dispositivos, Telemetria, Eventos, Comandos, Alertas, Lacres, Cilindros, Vínculos); nenhuma no grupo "default" | Baixa | A |
 
 ### 6.2 Dispositivos (`/api/v1/devices`)
 
@@ -462,9 +463,9 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 
 | Indicador | Valor |
 | --- | --- |
-| Suíte automatizada (`npm test`) | 86 casos (85 testes e 1 de teardown), 86 aprovados em 06/10/2026 |
+| Suíte automatizada (`npm test`) | 87 casos (86 testes e 1 de teardown), 87 aprovados em 07/10/2026 |
 | Compilação (`npx tsc --noEmit`) | Aprovada em 06/10/2026 |
-| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas); [Relatorio-de-Teste-2026-10-06-20h00.md](Relatorio-de-Teste-2026-10-06-20h00.md): entrega E (banco FluxID); [Relatorio-de-Teste-2026-10-06-20h35.md](Relatorio-de-Teste-2026-10-06-20h35.md): entrega D (catálogo de comandos e tipos de erro); [Relatorio-de-Teste-2026-10-06-21h31.md](Relatorio-de-Teste-2026-10-06-21h31.md): entrega B (associação); [Relatorio-de-Teste-2026-10-06-23h40.md](Relatorio-de-Teste-2026-10-06-23h40.md): alertas em português, análise e encerramento; [Relatorio-de-Teste-2026-10-07-00h15.md](Relatorio-de-Teste-2026-10-07-00h15.md): FluxID, alerta com cilindro e lacre obrigatórios. Todos **aprovados por Natã da Silva Baracho** |
+| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas); [Relatorio-de-Teste-2026-10-06-20h00.md](Relatorio-de-Teste-2026-10-06-20h00.md): entrega E (banco FluxID); [Relatorio-de-Teste-2026-10-06-20h35.md](Relatorio-de-Teste-2026-10-06-20h35.md): entrega D (catálogo de comandos e tipos de erro); [Relatorio-de-Teste-2026-10-06-21h31.md](Relatorio-de-Teste-2026-10-06-21h31.md): entrega B (associação); [Relatorio-de-Teste-2026-10-06-23h40.md](Relatorio-de-Teste-2026-10-06-23h40.md): alertas em português, análise e encerramento; [Relatorio-de-Teste-2026-10-07-00h15.md](Relatorio-de-Teste-2026-10-07-00h15.md): FluxID, alerta com cilindro e lacre obrigatórios; [Relatorio-de-Teste-2026-10-07-00h45.md](Relatorio-de-Teste-2026-10-07-00h45.md): grupos do Swagger e FluxID no Docker. Todos **aprovados por Natã da Silva Baracho** |
 | Cobertura da suíte | Dispositivos, autenticação, telemetria, eventos, comandos, alertas (criação, listagem, análise e encerramento) e associação |
 | Lacunas prioritárias | SEG-05, TEL-19, ALT-07/08/12, EVT-05, BD-04/06/11/16 (fora da suíte; cobertos pelo Roteiro) |
 | Entregas futuras | Todos os casos da seção 10 pendentes (funcionalidades ainda não implementadas) |
@@ -524,3 +525,4 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | 1.7 | 06/10/2026 | Entrega B, decisões de Natã da Silva Baracho: associação dispositivo → lacre → cilindro na Oxide (cópia provisória do FluxID), rotas abertas, regras RN04/RN05, troca, histórico e `error_type`; ASC-01 a ASC-14 e HIS-01 a HIS-05 revisados; suíte com 71 casos |
 | 1.8 | 06/10/2026 | Entrega de alertas, decisões de Natã da Silva Baracho: `alert_type` com os códigos do catálogo em português (nomes antigos convertidos), severidade padrão do catálogo, listagem e rota para analisar e encerrar alertas; ALT-03, ALT-05, ALT-07, ALT-08 e BD-06 revisados; novos ALT-13 a ALT-21 e BD-19; suíte com 86 casos |
 | 1.9 | 07/10/2026 | FluxID, decisão de Natã da Silva Baracho: alerta com cilindro e lacre obrigatórios (script `003`); novos FLX-23 a FLX-25 executados num servidor PostgreSQL temporário e FLX-26 (gatilho) pendente; SYN-09 passa a citar o script `004` |
+| 1.10 | 07/10/2026 | Swagger organizado em grupos (novo GER-06); FluxID de análise no Docker; dump em `sql/fluxid/FluxID.sql`; suíte com 87 casos |

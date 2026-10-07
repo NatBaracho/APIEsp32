@@ -1,5 +1,6 @@
 import { server } from "../src/server";
 import db from "../src/database/connection";
+import openApiSpec from "../src/docs/openapi";
 
 const BASE_URL = `http://localhost:${process.env.PORT || 3000}`;
 
@@ -81,6 +82,21 @@ async function main() {
     const text = await res.text();
     const passed = res.status === 200 && text.includes("API ESP32");
     return { passed, status: res.status, expectedStatus: 200, details: "Contém título 'API ESP32'" };
+  });
+
+  await runTest("Swagger: toda rota tem um grupo declarado (sem grupo default)", async () => {
+    const spec = openApiSpec as any;
+    const declared = new Set((spec.tags ?? []).map((tag: any) => tag.name));
+    const semGrupo: string[] = [];
+    for (const [path, operations] of Object.entries<any>(spec.paths)) {
+      for (const [method, operation] of Object.entries<any>(operations)) {
+        const tags: string[] = operation.tags ?? [];
+        if (tags.length === 0 || !tags.every(tag => declared.has(tag))) {
+          semGrupo.push(`${method.toUpperCase()} ${path}`);
+        }
+      }
+    }
+    return { passed: semGrupo.length === 0, details: semGrupo.length === 0 ? `${declared.size} grupos` : `sem grupo: ${semGrupo.join(", ")}` };
   });
 
   // Group 2: Devices

@@ -47,9 +47,9 @@ const endResponses = {
 // provisórias até o Worker trazer o cadastro oficial do FluxID
 const assetPaths = {
   "/api/v1/seals": {
-    get: { tags: ["Associação"], summary: "Listar lacres", responses: { "200": { description: "Lista de lacres" } } },
+    get: { tags: ["Lacres"], summary: "Listar lacres", responses: { "200": { description: "Lista de lacres" } } },
     post: {
-      tags: ["Associação"],
+      tags: ["Lacres"],
       summary: "Cadastrar lacre (provisório até o FluxID)",
       requestBody: jsonBody({
         seal_code: { type: "string", example: "LCR-000001" },
@@ -65,13 +65,13 @@ const assetPaths = {
   },
   "/api/v1/seals/{sealCode}": {
     get: {
-      tags: ["Associação"], summary: "Buscar lacre", parameters: [codeParam("sealCode", "LCR-000001")],
+      tags: ["Lacres"], summary: "Buscar lacre", parameters: [codeParam("sealCode", "LCR-000001")],
       responses: { "200": { description: "Lacre" }, "404": { description: "Lacre não encontrado" } }
     }
   },
   "/api/v1/seals/{sealCode}/status": {
     post: {
-      tags: ["Associação"], summary: "Alterar estado do lacre", parameters: [codeParam("sealCode", "LCR-000001")],
+      tags: ["Lacres"], summary: "Alterar estado do lacre", parameters: [codeParam("sealCode", "LCR-000001")],
       requestBody: jsonBody({ status: { type: "string", enum: sealStatusEnum, example: "SUSPEITA_VIOLACAO" } }, ["status"]),
       responses: {
         "200": { description: "Estado alterado" },
@@ -82,9 +82,9 @@ const assetPaths = {
     }
   },
   "/api/v1/cylinders": {
-    get: { tags: ["Associação"], summary: "Listar cilindros", responses: { "200": { description: "Lista de cilindros" } } },
+    get: { tags: ["Cilindros"], summary: "Listar cilindros", responses: { "200": { description: "Lista de cilindros" } } },
     post: {
-      tags: ["Associação"],
+      tags: ["Cilindros"],
       summary: "Cadastrar cilindro (provisório até o FluxID)",
       requestBody: jsonBody({
         cylinder_code: { type: "string", example: "CIL-000001" },
@@ -100,24 +100,24 @@ const assetPaths = {
   },
   "/api/v1/cylinders/{cylinderCode}": {
     get: {
-      tags: ["Associação"], summary: "Buscar cilindro", parameters: [codeParam("cylinderCode", "CIL-000001")],
+      tags: ["Cilindros"], summary: "Buscar cilindro", parameters: [codeParam("cylinderCode", "CIL-000001")],
       responses: { "200": { description: "Cilindro" }, "404": { description: "Cilindro não encontrado" } }
     }
   },
   "/api/v1/cylinders/{cylinderCode}/status": {
     post: {
-      tags: ["Associação"], summary: "Alterar estado do cilindro", parameters: [codeParam("cylinderCode", "CIL-000001")],
+      tags: ["Cilindros"], summary: "Alterar estado do cilindro", parameters: [codeParam("cylinderCode", "CIL-000001")],
       requestBody: jsonBody({ status: { type: "string", enum: cylinderStatusEnum, example: "EM_TRANSITO" } }, ["status"]),
       responses: { "200": { description: "Estado alterado" }, "400": { description: "Estado inválido" }, "404": { description: "Cilindro não encontrado" } }
     }
   },
   "/api/v1/assignments/device-seal": {
     get: {
-      tags: ["Associação"], summary: "Histórico dispositivo ↔ lacre (mais recente primeiro)", parameters: historyQuery,
+      tags: ["Vínculos"], summary: "Histórico dispositivo ↔ lacre (mais recente primeiro)", parameters: historyQuery,
       responses: { "200": { description: "Vínculos" } }
     },
     post: {
-      tags: ["Associação"],
+      tags: ["Vínculos"],
       summary: "Vincular dispositivo a lacre (RN05)",
       requestBody: jsonBody({
         device_id: { type: "string", example: "DSP-000001" },
@@ -134,17 +134,17 @@ const assetPaths = {
   },
   "/api/v1/assignments/device-seal/{id}/end": {
     post: {
-      tags: ["Associação"], summary: "Encerrar vínculo dispositivo ↔ lacre",
+      tags: ["Vínculos"], summary: "Encerrar vínculo dispositivo ↔ lacre",
       parameters: idParam, requestBody: endBody, responses: endResponses
     }
   },
   "/api/v1/assignments/seal-cylinder": {
     get: {
-      tags: ["Associação"], summary: "Histórico lacre ↔ cilindro (mais recente primeiro)", parameters: historyQuery,
+      tags: ["Vínculos"], summary: "Histórico lacre ↔ cilindro (mais recente primeiro)", parameters: historyQuery,
       responses: { "200": { description: "Vínculos" } }
     },
     post: {
-      tags: ["Associação"],
+      tags: ["Vínculos"],
       summary: "Instalar lacre em cilindro (RN04); lacre vira INSTALADO",
       requestBody: jsonBody({
         seal_code: { type: "string", example: "LCR-000001" },
@@ -161,7 +161,7 @@ const assetPaths = {
   },
   "/api/v1/assignments/seal-cylinder/{id}/end": {
     post: {
-      tags: ["Associação"], summary: "Encerrar vínculo lacre ↔ cilindro; lacre INSTALADO vira REMOVIDO",
+      tags: ["Vínculos"], summary: "Encerrar vínculo lacre ↔ cilindro; lacre INSTALADO vira REMOVIDO",
       parameters: idParam, requestBody: endBody, responses: endResponses
     }
   }
@@ -172,8 +172,18 @@ const openApiSpec = {
   info: {
     title: "API ESP32",
     version: "1.0.0",
-    description: "API para dispositivos ESP32 enviarem telemetrias e eventos."
+    description: "API Oxide: recebe os dados do ESP32 (telemetria, eventos, alertas e comandos) e mantém a fila local até a sincronização com o FluxID. As rotas de cadastro, de associação e de análise de alertas são abertas e provisórias, até o controle por perfil do FluxID."
   },
+  tags: [
+    { name: "Dispositivos", description: "Cadastro e consulta de dispositivos. Provisório até o Worker trazer o cadastro oficial do FluxID; a api_key só aparece no cadastro" },
+    { name: "Telemetria", description: "O ESP32 envia posição, bateria, sinal e estado do lacre (exige a X-API-Key do próprio dispositivo)" },
+    { name: "Eventos", description: "O ESP32 envia ocorrências: reinício, falha, mudança do lacre (exige a X-API-Key do próprio dispositivo)" },
+    { name: "Comandos", description: "O ESP32 busca comandos pendentes (TRAVAR_VALVULA, DESTRAVAR_VALVULA) e confirma EXECUTADO ou ERRO" },
+    { name: "Alertas", description: "O ESP32 cria alertas com os códigos do catálogo Tipos-de-Erro.md; o gestor lista, analisa e encerra (rotas abertas e provisórias)" },
+    { name: "Lacres", description: "Cadastro e estado dos lacres. Cópia provisória do cadastro do FluxID" },
+    { name: "Cilindros", description: "Cadastro e estado dos cilindros. Cópia provisória do cadastro do FluxID" },
+    { name: "Vínculos", description: "Dispositivo ↔ lacre e lacre ↔ cilindro, com troca, encerramento e histórico. Nada é apagado" }
+  ],
   servers: [
     {
       url: "http://localhost:3000",
@@ -262,6 +272,7 @@ const openApiSpec = {
   paths: {
     "/api/v1/devices": {
       get: {
+        tags: ["Dispositivos"],
         summary: "Listar dispositivos",
         responses: {
           "200": {
@@ -278,6 +289,7 @@ const openApiSpec = {
         }
       },
       post: {
+        tags: ["Dispositivos"],
         summary: "Cadastrar dispositivo",
         requestBody: {
           required: true,
@@ -323,6 +335,7 @@ const openApiSpec = {
     },
     "/api/v1/devices/{deviceId}": {
       get: {
+        tags: ["Dispositivos"],
         summary: "Buscar dispositivo pelo identificador",
         parameters: [
           {
@@ -348,6 +361,7 @@ const openApiSpec = {
     },
     "/api/v1/iot/telemetries": {
       get: {
+        tags: ["Telemetria"],
         summary: "Listar telemetrias da fila",
         description: "Retorna todas as telemetrias, da mais recente para a mais antiga.",
         security: [{ ApiKeyAuth: [] }],
@@ -375,6 +389,7 @@ const openApiSpec = {
         }
       },
       post: {
+        tags: ["Telemetria"],
         summary: "Enviar telemetria",
         security: [{ ApiKeyAuth: [] }],
         requestBody: {
@@ -442,6 +457,7 @@ const openApiSpec = {
     },
     "/api/v1/iot/events": {
       post: {
+        tags: ["Eventos"],
         summary: "Enviar evento",
         security: [{ ApiKeyAuth: [] }],
         requestBody: {
@@ -499,6 +515,7 @@ const openApiSpec = {
     },
     "/api/v1/iot/commands/{deviceId}": {
       get: {
+        tags: ["Comandos"],
         summary: "Listar comandos pendentes do dispositivo",
         security: [{ ApiKeyAuth: [] }],
         parameters: [
@@ -530,6 +547,7 @@ const openApiSpec = {
     },
     "/api/v1/iot/commands/confirm": {
       post: {
+        tags: ["Comandos"],
         summary: "Confirmar execução de comando",
         security: [{ ApiKeyAuth: [] }],
         requestBody: {
@@ -561,6 +579,7 @@ const openApiSpec = {
     },
     "/api/v1/iot/alerts": {
       post: {
+        tags: ["Alertas"],
         summary: "Registrar alerta",
         security: [{ ApiKeyAuth: [] }],
         requestBody: {
@@ -614,6 +633,7 @@ const openApiSpec = {
         }
       },
       get: {
+        tags: ["Alertas"],
         summary: "Listar alertas (aberta e provisória)",
         parameters: [
           { name: "status", in: "query", schema: { type: "string", enum: ["ABERTO", "EM_ANALISE", "ENCERRADO"] } },
@@ -641,6 +661,7 @@ const openApiSpec = {
     },
     "/api/v1/iot/alerts/{alertId}/status": {
       patch: {
+        tags: ["Alertas"],
         summary: "Analisar ou encerrar alerta (aberta e provisória)",
         description: "Caminhos: ABERTO → EM_ANALISE → ENCERRADO, ou ABERTO → ENCERRADO. ENCERRADO é final: um problema novo gera um alerta novo",
         parameters: [

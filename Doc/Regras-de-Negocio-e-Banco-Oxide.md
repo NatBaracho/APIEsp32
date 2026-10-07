@@ -1,6 +1,6 @@
 # Regras de Negócio da API e Bancos FluxID e Oxide
 
-Este documento descreve as regras implementadas na API, o schema do SQLite Oxide usado como buffer local e o modelo PostgreSQL principal FluxID identificado no dump `FluxID.sql`. Ele separa o comportamento atual das decisões e integrações ainda pendentes; não representa um contrato para recursos futuros.
+Este documento descreve as regras implementadas na API, o schema do SQLite Oxide usado como buffer local e o modelo PostgreSQL principal FluxID identificado no dump `sql/fluxid/FluxID.sql`. Ele separa o comportamento atual das decisões e integrações ainda pendentes; não representa um contrato para recursos futuros.
 
 ## 1. Escopo e execução
 
@@ -10,7 +10,7 @@ Este documento descreve as regras implementadas na API, o schema do SQLite Oxide
 - Banco local SQLite: `oxide.db` no diretório de trabalho do processo (`process.cwd()`); a Oxide funciona como buffer persistente da API.
 - A conexão habilita `PRAGMA foreign_keys = ON`.
 - A API utiliza o banco local SQLite (`oxide.db`) como buffer de ingestão. Através desta API e de um Worker (como o `SyncService`, atualmente preparado como estrutura), os dados serão sincronizados com o banco principal PostgreSQL (FluxID).
-- O arquivo `FluxID.sql` é um dump PostgreSQL em formato custom, identificado pela assinatura `PGDMP`; apesar da extensão, não é um script SQL texto e deve ser tratado com `pg_restore`.
+- O arquivo `sql/fluxid/FluxID.sql` é um dump PostgreSQL em formato custom, identificado pela assinatura `PGDMP`; apesar da extensão, não é um script SQL texto e deve ser tratado com `pg_restore`.
 
 ## 2. Rotas disponíveis
 

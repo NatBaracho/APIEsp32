@@ -2,7 +2,7 @@
 
 **Versão:** 1.1 — 06/10/2026 (decisões P1 a P8 fechadas por Natã da Silva Baracho)
 **Público:** equipe do projeto e quem for implementar o Worker de sincronização.
-**Base:** API Oxide após as entregas A e C, `oxide.db` atual e dump `FluxID.sql` de 23/09/2026 com os ajustes de `sql/fluxid/001_ajustes_estrutura.sql`.
+**Base:** API Oxide após as entregas A e C, `oxide.db` atual e dump `sql/fluxid/FluxID.sql` de 23/09/2026 com os ajustes de `sql/fluxid/001_ajustes_estrutura.sql`.
 
 Este documento diz **como cada dado da Oxide vira um registro do FluxID** e registra as **decisões** que orientam o Worker (seção 5). Nada aqui está implementado ainda.
 
@@ -140,4 +140,4 @@ Decididas por **Natã da Silva Baracho**. Registro conferido por questionário (
 2. Entrega D (catálogo de comandos), já decidindo a seção 3.4.
 3. ✅ Entrega B (associação): cópia provisória na Oxide no mesmo modelo do FluxID, com `error_type` registrando dispositivo sem lacre, lacre sem cilindro e lacre aberto em trânsito.
 4. ✅ Decisões P1 a P8 fechadas (seção 5).
-5. Implementar o Worker e a chave por hash na Oxide (seção 4), testando primeiro num FluxID de análise (Docker).
+5. Implementar o Worker e a chave por hash na Oxide (seção 4), testando primeiro num FluxID de análise no Docker (o container `fluxid-analise` (imagem `postgis/postgis:18-3.6`, porta `127.0.0.1:54329`, senha gerada na hora e não registrada) já existe desde 07/10/2026).

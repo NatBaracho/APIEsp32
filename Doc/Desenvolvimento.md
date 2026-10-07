@@ -310,7 +310,7 @@ PATCH /api/v1/iot/alerts/ALT-000001/status   { "status": "ENCERRADO", "resolved_
 
 ## 1.10 Estado atual
 
-- API em funcionamento, validada pela suíte automatizada (`npm test`, 86/86) e pelo Roteiro de Teste completo no `oxide.db` real.
+- API em funcionamento, validada pela suíte automatizada (`npm test`, 87/87) e pelo Roteiro de Teste completo no `oxide.db` real.
 - Próximas entregas: geofence e rota; regras e alertas automáticos (incluindo comandos automáticos); Worker (decisões P1 a P8 já fechadas na seção 5 do plano de integração).
 - Pendências conhecidas: firmware do ESP32 precisa enviar `seal_status` e `attempt_count` e tratar as respostas da seção 1.5; `nodemon` com vulnerabilidade apenas em desenvolvimento.
 
@@ -527,7 +527,7 @@ Compilação aprovada, suíte com 55/55 (três casos novos e um substituído), m
 ### 7.16 Entrega E — banco FluxID e plano de integração (06/10/2026)
 - Análise do dump `FluxID.sql` e do `Banco_FluxID.md`: estrutura coerente com as regras de negócio, documento desatualizado em contagens, valores aceitos e índices, e massa de testes com incoerências de negócio e nomes de empresas reais.
 - Decisões de Natã da Silva Baracho: scripts versionados em `sql/fluxid/` (001 estrutura, 002 massa), chave do dispositivo guardada como hash no FluxID, nomes fictícios Alfa e Beta Gases, correção dos cilindros reprovados e dos lacres violados, ativos livres para a Beta e matriz de perfis e permissões.
-- Validação: servidor PostgreSQL 18.6 temporário, separado do banco principal (o Docker ficou para depois, por exigir habilitar a virtualização na BIOS). Dump restaurado sem erros; scripts executados duas vezes (a segunda sem alterações); coerência e regras novas conferidas; servidor apagado ao final.
+- Validação: servidor PostgreSQL 18.6 temporário, separado do banco principal (o Docker ficou para depois, por exigir habilitar a virtualização na BIOS; passou a funcionar em 07/10/2026, seção 7.22). Dump restaurado sem erros; scripts executados duas vezes (a segunda sem alterações); coerência e regras novas conferidas; servidor apagado ao final.
 - Documentos: `Banco_FluxID.md` v3.1 e novo `Integracao-Oxide-FluxID.md`, com as tabelas de conversão e as decisões pendentes P1 a P8 para o Worker.
 - Validação registrada em [Relatorio-de-Teste-2026-10-06-20h00.md](Doc_tese/Relatorio-de-Teste-2026-10-06-20h00.md), **aprovada por Natã da Silva Baracho**.
 - Ocorrência no envio: logo após o merge do PR #4, um revert (PR #5) foi mesclado sem intenção e desfez a entrega na `main`. O conteúdo foi reaplicado sem nenhuma alteração por um novo pull request, conferido como idêntico ao aprovado.
@@ -598,11 +598,18 @@ Decisão de Natã da Silva Baracho, só no banco FluxID (a Oxide não muda): tod
 
 O script `sql/fluxid/003_alertas_cilindro_obrigatorio.sql` preenche os alertas sem cilindro pelo vínculo da data, para tudo se sobrar algum alerta fora da regra e cria o `CHECK`. Foi validado num PostgreSQL 18.6 temporário (porta 54329, porque a 55432 caiu numa faixa reservada do Windows): os 10 alertas de teste foram preenchidos, a segunda execução não alterou nada, as regras foram confirmadas e a parada segura não alterou nada. O script das decisões P1 a P8 passa a ser o `004`. Validação registrada em [Relatorio-de-Teste-2026-10-07-00h15.md](Doc_tese/Relatorio-de-Teste-2026-10-07-00h15.md), **aprovada por Natã da Silva Baracho**.
 
+### 7.22 Swagger em grupos e FluxID no Docker (07/10/2026)
+- **Swagger:** as rotas antigas não tinham grupo e apareciam em "default", ao lado do grupo "Associação". Decisão de Natã da Silva Baracho: 8 grupos com uma frase de explicação cada (Dispositivos, Telemetria, Eventos, Comandos, Alertas, Lacres, Cilindros e Vínculos) e um teste na suíte que barra rota sem grupo (GER-06). Só documentação: nenhuma rota mudou de comportamento.
+- **Docker:** com a virtualização habilitada, o Docker Desktop passou a funcionar. O FluxID de análise roda no container `fluxid-analise` (imagem `postgis/postgis:18-3.6`, porta `127.0.0.1:54329`, senha gerada na hora e não registrada), com o banco `FluxID_original` (dump sem alteração) e o `FluxID_db` (dump + `001`, `002` e `003`), para consulta no pgAdmin. Os três scripts deram o mesmo resultado do servidor temporário.
+- **Dump:** o `FluxID.sql` passou da raiz para `sql/fluxid/FluxID.sql`, junto dos scripts (conteúdo idêntico, mesmo SHA-256).
+
+Compilação aprovada, suíte com 87/87 em duas rodadas e teste negativo da regra de grupos. Validação registrada em [Relatorio-de-Teste-2026-10-07-00h45.md](Doc_tese/Relatorio-de-Teste-2026-10-07-00h45.md), **aprovada por Natã da Silva Baracho**.
+
 ## 9. Suíte de testes automatizados (`npm test`)
 
-A suíte `tests/api.test.ts` cobre hoje 86 casos de ponta a ponta:
+A suíte `tests/api.test.ts` cobre hoje 87 casos de ponta a ponta:
 
-1. **Geral & Documentação:** `/`, `/api-docs/` e `/api-docs/swagger-ui-init.js`.
+1. **Geral & Documentação:** `/`, `/api-docs/`, `/api-docs/swagger-ui-init.js` e a regra de que toda rota do Swagger tem um grupo declarado.
 2. **Dispositivos:** listagem e busca sem `api_key`, `404`, validação `400`, criação `201`, `device_id` duplicado (`409`), `api_key` já usada (`409`) e `active` inválido (`400`).
 3. **Autenticação:** `401` sem header, `401` com chave inválida, `403` para dispositivo inativo e `200` com chave válida.
 4. **Telemetria:** campos obrigatórios (`400`), payload válido (`202`), `message_id` duplicado (`409`), posição repetida (`200`, sem nova linha), posição nova (nova linha), reenvio de posição repetida (`409`), `attempt_count` em `device_attempt_count`, tipo inválido (`400`), dispositivo inexistente (`404`), chave de outro dispositivo (`403`), `seal_status` inválido (`400`), mudança do lacre na mesma posição (nova linha), `attempt_count` negativo (`400`), latitude fora da faixa (`400`), só latitude (`400`) e JSON malformado (`400`).
@@ -632,6 +639,7 @@ Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **a
 | #7 | D — Catálogo de comandos | Comandos só `TRAVAR_VALVULA` e `DESTRAVAR_VALVULA`; leitura e confirmação pelo ESP32 sem mudança; sem rota aberta para criar comando |
 | #8 | B — Associação | Rotas `/seals`, `/cylinders` e `/assignments` (abertas e provisórias); troca com `replace`; telemetria recebe lacre e cilindro do vínculo ativo; `error_type` registrado no recebimento |
 | #12 | Alertas em português | `alert_type` com os 28 códigos do catálogo (nomes antigos convertidos); severidade padrão do catálogo; `GET /iot/alerts` com filtros; `PATCH /iot/alerts/{alert_id}/status` para analisar e encerrar, com quem e motivo |
+| #14 | Swagger em grupos | 8 grupos com explicação (Dispositivos, Telemetria, Eventos, Comandos, Alertas, Lacres, Cilindros, Vínculos), sem grupo "default"; teste que barra rota sem grupo |
 
 ## 3.2 Oxide (`oxide.db`)
 
@@ -653,8 +661,9 @@ Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **a
 | #7 | D — Catálogo de erros | `Tipos-de-Erro.md`: catálogo em português com o equivalente de cada código no FluxID |
 | #8 | B — Associação | A cópia provisória da Oxide segue os mesmos códigos e estados de lacres, cilindros e vínculos do FluxID |
 | #9 | Decisões P1 a P8 | Data gravada na chegada, quarentena para telemetria sem GPS, tabela de eventos do dispositivo, tipos de alerta do catálogo (script `004` futuro) |
-| #13 | Alerta com cilindro e lacre | Script `003`: cilindro e lacre obrigatórios em `alertas` (salvo códigos de cadastro), com preenchimento dos 10 alertas de teste pelo vínculo da data e parada segura; validado em servidor temporário |
 | #12 | Alertas em português | A Oxide já usa os mesmos códigos de alerta que o FluxID vai aceitar (P5); `resolved_by` e `resolution_note` correspondem a `alertas.encerrado_por` e ao motivo do encerramento |
+| #13 | Alerta com cilindro e lacre | Script `003`: cilindro e lacre obrigatórios em `alertas` (salvo códigos de cadastro), com preenchimento dos 10 alertas de teste pelo vínculo da data e parada segura; validado em servidor temporário |
+| #14 | Docker e dump | FluxID de análise no Docker (container `fluxid-analise`, PostGIS 18), com `001`, `002` e `003` aplicados; dump movido para `sql/fluxid/FluxID.sql` |
 
 ## 3.4 Worker
 
