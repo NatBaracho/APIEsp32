@@ -12,7 +12,7 @@ Documentos relacionados:
 - [Regras-de-Negocio-e-Banco-Oxide.md](Regras-de-Negocio-e-Banco-Oxide.md): regras detalhadas e schema do SQLite.
 - [Oxidedb.md](Oxidedb.md): script de criação do banco.
 - [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md): como cada dado da Oxide vira um registro do FluxID.
-- [Contrato-API-Frontend.md](Contrato-API-Frontend.md): chamadas que a API vai oferecer ao frontend sobre o FluxID (proposta, aguardando aprovação).
+- [Contrato-API-Frontend.md](Contrato-API-Frontend.md): chamadas que a API vai oferecer ao frontend sobre o FluxID (proposta, aguardando aprovação). Com a API rodando, a proposta pode ser vista em `http://<IP_DA_API>:3000/api-docs-fluxid`.
 - [Tipos-de-Erro.md](Tipos-de-Erro.md): catálogo de tipos de erro e ocorrências operacionais (lacre, cilindro, GPS, rota, comunicação, comandos).
 - [Doc_tese/PlanoDeTeste.md](Doc_tese/PlanoDeTeste.md) e [Doc_tese/RoteiroDeTeste.md](Doc_tese/RoteiroDeTeste.md): como a API é testada.
 - Swagger, com a API rodando: `http://<IP_DA_API>:3000/api-docs`.
@@ -329,7 +329,7 @@ PATCH /api/v1/iot/alerts/ALT-000001/status   { "status": "ENCERRADO", "resolved_
 
 ## 1.10 Estado atual
 
-- API em funcionamento, validada pela suíte automatizada (`npm test`, 94/94) e pelo Roteiro de Teste completo no `oxide.db` real (até a versão anterior ao Worker).
+- API em funcionamento, validada pela suíte automatizada (`npm test`, 96/96) e pelo Roteiro de Teste completo no `oxide.db` real (até a versão anterior ao Worker).
 - Worker e integração com o FluxID implementados em 07/10/2026; teste formal e validação marcados para 08/10/2026 (seção 7.23).
 - Próximas entregas: API do frontend sobre o FluxID; geofence e rota; regras e alertas automáticos (incluindo comandos automáticos).
 - Pendências conhecidas: firmware do ESP32 precisa enviar `seal_status` e `attempt_count` e tratar as respostas da seção 1.5; `nodemon` com vulnerabilidade apenas em desenvolvimento.
@@ -641,9 +641,9 @@ Verificação técnica da IA (não substitui o teste formal): compilação; suí
 
 ## 9. Suíte de testes automatizados (`npm test`)
 
-A suíte `tests/api.test.ts` cobre hoje 94 casos de ponta a ponta:
+A suíte `tests/api.test.ts` cobre hoje 96 casos de ponta a ponta:
 
-1. **Geral & Documentação:** `/`, `/api-docs/`, `/api-docs/swagger-ui-init.js` e a regra de que toda rota do Swagger tem um grupo declarado.
+1. **Geral & Documentação:** `/`, `/api-docs/`, `/api-docs/swagger-ui-init.js` e a regra de que toda rota do Swagger tem um grupo declarado; página da proposta `/api-docs-fluxid` separada da atual, com as 21 funções em grupos e nenhuma rota `/api/v1/app` ainda.
 2. **Dispositivos:** listagem e busca sem `api_key`, `404`, validação `400`, criação `201`, `device_id` duplicado (`409`), `api_key` já usada (`409`) e `active` inválido (`400`).
 3. **Autenticação:** `401` sem header, `401` com chave inválida, `403` para dispositivo inativo e `200` com chave válida.
 4. **Telemetria:** campos obrigatórios (`400`), payload válido (`202`), `message_id` duplicado (`409`), posição repetida (`200`, sem nova linha), posição nova (nova linha), reenvio de posição repetida (`409`), `attempt_count` em `device_attempt_count`, tipo inválido (`400`), dispositivo inexistente (`404`), chave de outro dispositivo (`403`), `seal_status` inválido (`400`), mudança do lacre na mesma posição (nova linha), `attempt_count` negativo (`400`), latitude fora da faixa (`400`), só latitude (`400`) e JSON malformado (`400`).

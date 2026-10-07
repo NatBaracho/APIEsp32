@@ -136,7 +136,7 @@ curl -s -o /dev/null -w "porta 3000: %{http_code}\n" "$BASE/"   # esperado: 000 
 npm test
 ```
 
-Registre: total, aprovados, reprovados. **Esperado:** 94 casos, 94 aprovados, saída com código `0`.
+Registre: total, aprovados, reprovados. **Esperado:** 96 casos, 96 aprovados, saída com código `0`.
 Se houver reprovação, copie o nome de cada teste que falhou para o relatório.
 
 > A suíte limpa registros `DSP-TEST%` no início e no fim. Os casos manuais abaixo usam `DSP-TEST-RT`, que **também** será limpo na seção 8.
@@ -745,7 +745,7 @@ Gere o arquivo `Relatorio-de-Teste-AAAA-MM-DD-HHhMM.md` em `Doc/Doc_tese/` (ex.:
 | Indicador | Valor |
 | --- | --- |
 | Compilação | PASSOU/FALHOU |
-| Suíte automatizada | X/94 |
+| Suíte automatizada | X/96 |
 | Casos manuais executados | N |
 | PASSOU | N |
 | FALHOU | N |
@@ -803,4 +803,4 @@ marque NÃO EXECUTADO com o motivo.
 | 1.7 | 06/10/2026 | Entrega B: nova seção 5.9 (associação, troca, encerramento, histórico e `error_type`); limpeza inclui lacres, cilindros e vínculos de teste; suíte com 71 casos |
 | 1.8 | 06/10/2026 | Entrega de alertas: tipos do catálogo em português com transição dos nomes antigos, listagem, análise e encerramento (ALT-13 a ALT-20), regras do banco (BD-19), função `patch` no arquivo de ambiente; suíte com 86 casos |
 | 1.9 | 07/10/2026 | Swagger em grupos (GER-06 na suíte); dump em `sql/fluxid/FluxID.sql` e banco de análise no Docker; suíte com 87 casos |
-| 1.10 | 07/10/2026 | Nova seção 5.10 (Worker contra o FluxID de análise no Docker: SYN-01 a SYN-23); BD-01 e BD-02 com `sync_logs`; suíte com 94 casos. Preparado para o teste formal de 08/10/2026 |
+| 1.10 | 07/10/2026 | Nova seção 5.10 (Worker contra o FluxID de análise no Docker: SYN-01 a SYN-23); BD-01 e BD-02 com `sync_logs`; suíte com 96 casos (inclui a página `/api-docs-fluxid`). Preparado para o teste formal de 08/10/2026 |

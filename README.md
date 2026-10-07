@@ -33,9 +33,12 @@ npx tsc --noEmit
 npm test
 ```
 
-O `npm test` sobe a própria instância da API; pare o `npm start` antes de executá-lo para que a suíte não teste um processo antigo. A suíte grava no `oxide.db` do diretório atual e remove os registros `DSP-TEST%` ao final; faça backup do banco antes. Resultado atual: 94/94. O registro de cada entrega (validação da IA e do responsável) fica em `Doc/Doc_tese/Relatorio-de-Teste-*.md`.
+O `npm test` sobe a própria instância da API; pare o `npm start` antes de executá-lo para que a suíte não teste um processo antigo. A suíte grava no `oxide.db` do diretório atual e remove os registros `DSP-TEST%` ao final; faça backup do banco antes. Resultado atual: 96/96. O registro de cada entrega (validação da IA e do responsável) fica em `Doc/Doc_tese/Relatorio-de-Teste-*.md`.
 
 ## Documentação interativa
+
+A proposta da API do frontend sobre o FluxID (ainda não implementada) tem uma página própria: `http://localhost:3000/api-docs-fluxid` ([contrato](Doc/Contrato-API-Frontend.md)).
+
 
 Com o servidor ativo, acesse o Swagger UI em:
 

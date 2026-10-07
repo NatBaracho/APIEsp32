@@ -7,6 +7,8 @@
 - banco FluxID com os scripts `sql/fluxid/001` a `005`;
 - API Oxide com o Worker ([Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md)).
 
+Com a API rodando, a proposta também pode ser vista no navegador, no formato do Swagger: **`http://<servidor>:3000/api-docs-fluxid`** (página separada da API atual, marcada como proposta).
+
 Este documento diz **quais chamadas a API vai oferecer ao frontend**, o que cada uma recebe e devolve, e **de qual tabela do FluxID** sai cada dado. Nada aqui está implementado ainda. Primeiro vocês dois aprovam o contrato e as decisões da seção 9; depois a API é feita em entregas pequenas, com teste.
 
 ---

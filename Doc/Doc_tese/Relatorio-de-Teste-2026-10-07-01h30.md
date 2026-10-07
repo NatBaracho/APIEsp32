@@ -143,7 +143,7 @@ Não é o teste formal, que você pediu para amanhã. É a conferência mínima 
 | Verificação | Resultado |
 | --- | --- |
 | Compilação (`npx tsc --noEmit`) | Sem erros |
-| Suíte `npm test` numa cópia do banco | **94/94** (87 anteriores + 7 novos), em duas rodadas |
+| Suíte `npm test` numa cópia do banco | **94/94** (87 anteriores + 7 novos), em duas rodadas; depois da página da proposta, **96/96** (seção 11) |
 | Banco criado só pelo script do `Oxidedb.md` v1.7 (BD-14) | **94/94** |
 | Scripts `001` → `005` num banco novo | Sem erros; `004` e `005` rodados de novo não mudaram nada |
 | 1ª rodada do Worker | Cadastro trazido (50 dispositivos, 50 lacres, 50 cilindros, 60 vínculos, sem conflitos); 10 telemetrias e 8 eventos antigos da cópia enviados (7 telemetrias com posição, 3 na quarentena) |
@@ -219,3 +219,12 @@ Pedido por você depois deste relatório ("aproveite, faça hoje se necessário"
 - Nada foi implementado: é só o contrato.
 
 Pergunta extra para o questionário de amanhã: **14.** O contrato v0.1 pode ser levado ao aalissonalmeidaq como proposta?
+
+## 11. Página da proposta no navegador (`/api-docs-fluxid`)
+
+Também a seu pedido, o contrato ganhou uma página no formato do Swagger, separada da API atual e marcada como **proposta**: `http://localhost:3000/api-docs-fluxid`. Ela mostra as 21 funções em 4 grupos (Login e sessão, Acesso, Cilindros, Lacre e mapa), com entrada, saída, exemplos e a tabela do FluxID de cada uma. **Nenhuma dessas rotas funciona ainda** (`/api/v1/app/...` responde `404`).
+
+- As duas páginas (`/api-docs` e `/api-docs-fluxid`) passaram a gerar os arquivos separadamente (`serveFiles`), para uma não sobrescrever a outra.
+- A suíte ganhou 2 casos (GER-07 e GER-08) e passou de 94 para **96/96**, em duas rodadas, numa cópia do banco. O teste novo achou um erro meu na própria proposta (a indicação "sem token" do login no lugar errado), corrigido antes desta versão.
+
+Pergunta extra: **15.** A página `/api-docs-fluxid` pode ficar no projeto até a API do frontend ser implementada?
