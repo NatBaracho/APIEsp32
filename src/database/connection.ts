@@ -441,6 +441,87 @@ if (duplicatedApiKeys.length === 0) {
   );
 }
 
+// Associação dispositivo → lacre → cilindro (entrega B). Cópia provisória do
+// cadastro e dos vínculos do FluxID, nos mesmos códigos e estados, até o
+// Worker passar a sincronizá-los. Vínculos nunca são apagados (RN21):
+// encerrar = preencher ended_at
+db.exec(`
+  CREATE TABLE IF NOT EXISTS seals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    seal_code TEXT NOT NULL UNIQUE,
+    nfc_uid TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'EM_ESTOQUE'
+      CHECK (status IN (
+        'EM_ESTOQUE', 'INSTALADO', 'SUSPEITA_VIOLACAO', 'ROMPIDO',
+        'REMOVIDO', 'DANIFICADO', 'INUTILIZADO'
+      )),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS cylinders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cylinder_code TEXT NOT NULL UNIQUE,
+    serial_number TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'DISPONIVEL'
+      CHECK (status IN (
+        'DISPONIVEL', 'EM_TRANSITO', 'COM_CLIENTE',
+        'MANUTENCAO', 'EXTRAVIADO', 'INATIVO'
+      )),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS seal_assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id TEXT NOT NULL,
+    seal_code TEXT NOT NULL,
+    started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ended_at DATETIME,
+    end_reason TEXT,
+    FOREIGN KEY (device_id)
+      REFERENCES devices(device_id) ON UPDATE CASCADE ON DELETE RESTRICT,
+    FOREIGN KEY (seal_code)
+      REFERENCES seals(seal_code) ON UPDATE CASCADE ON DELETE RESTRICT
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS cylinder_assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    seal_code TEXT NOT NULL,
+    cylinder_code TEXT NOT NULL,
+    started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ended_at DATETIME,
+    end_reason TEXT,
+    FOREIGN KEY (seal_code)
+      REFERENCES seals(seal_code) ON UPDATE CASCADE ON DELETE RESTRICT,
+    FOREIGN KEY (cylinder_code)
+      REFERENCES cylinders(cylinder_code) ON UPDATE CASCADE ON DELETE RESTRICT
+  )
+`);
+
+// Um vínculo ativo por vez (RN04, RN05), como os índices parciais do FluxID
+db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_seal_assignment_device_active
+    ON seal_assignments (device_id) WHERE ended_at IS NULL;
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_seal_assignment_seal_active
+    ON seal_assignments (seal_code) WHERE ended_at IS NULL;
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_cylinder_assignment_seal_active
+    ON cylinder_assignments (seal_code) WHERE ended_at IS NULL;
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_cylinder_assignment_cylinder_active
+    ON cylinder_assignments (cylinder_code) WHERE ended_at IS NULL;
+`);
+
+// Código do catálogo Tipos-de-Erro.md registrado no recebimento, sem gerar
+// alerta (ex.: DISPOSITIVO_SEM_LACRE, LACRE_SEM_CILINDRO)
+addColumnIfMissing("telemetry_queue", "error_type", "TEXT");
+addColumnIfMissing("events", "error_type", "TEXT");
+
 // Verificação inicial
 console.log("✅ SQLite conectado:", databasePath);
 

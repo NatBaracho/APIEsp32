@@ -1,7 +1,10 @@
 import { Event } from "../models/Event";
 import { EventRepository } from "../repositories/EventRepository";
+import { AssignmentService } from "./AssignmentService";
 
 export class EventService {
+
+  private assignments = new AssignmentService();
 
   private repository =
     new EventRepository();
@@ -28,9 +31,15 @@ export class EventService {
 
     // O dispositivo precisa estar cadastrado: apiKeyDeviceMiddleware já
     // respondeu 404 antes de chegar aqui (sem criação automática, SEG-04)
-    this.repository.create(
-      event
+    const situation = this.assignments.describeDevice(
+      event.device_id,
+      event.seal_status
     );
+
+    this.repository.create({
+      ...event,
+      error_type: situation.error_type
+    });
 
     console.log(
       "Evento salvo:",

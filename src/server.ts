@@ -5,6 +5,7 @@ import eventRoutes from "./routes/eventRoute";
 import deviceRoutes from "./routes/deviceRoutes";
 import commandRoutes from "./routes/commandRoutes";
 import alertRoutes from "./routes/alertRoutes";
+import { assignmentRoutes, cylinderRoutes, sealRoutes } from "./routes/assetRoutes";
 import swaggerUi from "swagger-ui-express";
 import openApiSpec from "./docs/openapi";
 import { errorHandler } from "./Middleware/Errohandler";
@@ -22,6 +23,9 @@ app.use(`${API_PREFIX}/iot`, eventRoutes);
 app.use(`${API_PREFIX}/iot`, commandRoutes);
 app.use(`${API_PREFIX}/iot`, alertRoutes);
 app.use(`${API_PREFIX}/devices`, deviceRoutes);
+app.use(`${API_PREFIX}/seals`, sealRoutes);
+app.use(`${API_PREFIX}/cylinders`, cylinderRoutes);
+app.use(`${API_PREFIX}/assignments`, assignmentRoutes);
 
 
 try {

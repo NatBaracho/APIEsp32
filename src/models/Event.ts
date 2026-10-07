@@ -16,6 +16,9 @@ export interface Event {
   // Tentativas de envio informadas pelo ESP32 (o payload usa attempt_count)
   device_attempt_count?: number;
 
+  // Código do catálogo Tipos-de-Erro.md registrado no recebimento
+  error_type?: string | null;
+
   status?: string;
 
   attempt_count?: number;

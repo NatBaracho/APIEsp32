@@ -35,10 +35,12 @@ export class TelemetryQueueRepository {
         last_seen_at,
         seal_status,
         device_attempt_count,
+        error_type,
         status,
         attempt_count
       )
       VALUES (
+        ?,
         ?,
         ?,
         ?,
@@ -69,6 +71,7 @@ export class TelemetryQueueRepository {
       telemetry.last_seen_at ?? null,
       telemetry.seal_status ?? null,
       telemetry.device_attempt_count ?? null,
+      telemetry.error_type ?? null,
       "PENDING",
       0
     );

@@ -10,9 +10,8 @@ const numericFields = [
   "gsm_signal"
 ];
 
+// lacre_id e cilindro_id não são lidos do payload: vêm do vínculo ativo
 const optionalTextFields = [
-  "lacre_id",
-  "cilindro_id",
   "payload_json",
   "last_seen_at"
 ];
