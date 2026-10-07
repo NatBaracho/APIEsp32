@@ -84,16 +84,16 @@ Eventos **sem** `seal_status` (ex.: `startup`, falha de hardware) vão para uma 
 | Oxide | FluxID | Regra |
 | --- | --- | --- |
 | `alert_type` (código do catálogo, ex.: `LACRE_VIOLADO`) | `tipo` | **Direto**: desde a entrega de alertas em português, a Oxide grava os códigos de [Tipos-de-Erro.md](Tipos-de-Erro.md) |
-| — | — | O FluxID passa a aceitar **todos os códigos** do catálogo em `alertas.tipo` (decisão P5, script `003`). Enquanto isso não for aplicado, códigos como `VIOLACAO_LACRE` do dump antigo correspondem a `LACRE_VIOLADO` (seção 7 de `Tipos-de-Erro.md`) |
+| — | — | O FluxID passa a aceitar **todos os códigos** do catálogo em `alertas.tipo` (decisão P5, script `004`). Enquanto isso não for aplicado, códigos como `VIOLACAO_LACRE` do dump antigo correspondem a `LACRE_VIOLADO` (seção 7 de `Tipos-de-Erro.md`) |
 | `severity` | `severidade` | **Direto** (entrega C: mesmos valores) |
 | `status` | `status` | **Direto** (entrega C: mesmos valores) |
 | `title`, `description` | `titulo`, `descricao` | Direto |
 | `created_at` | `aberto_em` | Direto |
 | `resolved_at` | `encerrado_em` | Direto |
 | `resolved_by` | `encerrado_por` | Texto na Oxide; no FluxID é o usuário. O Worker precisa mapear o nome para o usuário (a definir) |
-| `resolution_note` | — | Motivo do encerramento; sem coluna própria no dump: guardar na descrição ou em coluna nova do script `003` (a definir) |
+| `resolution_note` | — | Motivo do encerramento; sem coluna própria no dump: guardar na descrição ou em coluna nova do script `004` (a definir) |
 | `alert_id` | `codigo` | **Direto** (decisão P7): a API Oxide gera o alerta e o envia; o FluxID não cria outro código |
-| `device_id` | `organizacao_id`, `lacre_id`, `cilindro_id` | Seção 2 |
+| `device_id` + `created_at` | `organizacao_id`, `lacre_id`, `cilindro_id` | **Obrigatórios** (script `003`): lacre e cilindro do vínculo **válido na data do alerta** (`vinculos_dispositivo_lacre` e `vinculos_cilindro_lacre`, por `data_inicio`/`data_fim`), não o vínculo atual. Sem vínculo naquela data, o alerta **não é enviado** e fica em `ERROR` na Oxide para o gestor. Exceção: códigos de cadastro (`LACRE_SEM_CILINDRO`, `DISPOSITIVO_SEM_LACRE`, `DISPOSITIVO_NAO_CADASTRADO`, `CHAVE_INVALIDA`) |
 
 **Alerta no mapa:** o alerta não guarda posição; o dashboard o desenha como ponto/cor na **posição atual** do lacre (última telemetria válida).
 
@@ -132,7 +132,7 @@ Decididas por **Natã da Silva Baracho**. Registro conferido por questionário (
 
 **Consequência a observar (P1 + P6):** como a data é a da chegada ao FluxID, um dado que demorou a ser enviado (Oxide sem internet ou novas tentativas do Worker) fica com a hora em que chegou, não com a hora da leitura.
 
-**Mudanças no FluxID que essas decisões pedem** (script `sql/fluxid/003`, na entrega do Worker): `DEFAULT now()` nas duas datas; tabela de quarentena; tabela de eventos do dispositivo; `CHECK` de `alertas.tipo` com os códigos do catálogo.
+**Mudanças no FluxID que essas decisões pedem** (script `sql/fluxid/004`, na entrega do Worker; o `003` é o do alerta com cilindro e lacre obrigatórios): `DEFAULT now()` nas duas datas; tabela de quarentena; tabela de eventos do dispositivo; `CHECK` de `alertas.tipo` com os códigos do catálogo.
 
 ## 6. Ordem sugerida
 

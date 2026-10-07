@@ -318,7 +318,7 @@ O dump não contém tabela `commands`. No dump de 23/09/2026 os IDs UUID não ti
 | `commands` | Sem tabela no dump | Por enquanto ficam só na Oxide (entrega D); criar ou não uma entidade no PostgreSQL será decidido na fase do Worker. |
 | `telemetry_queue.lacre_id` / `cilindro_id` | Vínculos FluxID | No SQLite esses campos são texto opcional sem FK; não são suficientes para reconstruir os vínculos históricos do FluxID. Usar as tabelas `vinculos_*` com regras temporais próprias. |
 
-Tipos de alerta: a Oxide já grava os códigos do catálogo `Tipos-de-Erro.md`, e pela decisão P5 o `CHECK` de `alertas.tipo` do FluxID passa a aceitar esses mesmos códigos (script `003`, na entrega do Worker). As severidades FluxID aceitas são `BAIXA`, `MEDIA`, `ALTA` e `CRITICA`; os estados aceitos são `ABERTO`, `EM_ANALISE` e `ENCERRADO`.
+Tipos de alerta: a Oxide já grava os códigos do catálogo `Tipos-de-Erro.md`, e pela decisão P5 o `CHECK` de `alertas.tipo` do FluxID passa a aceitar esses mesmos códigos (script `004`, na entrega do Worker). As severidades FluxID aceitas são `BAIXA`, `MEDIA`, `ALTA` e `CRITICA`; os estados aceitos são `ABERTO`, `EM_ANALISE` e `ENCERRADO`.
 
 ### 8.3 Preparação pendente para iniciar a sincronização
 

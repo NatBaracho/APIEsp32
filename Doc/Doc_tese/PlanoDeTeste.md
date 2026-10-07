@@ -1,6 +1,6 @@
 # Plano de Teste — FluxID / Oxide IoT
 
-**Versão:** 1.8
+**Versão:** 1.9
 **Data:** 06/10/2026
 **Escopo:** API Oxide (Node.js + TypeScript + Express + SQLite), sincronização com o PostgreSQL FluxID e API FluxID (NestJS) planejada
 **Validação humana:** Natã da Silva Baracho
@@ -375,7 +375,7 @@ Implementada na Oxide como cópia provisória do FluxID: rotas abertas `/seals`,
 | SYN-06 | Telemetria sem GPS ou sem data de coleta | Política aprovada: rejeição, quarentena ou ajuste; destino exige `data_coleta`, latitude e longitude |
 | SYN-07 | Mapeamento `device_id` → `dispositivo_id` (UUID) e `organizacao_id` | Resolvido conforme regra aprovada |
 | SYN-08 | Evento sem lacre relacionado | Política definida (destino exige `lacre_id`) |
-| SYN-09 | Alertas: tipos do catálogo (ex.: `LACRE_VIOLADO`, `SAIDA_GEOCERCA`, `BATERIA_BAIXA`, `SEM_COMUNICACAO`) gravados direto em `alertas.tipo` após o script `003` (decisão P5) | Satisfazem os `CHECK` do destino |
+| SYN-09 | Alertas: tipos do catálogo (ex.: `LACRE_VIOLADO`, `SAIDA_GEOCERCA`, `BATERIA_BAIXA`, `SEM_COMUNICACAO`) gravados direto em `alertas.tipo` após o script `004` (decisão P5) | Satisfazem os `CHECK` do destino |
 | SYN-10 | `DEVICE_ERROR` e `COMMAND_FAILURE` | Sem equivalente explícito: comportamento definido (mapear, ajustar `CHECK` ou manter local) |
 | SYN-11 | Severidade e estado | Somente `BAIXA/MEDIA/ALTA/CRITICA` e `ABERTO/EM_ANALISE/ENCERRADO` |
 | SYN-12 | Comandos | Decisão: permanecem locais ou entidade criada no PostgreSQL |
@@ -414,6 +414,10 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | FLX-20 | `api_key_hash` repetido em dois dispositivos; latitude fora da faixa; `eventos_lacre.message_id` repetido | Os três rejeitados pelo banco; evento sem `message_id` aceito (**executado na entrega E**) |
 | FLX-21 | Isolamento da massa entre organizações (RN22) | Nenhuma mistura de organizações em vínculos, entregas, alertas e custódias (**executado na entrega E**) |
 | FLX-22 | Coerência de negócio da massa | Nenhum cilindro reprovado circulando; lacres com violação em `SUSPEITA_VIOLACAO`; perfis com permissões (**executado na entrega E**) |
+| FLX-23 | Script `003`: alertas sem cilindro | Preenchidos pelo vínculo lacre → cilindro válido em `aberto_em`; segunda execução sem alteração; demais tabelas sem mudança (**executado em 07/10/2026**) |
+| FLX-24 | `CHECK` de cilindro e lacre no alerta | Alerta operacional sem cilindro ou sem lacre rejeitado; com os dois, aceito; exceções de cadastro aceitas (`LACRE_SEM_CILINDRO` sem cilindro, `DISPOSITIVO_SEM_LACRE` sem os dois); `LACRE_SEM_CILINDRO` sem lacre rejeitado (**executado em 07/10/2026**) |
+| FLX-25 | Alerta sem vínculo na data | O `003` para, lista o código e não altera nada (**executado em 07/10/2026**) |
+| FLX-26 | Gatilho do par lacre + cilindro | Alerta com par sem vínculo na data rejeitado (**pendente**, entrega futura) |
 
 ---
 
@@ -460,7 +464,7 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | --- | --- |
 | Suíte automatizada (`npm test`) | 86 casos (85 testes e 1 de teardown), 86 aprovados em 06/10/2026 |
 | Compilação (`npx tsc --noEmit`) | Aprovada em 06/10/2026 |
-| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas); [Relatorio-de-Teste-2026-10-06-20h00.md](Relatorio-de-Teste-2026-10-06-20h00.md): entrega E (banco FluxID); [Relatorio-de-Teste-2026-10-06-20h35.md](Relatorio-de-Teste-2026-10-06-20h35.md): entrega D (catálogo de comandos e tipos de erro); [Relatorio-de-Teste-2026-10-06-21h31.md](Relatorio-de-Teste-2026-10-06-21h31.md): entrega B (associação); [Relatorio-de-Teste-2026-10-06-23h40.md](Relatorio-de-Teste-2026-10-06-23h40.md): alertas em português, análise e encerramento. Todos **aprovados por Natã da Silva Baracho** |
+| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas); [Relatorio-de-Teste-2026-10-06-20h00.md](Relatorio-de-Teste-2026-10-06-20h00.md): entrega E (banco FluxID); [Relatorio-de-Teste-2026-10-06-20h35.md](Relatorio-de-Teste-2026-10-06-20h35.md): entrega D (catálogo de comandos e tipos de erro); [Relatorio-de-Teste-2026-10-06-21h31.md](Relatorio-de-Teste-2026-10-06-21h31.md): entrega B (associação); [Relatorio-de-Teste-2026-10-06-23h40.md](Relatorio-de-Teste-2026-10-06-23h40.md): alertas em português, análise e encerramento; [Relatorio-de-Teste-2026-10-07-00h15.md](Relatorio-de-Teste-2026-10-07-00h15.md): FluxID, alerta com cilindro e lacre obrigatórios. Todos **aprovados por Natã da Silva Baracho** |
 | Cobertura da suíte | Dispositivos, autenticação, telemetria, eventos, comandos, alertas (criação, listagem, análise e encerramento) e associação |
 | Lacunas prioritárias | SEG-05, TEL-19, ALT-07/08/12, EVT-05, BD-04/06/11/16 (fora da suíte; cobertos pelo Roteiro) |
 | Entregas futuras | Todos os casos da seção 10 pendentes (funcionalidades ainda não implementadas) |
@@ -519,3 +523,4 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | 1.6 | 06/10/2026 | Entrega D, decisões de Natã da Silva Baracho: catálogo de comandos (`TRAVAR_VALVULA`, `DESTRAVAR_VALVULA`) aplicado no banco, sem rota de criação; novos casos CMD-14, CMD-15 e BD-18; suíte com 57 casos |
 | 1.7 | 06/10/2026 | Entrega B, decisões de Natã da Silva Baracho: associação dispositivo → lacre → cilindro na Oxide (cópia provisória do FluxID), rotas abertas, regras RN04/RN05, troca, histórico e `error_type`; ASC-01 a ASC-14 e HIS-01 a HIS-05 revisados; suíte com 71 casos |
 | 1.8 | 06/10/2026 | Entrega de alertas, decisões de Natã da Silva Baracho: `alert_type` com os códigos do catálogo em português (nomes antigos convertidos), severidade padrão do catálogo, listagem e rota para analisar e encerrar alertas; ALT-03, ALT-05, ALT-07, ALT-08 e BD-06 revisados; novos ALT-13 a ALT-21 e BD-19; suíte com 86 casos |
+| 1.9 | 07/10/2026 | FluxID, decisão de Natã da Silva Baracho: alerta com cilindro e lacre obrigatórios (script `003`); novos FLX-23 a FLX-25 executados num servidor PostgreSQL temporário e FLX-26 (gatilho) pendente; SYN-09 passa a citar o script `004` |
