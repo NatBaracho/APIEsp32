@@ -1,5 +1,7 @@
 # ESP32 - Como enviar dados para a API e armazenamento no SQLite
 
+> **Para quem programa o lacre:** o guia principal é o [Guia-Firmware-Lacre-IoT.md](Guia-Firmware-Lacre-IoT.md) (o que enviar, quando, o que fazer com cada resposta, fila sem rede e exemplo em C++). Este documento traz os exemplos detalhados de cada payload.
+
 ## Visão geral
 
 Este documento foi criado para orientar a pessoa que está programando o módulo ESP32 sobre quais informações devem ser enviadas para a API, para que sejam armazenadas no banco SQLite pela aplicação backend.
@@ -528,16 +530,20 @@ Se o ESP32 for enviar dados de monitoramento, o payload ideal é:
   "longitude": -39.3063666,
   "speed_kmh": 21.98,
   "battery_percent": 57.33,
-  "gsm_signal": -64
+  "gsm_signal": -64,
+  "seal_status": "LOCKED",
+  "attempt_count": 1
 }
 ```
 
-Se o ESP32 for enviar um evento de status, o payload ideal é:
+Se o ESP32 for enviar um evento de status, o payload ideal é (o `event_type` é obrigatório; sem ele, a API responde `400`):
 
 ```json
 {
-  "message_id": "MSG-000002",
-  "device_id": "DSP-000001"
+  "message_id": "EVT-000002",
+  "device_id": "DSP-000001",
+  "event_type": "seal_changed",
+  "seal_status": "BROKEN"
 }
 ```
 
