@@ -84,7 +84,7 @@ O que a Oxide faz hoje:
 - Recebe do Worker o cadastro oficial, os vínculos e o hash da chave do FluxID. O FluxID manda; o cadastro provisório local é mantido e nada é apagado.
 - Registra cada rodada do Worker em `sync_logs`.
 
-**Worker — faz hoje** (regras em [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md); teste formal da IA em 07/10/2026, sem falhas; aguarda validação)
+**Worker — faz hoje** (regras em [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md); testado sem falhas e aprovado por Natã da Silva Baracho em 07/10/2026)
 - Envia telemetria, eventos e alertas ao FluxID, cada linha numa transação, sem duplicar (`message_id`/`alert_id`).
 - Tentativas: envio inicial e mais 5, esperando 1 min, 5 min, 15 min, 1 h e 6 h; depois deixa a linha parada para o gestor (P6). FluxID fora do ar não gasta tentativa.
 - Telemetria sem GPS vai para a quarentena (P2). Evento do lacre de dispositivo sem lacre espera o vínculo (P3). Eventos sem estado de lacre vão para `eventos_dispositivo` (P4).
@@ -330,7 +330,7 @@ PATCH /api/v1/iot/alerts/ALT-000001/status   { "status": "ENCERRADO", "resolved_
 ## 1.10 Estado atual
 
 - API em funcionamento, validada pela suíte automatizada (`npm test`, 96/96) e pelo Roteiro de Teste completo no `oxide.db` real (até a versão anterior ao Worker).
-- Worker e integração com o FluxID implementados e testados pela IA em 07/10/2026 (Roteiro v1.10, sem falhas); aguardam a validação de Natã da Silva Baracho (seção 7.23).
+- Worker e integração com o FluxID implementados e testados pela IA em 07/10/2026 (Roteiro v1.10, sem falhas); aprovados por Natã da Silva Baracho em 07/10/2026 (seção 7.23).
 - Próximas entregas: API do frontend sobre o FluxID; geofence e rota; regras e alertas automáticos (incluindo comandos automáticos).
 - Pendências conhecidas: firmware do ESP32 precisa enviar `seal_status` e `attempt_count` e tratar as respostas da seção 1.5; `nodemon` com vulnerabilidade apenas em desenvolvimento.
 
@@ -626,7 +626,7 @@ O script `sql/fluxid/003_alertas_cilindro_obrigatorio.sql` preenche os alertas s
 Compilação aprovada, suíte com 87/87 em duas rodadas e teste negativo da regra de grupos. Validação registrada em [Relatorio-de-Teste-2026-10-07-00h45.md](Doc_tese/Relatorio-de-Teste-2026-10-07-00h45.md), **aprovada por Natã da Silva Baracho**.
 
 ### 7.23 Integração Oxide ⇄ FluxID: Worker, chave por hash e estruturas do frontend (07/10/2026)
-Pedido de Natã da Silva Baracho: deixar pronto tudo do lacre e da integração da API com os dois bancos, com o `FluxID_db` como banco definitivo; replicar no FluxID o que o frontend usa, integrado com a Oxide; atualizar os documentos e gerar um relatório para validação. O teste formal da IA foi adiantado para a mesma madrugada (Roteiro v1.10 completo, sem falhas); falta a validação humana.
+Pedido de Natã da Silva Baracho: deixar pronto tudo do lacre e da integração da API com os dois bancos, com o `FluxID_db` como banco definitivo; replicar no FluxID o que o frontend usa, integrado com a Oxide; atualizar os documentos e gerar um relatório para validação. O teste formal da IA foi adiantado para a mesma madrugada (Roteiro v1.10 completo, sem falhas).
 
 | Parte | O que foi feito |
 | --- | --- |
@@ -637,7 +637,7 @@ Pedido de Natã da Silva Baracho: deixar pronto tudo do lacre e da integração 
 | Oxide | Colunas `next_attempt_at`, `sync_*` nos alertas, `api_key_hash`, `fluxid_id`; tabela `sync_logs` |
 | Testes | 7 casos novos na suíte (94 no total) |
 
-Verificação técnica da IA (não substitui o teste formal): compilação; suíte 94/94 em duas rodadas e num banco criado só pelo script do `Oxidedb.md`; scripts `001` a `005` em banco novo no Docker, com nova execução sem mudança; Worker contra o FluxID do Docker, com uma cópia do `oxide.db`. Detalhes em [Relatorio-de-Teste-2026-10-07-01h30.md](Doc_tese/Relatorio-de-Teste-2026-10-07-01h30.md). **Aguardando validação de Natã da Silva Baracho.**
+Verificação técnica da IA (não substitui o teste formal): compilação; suíte 94/94 em duas rodadas e num banco criado só pelo script do `Oxidedb.md`; scripts `001` a `005` em banco novo no Docker, com nova execução sem mudança; Worker contra o FluxID do Docker, com uma cópia do `oxide.db`. Teste formal (Roteiro v1.10 completo) sem falhas. Detalhes em [Relatorio-de-Teste-2026-10-07-01h30.md](Doc_tese/Relatorio-de-Teste-2026-10-07-01h30.md). Questionário com 15/15 sim: **aprovada por Natã da Silva Baracho** em 07/10/2026.
 
 ## 9. Suíte de testes automatizados (`npm test`)
 
@@ -675,7 +675,7 @@ Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **a
 | #8 | B — Associação | Rotas `/seals`, `/cylinders` e `/assignments` (abertas e provisórias); troca com `replace`; telemetria recebe lacre e cilindro do vínculo ativo; `error_type` registrado no recebimento |
 | #12 | Alertas em português | `alert_type` com os 28 códigos do catálogo (nomes antigos convertidos); severidade padrão do catálogo; `GET /iot/alerts` com filtros; `PATCH /iot/alerts/{alert_id}/status` para analisar e encerrar, com quem e motivo |
 | #14 | Swagger em grupos | 8 grupos com explicação (Dispositivos, Telemetria, Eventos, Comandos, Alertas, Lacres, Cilindros, Vínculos), sem grupo "default"; teste que barra rota sem grupo |
-| (a enviar) | Integração Oxide ⇄ FluxID | Chave por hash; alerta volta à fila ao mudar de status; rotas `/sync/*` e grupo "Sincronização" |
+| #15 | Integração Oxide ⇄ FluxID | Chave por hash; alerta volta à fila ao mudar de status; rotas `/sync/*` e grupo "Sincronização" |
 
 ## 3.2 Oxide (`oxide.db`)
 
@@ -686,7 +686,7 @@ Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **a
 | #7 | D — Catálogo de comandos | `CHECK` do catálogo e do status em `commands`; migração de `LOCK_VALVE`/`UNLOCK_VALVE` e de pendentes desconhecidos |
 | #8 | B — Associação | Tabelas `seals`, `cylinders`, `seal_assignments` e `cylinder_assignments`, com índices de vínculo ativo único e `ON DELETE RESTRICT`; coluna `error_type` em telemetria e eventos; `Oxidedb.md` v1.5 validado |
 | #12 | Alertas em português | `alerts` com `CHECK` do catálogo em `alert_type`, colunas `resolved_by` e `resolution_note` e `CHECK` de `ENCERRADO` com data; migração automática dos tipos em inglês; `Oxidedb.md` v1.6 validado |
-| (a enviar) | Integração Oxide ⇄ FluxID | `next_attempt_at` na telemetria e nos eventos; `sync_*` nos alertas; `devices.api_key_hash`; `fluxid_id` nos vínculos; tabela `sync_logs`; `Oxidedb.md` v1.7 |
+| #15 | Integração Oxide ⇄ FluxID | `next_attempt_at` na telemetria e nos eventos; `sync_*` nos alertas; `devices.api_key_hash`; `fluxid_id` nos vínculos; tabela `sync_logs`; `Oxidedb.md` v1.7 |
 
 ## 3.3 FluxID
 
@@ -701,11 +701,11 @@ Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **a
 | #12 | Alertas em português | A Oxide já usa os mesmos códigos de alerta que o FluxID vai aceitar (P5); `resolved_by` e `resolution_note` correspondem a `alertas.encerrado_por` e ao motivo do encerramento |
 | #13 | Alerta com cilindro e lacre | Script `003`: cilindro e lacre obrigatórios em `alertas` (salvo códigos de cadastro), com preenchimento dos 10 alertas de teste pelo vínculo da data e parada segura; validado em servidor temporário |
 | #14 | Docker e dump | FluxID de análise no Docker (container `fluxid-analise`, PostGIS 18), com `001`, `002` e `003` aplicados; dump movido para `sql/fluxid/FluxID.sql` |
-| (a enviar) | Integração Oxide ⇄ FluxID | Script `004` (P1 a P8, gatilho FLX-26) e `005` (estruturas do frontend, histórico do cilindro integrado com a Oxide) |
+| #15 | Integração Oxide ⇄ FluxID | Script `004` (P1 a P8, gatilho FLX-26) e `005` (estruturas do frontend, histórico do cilindro integrado com a Oxide) |
 
 ## 3.4 Worker
 
-Implementado em 07/10/2026 (a enviar, depois da validação). O que levou até ele:
+Implementado e aprovado em 07/10/2026 (PR #15). O que levou até ele:
 
 | PR | Entrega | O que foi preparado ou feito |
 | --- | --- | --- |
@@ -715,4 +715,4 @@ Implementado em 07/10/2026 (a enviar, depois da validação). O que levou até e
 | #9 | Decisões P1 a P8 | Regras do Worker: data, quarentena, espera de vínculo, eventos do dispositivo, tipos de alerta, 5 tentativas, código do alerta e suspeita de violação |
 | #12 | Alertas em português | O tipo do alerta passa direto, sem conversão; falta mapear `resolved_by` (texto) para o usuário do FluxID |
 | #13 | Alerta com cilindro e lacre | O Worker busca o lacre e o cilindro do vínculo válido na data do alerta; sem vínculo, o alerta fica em erro na Oxide para o gestor |
-| (a enviar) | Integração Oxide ⇄ FluxID | Worker completo (`src/worker/`, `npm run worker`): envio da fila, tentativas, espera do P3, cadastro de volta com o hash da chave |
+| #15 | Integração Oxide ⇄ FluxID | Worker completo (`src/worker/`, `npm run worker`): envio da fila, tentativas, espera do P3, cadastro de volta com o hash da chave |

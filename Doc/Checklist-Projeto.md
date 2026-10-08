@@ -2,7 +2,7 @@
 
 Este documento registra o que já foi implementado e validado e o que falta para concluir o escopo planejado. Os itens de hardening estão separados das entregas do MVP.
 
-Legenda: ✅ feito e validado; ⏳ feito e testado pela IA, aguardando a validação de Natã da Silva Baracho; [ ] a fazer.
+Legenda: ✅ feito e validado; ⏳ feito, falta o passo indicado no item; [ ] a fazer.
 
 ## Arquitetura local
 
@@ -13,7 +13,7 @@ Legenda: ✅ feito e validado; ⏳ feito e testado pela IA, aguardando a valida�
 - ✅ Especificação OpenAPI e interface Swagger disponíveis.
 - ✅ Inicialização do SQLite com criação e normalização de schema.
 - ✅ Modelo de dados local documentado.
-- ⏳ Worker de sincronização Oxide ⇄ FluxID (implementado em 07/10/2026; teste formal da IA em 07/10/2026, sem falhas; aguarda a validação de Natã da Silva Baracho).
+- ✅ Worker de sincronização Oxide ⇄ FluxID (implementado em 07/10/2026; teste formal sem falhas; aprovado por Natã da Silva Baracho em 07/10/2026).
 - ⏳ PostgreSQL central (FluxID) integrado: verificado no Docker; falta aplicar os scripts no banco principal.
 
 **Status:** base local da API implementada; sincronização central permanece pendente.
@@ -34,7 +34,7 @@ Legenda: ✅ feito e validado; ⏳ feito e testado pela IA, aguardando a valida�
 
 Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se forem definidos como requisitos:
 
-- ⏳ Hash de API Keys em repouso: a chave vem do FluxID só como hash e a Oxide confere o SHA-256 (implementado em 07/10/2026; teste formal da IA em 07/10/2026, sem falhas; aguarda a validação de Natã da Silva Baracho).
+- ✅ Hash de API Keys em repouso: a chave vem do FluxID só como hash e a Oxide confere o SHA-256 (implementado em 07/10/2026; teste formal sem falhas; aprovado por Natã da Silva Baracho em 07/10/2026).
 - [ ] Rotação e revogação de chaves.
 - [ ] Rate limiting.
 - [ ] Auditoria de acesso e de alterações.
@@ -127,7 +127,7 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ `commands`
 - ✅ `alerts`
 - ✅ `seals`, `cylinders`, `seal_assignments` e `cylinder_assignments`
-- ⏳ `sync_logs` (uma linha por rodada do Worker). `sync_items` não foi criada: o estado de cada item fica na própria fila (decisão a validar).
+- ✅ `sync_logs` (uma linha por rodada do Worker). `sync_items` não foi criada: o estado de cada item fica na própria fila (decisão aprovado por Natã da Silva Baracho em 07/10/2026).
 
 ### Relacionamentos e integridade
 
@@ -176,7 +176,7 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ Entidades inexistentes (`404`), duplicidade e conflitos (`409`) validados; rotas abertas por decisão (ownership não se aplica).
 - ✅ Telemetria preenche `lacre_id`/`cilindro_id` pelo vínculo ativo; `error_type` registra dispositivo sem lacre, lacre sem cilindro e lacre aberto em trânsito.
 - ✅ OpenAPI e documentação atualizados (no Swagger, grupos Lacres, Cilindros e Vínculos desde 07/10/2026).
-- ⏳ Cópia provisória atualizada pelo cadastro do FluxID (Worker; o FluxID prevalece e nada é apagado) (implementado em 07/10/2026; teste formal da IA em 07/10/2026, sem falhas; aguarda a validação de Natã da Silva Baracho).
+- ✅ Cópia provisória atualizada pelo cadastro do FluxID (Worker; o FluxID prevalece e nada é apagado) (implementado em 07/10/2026; teste formal sem falhas; aprovado por Natã da Silva Baracho em 07/10/2026).
 
 ### 2. Histórico de associações
 
@@ -210,19 +210,19 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - [ ] Aplicar os scripts no FluxID principal e versionar o novo dump.
 - ✅ Decisões P1 a P8 do plano de integração fechadas (06/10/2026).
 - ✅ Script `sql/fluxid/003`: alerta com cilindro e lacre obrigatórios (vínculo da data do alerta), validado em servidor temporário (07/10/2026).
-- ⏳ Gatilho no FluxID que confere se o par lacre + cilindro do alerta tinha vínculo naquela data (script `004`, implementado em 07/10/2026; teste formal da IA em 07/10/2026, sem falhas; aguarda a validação de Natã da Silva Baracho).
-- ⏳ Script `sql/fluxid/004`: data gravada na chegada (P1), lacre e cilindro na telemetria, quarentena da telemetria sem GPS (P2), tabela de eventos do dispositivo (P4), tipos de alerta do catálogo em `alertas.tipo` (P5) e colunas da Oxide nos alertas (implementado em 07/10/2026; teste formal da IA em 07/10/2026, sem falhas; aguarda a validação de Natã da Silva Baracho).
-- ⏳ Script `sql/fluxid/005`: estruturas do frontend (tipos e identificadores de cilindro, laudo e retificação do teste hidrostático, histórico imutável do cilindro integrado com a Oxide) (implementado em 07/10/2026; teste formal da IA em 07/10/2026, sem falhas; aguarda a validação de Natã da Silva Baracho).
+- ✅ Gatilho no FluxID que confere se o par lacre + cilindro do alerta tinha vínculo naquela data (script `004`, implementado em 07/10/2026; teste formal sem falhas; aprovado por Natã da Silva Baracho em 07/10/2026).
+- ✅ Script `sql/fluxid/004`: data gravada na chegada (P1), lacre e cilindro na telemetria, quarentena da telemetria sem GPS (P2), tabela de eventos do dispositivo (P4), tipos de alerta do catálogo em `alertas.tipo` (P5) e colunas da Oxide nos alertas (implementado em 07/10/2026; teste formal sem falhas; aprovado por Natã da Silva Baracho em 07/10/2026).
+- ✅ Script `sql/fluxid/005`: estruturas do frontend (tipos e identificadores de cilindro, laudo e retificação do teste hidrostático, histórico imutável do cilindro integrado com a Oxide) (implementado em 07/10/2026; teste formal sem falhas; aprovado por Natã da Silva Baracho em 07/10/2026).
 - [ ] Decidir com o frontend: situação de estoque × `cilindros.status`, classificação dos tipos dos cilindros já cadastrados, login/sessões/convites e papéis por organização.
-- ⏳ Regras do Worker: evento sem lacre espera o vínculo (P3), código do alerta = `alert_id` da Oxide (P7) e lacre só marcado como `SUSPEITA_VIOLACAO`, com confirmação do gestor (P8) (implementado em 07/10/2026; teste formal da IA em 07/10/2026, sem falhas; aguarda a validação de Natã da Silva Baracho).
-- ⏳ Oxide guarda `api_key_hash` e compara o SHA-256 da `X-API-Key` (implementado em 07/10/2026; teste formal da IA em 07/10/2026, sem falhas; aguarda a validação de Natã da Silva Baracho).
-- ⏳ Configuração segura de conexão: `FLUXID_DATABASE_URL` no `.env` (fora do git), modelo em `.env.example` sem senha.
-- ⏳ Leitura de pendências e envio ao PostgreSQL (implementado em 07/10/2026; teste formal da IA em 07/10/2026, sem falhas; aguarda a validação de Natã da Silva Baracho).
-- ⏳ Estados de sincronização na própria fila (`next_attempt_at`; `sync_*` nos alertas) e `sync_logs`.
-- ⏳ Transações, idempotência, retry (envio inicial + 5 tentativas: 1 min, 5 min, 15 min, 1 h e 6 h; depois o gestor resolve, P6) e recuperação sem perda de dados (implementado em 07/10/2026; teste formal da IA em 07/10/2026, sem falhas; aguarda a validação de Natã da Silva Baracho).
-- ⏳ Inicialização (devolve à fila o que ficou pela metade), encerramento ao fim da rodada (Ctrl+C) e `sync_logs`.
-- ⏳ Teste formal de sucesso, repetição, indisponibilidade do PostgreSQL e recuperação: Roteiro v1.10 (seção 5.10) executado pela IA em 07/10/2026, sem falhas; aguarda a validação.
-- ⏳ Configuração, execução e recuperação de falhas documentadas (`Integracao-Oxide-FluxID.md` v2.0, seção 6; `Desenvolvimento.md` 1.8).
+- ✅ Regras do Worker: evento sem lacre espera o vínculo (P3), código do alerta = `alert_id` da Oxide (P7) e lacre só marcado como `SUSPEITA_VIOLACAO`, com confirmação do gestor (P8) (implementado em 07/10/2026; teste formal sem falhas; aprovado por Natã da Silva Baracho em 07/10/2026).
+- ✅ Oxide guarda `api_key_hash` e compara o SHA-256 da `X-API-Key` (implementado em 07/10/2026; teste formal sem falhas; aprovado por Natã da Silva Baracho em 07/10/2026).
+- ✅ Configuração segura de conexão: `FLUXID_DATABASE_URL` no `.env` (fora do git), modelo em `.env.example` sem senha.
+- ✅ Leitura de pendências e envio ao PostgreSQL (implementado em 07/10/2026; teste formal sem falhas; aprovado por Natã da Silva Baracho em 07/10/2026).
+- ✅ Estados de sincronização na própria fila (`next_attempt_at`; `sync_*` nos alertas) e `sync_logs`.
+- ✅ Transações, idempotência, retry (envio inicial + 5 tentativas: 1 min, 5 min, 15 min, 1 h e 6 h; depois o gestor resolve, P6) e recuperação sem perda de dados (implementado em 07/10/2026; teste formal sem falhas; aprovado por Natã da Silva Baracho em 07/10/2026).
+- ✅ Inicialização (devolve à fila o que ficou pela metade), encerramento ao fim da rodada (Ctrl+C) e `sync_logs`.
+- ✅ Teste formal de sucesso, repetição, indisponibilidade do PostgreSQL e recuperação: Roteiro v1.10 (seção 5.10) executado pela IA em 07/10/2026, sem falhas; aprovado por Natã da Silva Baracho em 07/10/2026.
+- ✅ Configuração, execução e recuperação de falhas documentadas (`Integracao-Oxide-FluxID.md` v2.0, seção 6; `Desenvolvimento.md` 1.8).
 - ✅ FluxID de análise no Docker (container `fluxid-analise`).
 
 ## Fase de operação e conclusão
@@ -249,11 +249,13 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 | Geofence | Pendente |
 | Comandos automáticos | Pendente |
 | Decisões de integração (P1 a P8) | Fechadas |
-| Worker e sincronização PostgreSQL | Implementados e testados pela IA (07/10/2026, sem falhas); aguardando validação |
-| Estruturas do frontend no FluxID | Proposta (script `005`); a validar com o frontend |
+| Worker e sincronização PostgreSQL | Implementados, testados (sem falhas) e aprovado por Natã da Silva Baracho em 07/10/2026 |
+| Estruturas do frontend no FluxID | Script `005` aprovado por Natã da Silva Baracho em 07/10/2026 como proposta; F1 a F4 a decidir com o frontend |
 | API do frontend sobre o FluxID | Contrato proposto (`Contrato-API-Frontend.md` v0.1); implementação pendente |
 | Dashboard com mapa | Pendente (requisito definido) |
 | Hardening adicional de segurança | Pendente, fora do MVP atual |
 
-**Conclusão:** a API local atual está operacional para os fluxos implementados, e a integração com o FluxID foi implementada e testada pela IA em 07/10/2026, aguardando a validação. O projeto completo ainda não está concluído: faltam a API do frontend, as próximas entregas do roadmap e a fase de operação.
+**Conclusão:** a API local atual está operacional para os fluxos implementados, e a integração com o FluxID foi implementada, testada e aprovado por Natã da Silva Baracho em 07/10/2026. O projeto completo ainda não está concluído: faltam a API do frontend, as próximas entregas do roadmap e a fase de operação.
 Atualização de 06/10/2026 (decisões P1 a P8 e dashboard com mapa) conferida por questionário (3/3 sim) e **aprovada por Natã da Silva Baracho**.
+
+Atualização de 07/10/2026 (integração Oxide ⇄ FluxID, scripts `004` e `005`, contrato do frontend) conferida por questionário (15/15 sim) e **aprovada por Natã da Silva Baracho**.

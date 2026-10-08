@@ -1,10 +1,10 @@
 # Integração Oxide ⇄ FluxID
 
-**Versão:** 2.0 — 07/10/2026 (Worker implementado e testado pela IA; aguardando a validação de Natã da Silva Baracho)
+**Versão:** 2.0 — 07/10/2026 (Worker implementado, testado e aprovado por Natã da Silva Baracho em 07/10/2026)
 **Público:** equipe do projeto, quem mantém a API Oxide e quem vai construir a API do frontend sobre o FluxID.
 **Base:** API Oxide, `oxide.db` e dump `sql/fluxid/FluxID.sql` de 23/09/2026 com os scripts `sql/fluxid/001` a `005`.
 
-Este documento diz **como cada dado da Oxide vira um registro do FluxID**, como o **cadastro oficial do FluxID volta para a Oxide** e quais **decisões** orientam o Worker (seção 5). A versão 1.1 era só o plano; desde a 2.0, tudo o que está aqui foi implementado (`src/worker/` e scripts `004` e `005`). A verificação técnica e o teste formal da IA (Roteiro v1.10, sem falhas) estão no relatório `Doc/Doc_tese/Relatorio-de-Teste-2026-10-07-01h30.md`; falta a validação de Natã da Silva Baracho.
+Este documento diz **como cada dado da Oxide vira um registro do FluxID**, como o **cadastro oficial do FluxID volta para a Oxide** e quais **decisões** orientam o Worker (seção 5). A versão 1.1 era só o plano; desde a 2.0, tudo o que está aqui foi implementado (`src/worker/` e scripts `004` e `005`). A verificação técnica e o teste formal da IA (Roteiro v1.10, sem falhas) estão no relatório `Doc/Doc_tese/Relatorio-de-Teste-2026-10-07-01h30.md`; questionário com 15/15 sim, aprovado por Natã da Silva Baracho em 07/10/2026.
 
 ---
 
@@ -144,7 +144,7 @@ Decididas por **Natã da Silva Baracho**. Registro conferido por questionário (
 
 **Efeito aceito (P1 + P6):** um dado que demorou a chegar ao FluxID fica com a hora em que chegou, não com a hora da leitura.
 
-### 5.2 Escolhas feitas na implementação (a validar)
+### 5.2 Escolhas feitas na implementação (aprovado por Natã da Silva Baracho em 07/10/2026)
 
 | # | Escolha | Motivo |
 | --- | --- | --- |
@@ -181,5 +181,5 @@ Decididas por **Natã da Silva Baracho**. Registro conferido por questionário (
 2. ✅ Decisões P1 a P8 fechadas e implementadas.
 3. ✅ Worker, chave por hash e cadastro de volta implementados. Verificação técnica feita pela IA no Docker.
 4. ✅ Teste formal da IA (Roteiro v1.10, seção 5.10) em 07/10/2026, sem falhas.
-5. ⏳ Validação de Natã da Silva Baracho (questionário do relatório).
+5. ✅ Validação de Natã da Silva Baracho: questionário 15/15 sim (07/10/2026).
 6. ⏳ Aplicar `001` a `005` no `FluxID_db` principal e gerar o novo dump.

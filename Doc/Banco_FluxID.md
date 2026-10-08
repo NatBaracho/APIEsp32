@@ -395,7 +395,7 @@ Resultado no servidor temporário (dump + `001` + `002`): os 10 alertas de teste
 
 ### 17.6 Integração com a Oxide — `004_integracao_oxide.sql` (07/10/2026)
 
-Aplica no banco as decisões P1 a P8 (`Integracao-Oxide-FluxID.md`, seção 5) e o gatilho FLX-26. Testado pela IA no Docker em 07/10/2026 (Roteiro v1.10, sem falhas). **Aguardando a validação de Natã da Silva Baracho.**
+Aplica no banco as decisões P1 a P8 (`Integracao-Oxide-FluxID.md`, seção 5) e o gatilho FLX-26. Testado pela IA no Docker em 07/10/2026 (Roteiro v1.10, sem falhas). **Aprovado por Natã da Silva Baracho em 07/10/2026.**
 
 | Passo | O que muda | Decisão |
 | --- | --- | --- |
@@ -412,7 +412,7 @@ Resultado no Docker (dump + `001` a `004`): sem erros; na segunda execução, na
 
 ### 17.7 Estruturas do frontend — `005_estruturas_do_frontend.sql` (07/10/2026)
 
-O FluxID_db é o banco definitivo (decisão de Natã da Silva Baracho, 07/10/2026). O frontend (repositório `fluxid_integra2026`) foi feito sobre um banco de teste no Supabase, com tabelas que o FluxID não tinha. O `005` replica no FluxID, no padrão dele (português), o que as telas de cilindros do frontend (etapa 006) usam e que não deixa dúvida. **Proposta para validar com o responsável pelo frontend.**
+O FluxID_db é o banco definitivo (decisão de Natã da Silva Baracho, 07/10/2026). O frontend (repositório `fluxid_integra2026`) foi feito sobre um banco de teste no Supabase, com tabelas que o FluxID não tinha. O `005` replica no FluxID, no padrão dele (português), o que as telas de cilindros do frontend (etapa 006) usam e que não deixa dúvida. **Aprovado por Natã da Silva Baracho em 07/10/2026 como proposta**, para confirmar com o responsável pelo frontend (pontos de 1 a 4 abaixo).
 
 | Frontend (Supabase) | FluxID (`005`) | Observação |
 | --- | --- | --- |
