@@ -8,6 +8,7 @@ Este documento tem três partes:
 
 Documentos relacionados:
 
+- [Guia-Firmware-Lacre-IoT.md](Guia-Firmware-Lacre-IoT.md): guia principal para quem programa o lacre (o que enviar, quando, respostas, fila sem rede, C++ e lista de conferência).
 - [ESP32-envio-de-dados.md](ESP32-envio-de-dados.md): payloads de exemplo e código C++ para o firmware.
 - [Regras-de-Negocio-e-Banco-Oxide.md](Regras-de-Negocio-e-Banco-Oxide.md): regras detalhadas e schema do SQLite.
 - [Oxidedb.md](Oxidedb.md): script de criação do banco.

@@ -61,14 +61,15 @@ O `npm test` sobe a própria instância da API; pare o `npm start` antes de exec
 
 A proposta da API do frontend sobre o FluxID (ainda não implementada) tem uma página própria: `http://localhost:3000/api-docs-fluxid` ([contrato](Doc/Contrato-API-Frontend.md)).
 
-
 Com o servidor ativo, acesse o Swagger UI em:
 
 ```text
 http://localhost:3000/api-docs
 ```
 
-Use **Try it out** para executar as requisições. Para telemetrias e eventos, clique em **Authorize** e informe uma chave cadastrada no header `X-API-Key`.
+Use **Try it out** para executar as requisições. Para telemetria, eventos, alertas e comandos, clique em **Authorize** e informe a chave do dispositivo no header `X-API-Key`.
+
+**Quem programa o lacre (ESP32)** deve começar pelo [Guia do firmware do lacre IoT](Doc/Guia-Firmware-Lacre-IoT.md).
 
 ## Endpoints principais
 
@@ -86,9 +87,15 @@ Use **Try it out** para executar as requisições. Para telemetrias e eventos, c
 | `GET` | `/api/v1/iot/alerts` | Listar alertas (filtros `status` e `device_id`; aberta e provisória) |
 | `PATCH` | `/api/v1/iot/alerts/{alert_id}/status` | Analisar ou encerrar alerta (aberta e provisória) |
 | `GET`/`POST` | `/api/v1/seals` | Listar e cadastrar lacres (provisório) |
-| `GET`/`POST` | `/api/v1/cylinders` | Listar e cadastrar cilindros (provisório) |
-| `GET`/`POST` | `/api/v1/assignments/device-seal` | Histórico e vínculo dispositivo ↔ lacre |
-| `GET`/`POST` | `/api/v1/assignments/seal-cylinder` | Histórico e vínculo lacre ↔ cilindro |
+| `GET` | `/api/v1/seals/:sealCode` | Buscar lacre |
+| `POST` | `/api/v1/seals/:sealCode/status` | Mudar o estado do lacre (`INSTALADO` só pelo vínculo) |
+| `GET`/`POST` | `/api/v1/cylinders` | Listar e cadastrar cilindros (provisório; a série pode repetir, o código não) |
+| `GET` | `/api/v1/cylinders/:cylinderCode` | Buscar cilindro |
+| `POST` | `/api/v1/cylinders/:cylinderCode/status` | Mudar o estado do cilindro |
+| `GET`/`POST` | `/api/v1/assignments/device-seal` | Histórico e vínculo dispositivo ↔ lacre (`replace: true` para trocar) |
+| `POST` | `/api/v1/assignments/device-seal/:id/end` | Encerrar vínculo dispositivo ↔ lacre |
+| `GET`/`POST` | `/api/v1/assignments/seal-cylinder` | Histórico e vínculo lacre ↔ cilindro (`replace: true` para trocar) |
+| `POST` | `/api/v1/assignments/seal-cylinder/:id/end` | Encerrar vínculo lacre ↔ cilindro |
 | `GET` | `/api/v1/sync/status` | Situação das filas do Worker e últimas rodadas (aberta e provisória) |
 | `GET` | `/api/v1/sync/problems?queue=` | Itens com problema na sincronização (aberta e provisória) |
 | `POST` | `/api/v1/sync/retry` | Devolver um item parado à fila do Worker (aberta e provisória) |
@@ -116,6 +123,7 @@ A tabela `alerts` armazena alertas associados a dispositivos. `POST /api/v1/iot/
 - [Checklist de conclusão do projeto](Doc/Checklist-Projeto.md)
 - [Regras de negócio da API e bancos FluxID/Oxide](Doc/Regras-de-Negocio-e-Banco-Oxide.md)
 - [Desenvolvimento: como a API funciona (guia para o ESP32) e histórico de testes](Doc/Desenvolvimento.md)
+- [Guia do firmware do lacre IoT](Doc/Guia-Firmware-Lacre-IoT.md) (para quem programa o ESP32)
 - [Integração e payloads do ESP32](Doc/ESP32-envio-de-dados.md)
 - [Especificação do banco SQLite Oxide](Doc/Oxidedb.md)
 - [Banco PostgreSQL FluxID](Doc/Banco_FluxID.md) e scripts de ajuste em [`sql/fluxid/`](sql/fluxid)
