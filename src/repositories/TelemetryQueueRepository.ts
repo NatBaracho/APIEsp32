@@ -37,7 +37,8 @@ export class TelemetryQueueRepository {
         device_attempt_count,
         error_type,
         status,
-        attempt_count
+        attempt_count,
+        received_at
       )
       VALUES (
         ?,
@@ -55,7 +56,8 @@ export class TelemetryQueueRepository {
         ?,
         ?,
         ?,
-        ?
+        ?,
+        datetime('now')
       )
     `).run(
       telemetry.message_id,

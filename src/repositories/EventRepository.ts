@@ -21,7 +21,8 @@ export class EventRepository {
         device_attempt_count,
         error_type,
         status,
-        attempt_count
+        attempt_count,
+        received_at
       )
       VALUES (
         ?,
@@ -32,7 +33,8 @@ export class EventRepository {
         ?,
         ?,
         ?,
-        ?
+        ?,
+        datetime('now')
       )
     `).run(
       event.message_id,

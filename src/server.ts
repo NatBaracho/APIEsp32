@@ -11,6 +11,8 @@ import swaggerUi from "swagger-ui-express";
 import openApiSpec from "./docs/openapi";
 import openApiFluxidSpec from "./docs/openapiFluxid";
 import { errorHandler } from "./Middleware/Errohandler";
+import appRoutes from "./app/router";
+import { saude } from "./saude";
 
 
 
@@ -18,16 +20,17 @@ import { errorHandler } from "./Middleware/Errohandler";
 const app = express();
 const API_PREFIX = "/api/v1";
 
+// API do frontend: CORS e limite de corpo próprios, antes do express.json geral
+app.use(`${API_PREFIX}/app`, appRoutes);
 app.use(express.json());
 // serveFiles gera os arquivos de cada página separadamente (com serve, a
 // segunda página sobrescreveria a primeira)
 app.use("/api-docs", swaggerUi.serveFiles(openApiSpec), swaggerUi.setup(openApiSpec));
-// Proposta da API do frontend sobre o FluxID (Doc/Contrato-API-Frontend.md);
-// só documentação, nenhuma rota /api/v1/app existe ainda
+// API do frontend sobre o FluxID (Doc/Contrato-API-Frontend.md), em /api/v1/app
 app.use(
   "/api-docs-fluxid",
   swaggerUi.serveFiles(openApiFluxidSpec),
-  swaggerUi.setup(openApiFluxidSpec, { customSiteTitle: "API FluxID (proposta)" })
+  swaggerUi.setup(openApiFluxidSpec, { customSiteTitle: "API FluxID (frontend)" })
 );
 app.use(`${API_PREFIX}/iot`, telemetryRoutes);
 app.use(`${API_PREFIX}/iot`, eventRoutes);
@@ -65,6 +68,13 @@ try {
 
 app.get("/", (req, res) => {
     res.send("API ESP32 Online");
+});
+
+// Situação da API, da Oxide, do FluxID e do Worker (monitoramento)
+app.get("/health", (req, res) => {
+    saude()
+      .then(resultado => res.status(resultado.status === "OK" ? 200 : 503).json(resultado))
+      .catch(() => res.status(503).json({ status: "FALHOU" }));
 });
 
 app.use(errorHandler);

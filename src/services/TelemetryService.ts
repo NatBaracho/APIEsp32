@@ -2,6 +2,7 @@ import { Telemetry } from "../models/Telemetry";
 import { DeviceRepository } from "../repositories/DeviceRepository";
 import { AssignmentService } from "./AssignmentService";
 import { TelemetryQueueRepository } from "../repositories/TelemetryQueueRepository";
+import { aposTelemetria } from "../regras/recepcao";
 
 export type CreateTelemetryResult =
   | "created"
@@ -75,6 +76,8 @@ export class TelemetryService {
         "📍 Posição repetida. Apenas atualizando horário."
       );
 
+      aposTelemetria(telemetry, null);
+
       return "position_repeated";
 
     }
@@ -96,6 +99,9 @@ export class TelemetryService {
       "Telemetria salva:",
       telemetry.message_id
     );
+
+    // Regras automáticas (bateria, GSM, lacre aberto em trânsito)
+    aposTelemetria(telemetry, situation.error_type);
 
     return "created";
 

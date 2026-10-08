@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import fs from "fs";
 import path from "path";
 import db from "../database/connection";
@@ -7,8 +8,7 @@ import { createFluxidPool } from "../worker/fluxid";
 import { runCycle } from "../worker/runner";
 import { Ambiente } from "./ambiente";
 import {
-  CLIENTE, cadastroEmMassa, cadastroUnitario, concluirEntrega, distanciaMetros,
-  iniciarEntrega, lerCsv, reimportarMassa, tentar
+  CLIENTE, cadastroEmMassa, cadastroUnitario, distanciaMetros, lerCsv, prepararLogin, reimportarMassa, tentar
 } from "./operador";
 import { Registro } from "./registro";
 
@@ -39,6 +39,27 @@ export async function executar(ambiente: Ambiente, projeto: string): Promise<num
   const linhas = async (sql: string, valores: unknown[] = []): Promise<any[]> => (await fluxid.query(sql, valores)).rows;
   const oxide = <T>(sql: string, ...valores: unknown[]): T => db.prepare(sql).get(...valores) as T;
   const worker = async (cadastro = false) => runCycle(fluxid, { batchSize: 500, withCadastro: cadastro });
+  // API do frontend (/api/v1/app), usada pelo operador da simulação
+  let token = "";
+  const app = async (funcao: string, corpo: Record<string, unknown>): Promise<Resposta> => {
+    const res = await fetch(`${base}/app/${funcao}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify(corpo)
+    });
+    return { status: res.status, json: await res.json().catch(() => null) };
+  };
+  // Trajeto planejado: depósito → três pontos → cliente
+  const deposito = { latitude: -7.2305, longitude: -39.3150 };
+  const trajeto = [
+    { latitude: -7.2250, longitude: -39.3120 },
+    { latitude: -7.2180, longitude: -39.3090 },
+    { latitude: -7.2120, longitude: -39.3070 }
+  ];
+  const alertasAutomaticos = async (cilindroId: string): Promise<any[]> =>
+    ((await app("query-alerts", { operation: "list", organization_id: orgId, cylinder_id: cilindroId, limit: 100 })).json?.items ?? [])
+      .filter((a: any) => String(a.code).startsWith("AUT-"));
+  let orgId = "";
 
   try {
     // ------------------------------------------------------------------ 0
@@ -63,6 +84,15 @@ export async function executar(ambiente: Ambiente, projeto: string): Promise<num
     r.conferir("Rota (entrega) até o endereço do cliente", "PENDENTE com 1 cilindro", `${entrega?.status} com ${entrega?.itens} cilindro`, entrega?.status === "PENDENTE" && entrega?.itens === "1");
     const lacreInstalado = await umValor<{ status: string }>("SELECT status FROM lacres WHERE id = $1", [p.lacre.id]);
     r.conferir("Lacre no cilindro", "INSTALADO", lacreInstalado?.status ?? "?", lacreInstalado?.status === "INSTALADO");
+    orgId = cad.organizacaoId;
+    const senhaRodada = `Sim-${rodada}-${randomBytes(9).toString("base64url")}`;
+    const email = await prepararLogin(fluxid, cad, senhaRodada);
+    const entrada = await app("session-login", { email, password: senhaRodada });
+    token = entrada.json?.session?.access_token ?? "";
+    r.conferir("Operador entra pela API do frontend (session-login)", "200 AUTHENTICATED", `${entrada.status} ${entrada.json?.code}`, entrada.status === 200 && Boolean(token));
+    const pontosRota = [deposito, ...trajeto, { latitude: CLIENTE.latitude, longitude: CLIENTE.longitude }];
+    const rota = await app("manage-deliveries", { operation: "set_route", organization_id: orgId, delivery_id: cad.entregaId, points: pontosRota, margin_meters: 50 });
+    r.conferir("Rota até o cliente (manage-deliveries set_route)", `SAVED, ${pontosRota.length} pontos, margem de 50 m`, `${rota.status} ${rota.json?.code}`, rota.json?.code === "SAVED");
 
     // ------------------------------------------------------------------ 2
     r.etapa("2. Operador: erros de cadastro (o banco recusa)");
@@ -117,7 +147,6 @@ export async function executar(ambiente: Ambiente, projeto: string): Promise<num
 
     // ------------------------------------------------------------------ 5
     r.etapa("5. Lacre ativo no depósito");
-    const deposito = { latitude: -7.2305, longitude: -39.3150 };
     const ativo = await api("GET", `/devices/${p.dispositivo.codigo}`);
     r.conferir("Dispositivo ativo", "active = 1", `active = ${ativo.json?.active}`, ativo.json?.active === 1);
     const t1 = await api("POST", "/iot/telemetries", {
@@ -126,16 +155,12 @@ export async function executar(ambiente: Ambiente, projeto: string): Promise<num
     r.conferir("Primeira posição (lacre fechado)", "202", String(t1.status), t1.status === 202);
 
     // ------------------------------------------------------------------ 6
-    r.etapa("6. Rota: cilindro sai para o cliente (lacre sempre fechado)");
-    await iniciarEntrega(fluxid, cad);
+    r.etapa("6. Rota: cilindro sai para o cliente (detecção automática de rota e de lacre aberto)");
+    const saida = await app("manage-deliveries", { operation: "start", organization_id: orgId, delivery_id: cad.entregaId });
+    r.conferir("Saída da entrega pela API do frontend (start)", "STARTED", `${saida.status} ${saida.json?.code}`, saida.json?.code === "STARTED");
     await worker(true);
     const emTransito = oxide<{ status: string }>("SELECT status FROM cylinders WHERE cylinder_code = ?", p.cilindro.codigo);
     r.conferir("Cilindro em trânsito na Oxide", "EM_TRANSITO", emTransito?.status ?? "?", emTransito?.status === "EM_TRANSITO");
-    const trajeto = [
-      { latitude: -7.2250, longitude: -39.3120 },
-      { latitude: -7.2180, longitude: -39.3090 },
-      { latitude: -7.2120, longitude: -39.3070 }
-    ];
     for (const [i, ponto] of trajeto.entries()) {
       const t = await api("POST", "/iot/telemetries", {
         message_id: msg(), device_id: p.dispositivo.codigo, ...ponto, speed_kmh: 40, battery_percent: 95 - i, gsm_signal: -65, seal_status: "LOCKED"
@@ -160,6 +185,8 @@ export async function executar(ambiente: Ambiente, projeto: string): Promise<num
     const erroTransito = oxide<{ error_type: string }>("SELECT error_type FROM events WHERE device_id = ? ORDER BY id DESC LIMIT 1", p.dispositivo.codigo);
     r.conferir("Lacre aberto em trânsito (detectado pela API)", "202 e error_type LACRE_ABERTO_EM_TRANSITO",
       `${abertura.status} e ${erroTransito?.error_type}`, abertura.status === 202 && erroTransito?.error_type === "LACRE_ABERTO_EM_TRANSITO");
+    const travar = oxide<{ command_id: string }>("SELECT command_id FROM commands WHERE device_id = ? AND command_type = 'TRAVAR_VALVULA' AND status = 'PENDENTE'", p.dispositivo.codigo);
+    r.conferir("Travamento automático da válvula", "comando TRAVAR_VALVULA pendente", travar?.command_id ?? "nenhum", Boolean(travar));
     const foraDaRota = { latitude: -7.2160, longitude: -39.2950 };
     const tRota = await api("POST", "/iot/telemetries", { message_id: msg(), device_id: p.dispositivo.codigo, ...foraDaRota, speed_kmh: 35, seal_status: "UNLOCKED" }, p.dispositivo.chave);
     r.conferir("Posição fora da rota", "202", `${tRota.status} (a ${Math.round(distanciaMetros(foraDaRota, trajeto[1]!))} m do trajeto)`, tRota.status === 202);
@@ -167,18 +194,24 @@ export async function executar(ambiente: Ambiente, projeto: string): Promise<num
     // Alertas que o lacre (ESP32) envia durante o trajeto
     const alerta = async (tipo: string, titulo: string, chave = p.dispositivo.chave, dispositivo = p.dispositivo.codigo): Promise<Resposta> =>
       api("POST", "/iot/alerts", { alert_id: `ALT-S${rodada}-${String(++seq).padStart(3, "0")}`, device_id: dispositivo, alert_type: tipo, title: titulo }, chave);
-    for (const [tipo, titulo] of [
-      ["GPS_SEM_SINAL", "GPS sem sinal no trajeto"],
-      ["LACRE_ABERTO_EM_TRANSITO", "Lacre aberto durante o transporte"],
-      ["SAIDA_ROTA", "Saiu da rota planejada (enviado pelo lacre simulado)"]
-    ] as const) {
-      const a = await alerta(tipo, titulo);
-      r.conferir(`Alerta ${tipo}`, "201", `${a.status} (${a.json?.alert?.severity})`, a.status === 201);
-    }
+    const gps = await alerta("GPS_SEM_SINAL", "GPS sem sinal no trajeto");
+    r.conferir("Alerta GPS_SEM_SINAL (enviado pelo lacre)", "201", `${gps.status} (${gps.json?.alert?.severity})`, gps.status === 201);
+
+    // O Worker envia as posições e roda as regras automáticas
+    await worker(false);
+    const automaticos6 = await alertasAutomaticos(p.cilindro.id);
+    const abertoAuto = automaticos6.find(a => a.type === "LACRE_ABERTO_EM_TRANSITO");
+    const rotaAuto = automaticos6.find(a => a.type === "SAIDA_ROTA");
+    r.conferir("Alerta automático LACRE_ABERTO_EM_TRANSITO no FluxID", "CRITICA, com lacre e cilindro",
+      abertoAuto ? `${abertoAuto.code} ${abertoAuto.severity}; ${abertoAuto.seal?.code} / ${abertoAuto.cylinder?.code}` : "não criado",
+      abertoAuto?.severity === "CRITICA" && abertoAuto?.seal?.code === p.lacre.codigo);
+    r.conferir("Alerta automático SAIDA_ROTA no FluxID (margem de 50 m)", "ALTA", rotaAuto ? `${rotaAuto.code}: ${rotaAuto.description}` : "não criado", rotaAuto?.severity === "ALTA");
 
     // ------------------------------------------------------------------ 7
-    r.etapa("7. Chegada ao cliente e geocerca de 10 m");
-    await concluirEntrega(fluxid, cad);
+    r.etapa("7. Chegada ao cliente e geocerca de 10 m (detecção automática)");
+    const chegada = await app("manage-deliveries", { operation: "finish", organization_id: orgId, delivery_id: cad.entregaId });
+    r.conferir("Entrega concluída pela API do frontend (finish: custódia no endereço)", "FINISHED", `${chegada.status} ${chegada.json?.code}`, chegada.json?.code === "FINISHED");
+    await new Promise(resolve => setTimeout(resolve, 1100));
     await worker(true);
     const comCliente = oxide<{ status: string }>("SELECT status FROM cylinders WHERE cylinder_code = ?", p.cilindro.codigo);
     r.conferir("Cilindro com o cliente na Oxide", "COM_CLIENTE", comCliente?.status ?? "?", comCliente?.status === "COM_CLIENTE");
@@ -190,8 +223,9 @@ export async function executar(ambiente: Ambiente, projeto: string): Promise<num
     const tFora = await api("POST", "/iot/telemetries", { message_id: msg(), device_id: p.dispositivo.codigo, ...fora, speed_kmh: 5, seal_status: "LOCKED" }, p.dispositivo.chave);
     const mFora = distanciaMetros(fora, CLIENTE);
     r.conferir("Posição fora da geocerca", `202 e mais de ${CLIENTE.raio} m`, `${tFora.status} a ${mFora.toFixed(1)} m`, tFora.status === 202 && mFora > CLIENTE.raio);
-    const aGeo = await alerta("SAIDA_GEOCERCA", "Saiu do raio de 10 m do cliente (enviado pelo lacre simulado)");
-    r.conferir("Alerta SAIDA_GEOCERCA", "201", `${aGeo.status} (${aGeo.json?.alert?.severity})`, aGeo.status === 201);
+    await worker(false);
+    const geoAuto = (await alertasAutomaticos(p.cilindro.id)).find(a => a.type === "SAIDA_GEOCERCA");
+    r.conferir("Alerta automático SAIDA_GEOCERCA no FluxID", "ALTA", geoAuto ? `${geoAuto.code}: ${geoAuto.description}` : "não criado", geoAuto?.severity === "ALTA");
 
     // ------------------------------------------------------------------ 8
     r.etapa("8. Violação e erros do dispositivo");
@@ -271,19 +305,25 @@ export async function executar(ambiente: Ambiente, projeto: string): Promise<num
     r.conferir("Gestor manda tentar de novo (POST /sync/retry)", "200", String(reenviar.status), reenviar.status === 200);
 
     // ------------------------------------------------------------------ 11
-    r.etapa("11. Gestor analisa e encerra o alerta de violação");
+    r.etapa("11. Gestor trata o alerta de violação pela API do frontend (D5)");
     const idViolacao = aViolacao.json?.alert?.alert_id as string;
-    const analise = await api("PATCH", `/iot/alerts/${idViolacao}/status`, { status: "EM_ANALISE" });
-    const fecha = await api("PATCH", `/iot/alerts/${idViolacao}/status`, { status: "ENCERRADO", resolved_by: "Gestor da simulação", resolution_note: "Lacre substituído e cilindro conferido no cliente" });
+    const analise = await app("manage-alerts", { operation: "analyze", organization_id: orgId, alert_id: idViolacao });
+    const fecha = await app("manage-alerts", { operation: "close", organization_id: orgId, alert_id: idViolacao, resolution_note: "Lacre substituído e cilindro conferido no cliente" });
+    const fechado = await umValor<{ status: string; encerrado_por_nome: string; tratado_no_fluxid: boolean }>(
+      "SELECT status, encerrado_por_nome, tratado_no_fluxid FROM alertas WHERE codigo = $1", [idViolacao]);
+    r.conferir("Encerramento no FluxID com o nome de quem encerrou", "EM_ANALISE, depois ENCERRADO",
+      `${analise.json?.alert?.status}, ${fechado?.status} por ${fechado?.encerrado_por_nome}`,
+      analise.json?.alert?.status === "EM_ANALISE" && fecha.json?.alert?.status === "ENCERRADO" && fechado?.tratado_no_fluxid === true);
     await worker(false);
-    const fechado = await umValor<{ status: string; encerrado_por_nome: string }>("SELECT status, encerrado_por_nome FROM alertas WHERE codigo = $1", [idViolacao]);
-    r.conferir("Encerramento chega ao FluxID", "200, 200 e ENCERRADO", `${analise.status}, ${fecha.status} e ${fechado?.status} por ${fechado?.encerrado_por_nome}`,
-      analise.status === 200 && fecha.status === 200 && fechado?.status === "ENCERRADO");
+    const naOxide = oxide<{ status: string }>("SELECT status FROM alerts WHERE alert_id = ?", idViolacao);
+    r.conferir("Worker espelha o encerramento na Oxide", "ENCERRADO", naOxide?.status ?? "?", naOxide?.status === "ENCERRADO");
+    const violacao2 = await app("manage-seals", { operation: "confirm_violation", organization_id: orgId, seal_id: p.lacre.id, decision: "confirm", justification: "Rompimento confirmado na vistoria" });
+    r.conferir("Gestor confirma a violação (P8)", "SUSPEITA_VIOLACAO → ROMPIDO", `${violacao2.status} ${violacao2.json?.status ?? violacao2.json?.code}`, violacao2.json?.status === "ROMPIDO");
 
     // ------------------------------------------------------------------ 12
     r.etapa("12. O que ficou nos dois bancos (visualização dos erros)");
     const lacreFinal = await umValor<{ status: string }>("SELECT status FROM lacres WHERE id = $1", [p.lacre.id]);
-    r.conferir("Estado do lacre no FluxID (P8)", "SUSPEITA_VIOLACAO (o gestor confirma ROMPIDO)", lacreFinal?.status ?? "?", lacreFinal?.status === "SUSPEITA_VIOLACAO");
+    r.conferir("Estado do lacre no FluxID (P8)", "ROMPIDO (confirmado pelo gestor)", lacreFinal?.status ?? "?", lacreFinal?.status === "ROMPIDO");
     const alertasFluxid = await linhas(
       "SELECT tipo, severidade, status FROM alertas WHERE dispositivo_id = $1 ORDER BY aberto_em, codigo", [p.dispositivo.id]);
     r.conferir("Alertas do lacre no FluxID", `${restantes.length + 9} alertas com lacre e cilindro`, `${alertasFluxid.length} alertas`, alertasFluxid.length === restantes.length + 9);
@@ -341,7 +381,7 @@ export async function executar(ambiente: Ambiente, projeto: string): Promise<num
     `**Data/hora:** ${new Date().toISOString()}  `,
     `**Banco Oxide:** cópia nova em \`${ambiente.pasta}\` (o oxide.db do projeto não foi tocado)  `,
     "**Banco FluxID:** FluxID de análise no Docker (o banco principal não foi tocado)  ",
-    "**Atenção:** a detecção automática de geocerca e de saída de rota ainda não existe; os alertas SAIDA_GEOCERCA e SAIDA_ROTA foram enviados pelo lacre simulado. O operador foi simulado direto no FluxID, porque a API do frontend ainda não existe."
+    "**Como foi feito:** empresa, pessoa e cadastro em massa foram preparados direto no FluxID; rota, saída, entrega, tratamento do alerta e confirmação da violação foram feitos pela API do frontend (`/api/v1/app`). SAIDA_ROTA, SAIDA_GEOCERCA e LACRE_ABERTO_EM_TRANSITO foram detectados automaticamente pelo servidor (não enviados pelo lacre)."
   ]), "utf8");
 
   console.log(`\nResultado: ${r.verificacoes.length - r.falhas} de ${r.verificacoes.length} verificações conforme; ${r.falhas} falha(s).`);

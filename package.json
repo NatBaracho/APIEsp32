@@ -4,11 +4,15 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "ts-node src/server.ts",
-    "dev": "nodemon --exec ts-node src/server.ts",
+    "start": "node --env-file-if-exists=.env --require ts-node/register src/server.ts",
+    "dev": "nodemon --exec \"node --env-file-if-exists=.env --require ts-node/register src/server.ts\"",
     "test": "ts-node tests/api.test.ts",
+    "test:app": "node --env-file-if-exists=.env --require ts-node/register tests/app.test.ts",
     "worker": "node --env-file-if-exists=.env --require ts-node/register src/worker/index.ts",
-    "simular": "node --env-file-if-exists=.env --require ts-node/register src/simulador/index.ts"
+    "simular": "node --env-file-if-exists=.env --require ts-node/register src/simulador/index.ts",
+    "senha": "node --env-file-if-exists=.env --require ts-node/register src/manutencao/definirSenha.ts",
+    "backup": "node --env-file-if-exists=.env --require ts-node/register src/manutencao/backup.ts",
+    "retencao": "node --env-file-if-exists=.env --require ts-node/register src/manutencao/retencao.ts"
   },
   "keywords": [],
   "author": "",

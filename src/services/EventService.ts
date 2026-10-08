@@ -1,6 +1,7 @@
 import { Event } from "../models/Event";
 import { EventRepository } from "../repositories/EventRepository";
 import { AssignmentService } from "./AssignmentService";
+import { aposEvento } from "../regras/recepcao";
 
 export class EventService {
 
@@ -40,6 +41,9 @@ export class EventService {
       ...event,
       error_type: situation.error_type
     });
+
+    // Regras automáticas (lacre aberto em trânsito)
+    aposEvento(event.device_id, situation.error_type, event.seal_status, event.message_id);
 
     console.log(
       "Evento salvo:",

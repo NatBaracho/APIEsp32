@@ -666,6 +666,18 @@ db.exec(`
     ON cylinder_assignments (fluxid_id) WHERE fluxid_id IS NOT NULL;
 `);
 
+// Último contato do dispositivo, para as regras automáticas
+// (SEM_COMUNICACAO, GPS_SEM_SINAL). Hora de chegada na API, em UTC
+addColumnIfMissing("devices", "last_contact_at", "DATETIME");
+addColumnIfMissing("devices", "last_telemetry_at", "DATETIME");
+addColumnIfMissing("devices", "last_position_at", "DATETIME");
+
+// Hora de chegada de cada mensagem (UTC), usada pela retenção: só sai o que
+// já foi sincronizado e chegou há mais de RETENCAO_DIAS. Linhas anteriores
+// a esta coluna ficam sem data e nunca são apagadas
+addColumnIfMissing("telemetry_queue", "received_at", "DATETIME");
+addColumnIfMissing("events", "received_at", "DATETIME");
+
 // Registro de cada rodada do Worker (o que foi enviado, o que falhou)
 db.exec(`
   CREATE TABLE IF NOT EXISTS sync_logs (

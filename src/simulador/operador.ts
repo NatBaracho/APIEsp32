@@ -1,10 +1,13 @@
 import { randomBytes } from "crypto";
 import fs from "fs";
 import { Pool, PoolClient } from "pg";
+import { hashSenha } from "../app/base";
 import { hashApiKey } from "../utils/apiKeyHash";
 
-// Ações do operador do sistema, feitas direto no FluxID — exatamente o que a
-// API do frontend fará quando existir (Doc/Contrato-API-Frontend.md).
+// Preparação do FluxID para a simulação (empresa, pessoa, conjuntos e
+// cadastro em massa) direto no banco. As ações do operador do dia a dia
+// (rota, saída, entrega, alertas, violação) são feitas pela API do frontend,
+// em executar.ts.
 
 export interface Conjunto {
   linha: number;
@@ -203,22 +206,20 @@ export async function reimportarMassa(pool: Pool, cadastro: Cadastro, rodada: st
   }
 }
 
-// Saída da entrega (cilindro em trânsito) e chegada (cilindro com o
-// cliente e custódia no endereço)
-export async function iniciarEntrega(pool: Pool, cadastro: Cadastro): Promise<void> {
-  await emTransacao(pool, async client => {
-    await client.query("UPDATE entregas SET status = 'EM_ANDAMENTO', data_saida = now() WHERE id = $1", [cadastro.entregaId]);
-    await client.query("UPDATE cilindros SET status = 'EM_TRANSITO', atualizado_em = now() WHERE id = $1", [cadastro.principal.cilindro.id]);
-  });
-}
-
-export async function concluirEntrega(pool: Pool, cadastro: Cadastro): Promise<void> {
-  await emTransacao(pool, async client => {
-    await client.query("UPDATE entregas SET status = 'CONCLUIDA', data_entrega = now() WHERE id = $1", [cadastro.entregaId]);
-    await client.query("UPDATE cilindros SET status = 'COM_CLIENTE', atualizado_em = now() WHERE id = $1", [cadastro.principal.cilindro.id]);
+// Login do operador na API do frontend: senha só desta rodada (gerada na
+// hora, nunca gravada em arquivo), vínculo ativo e papel ORG_ADMIN na empresa
+export async function prepararLogin(pool: Pool, cadastro: Cadastro, senha: string): Promise<string> {
+  return emTransacao(pool, async client => {
+    const { rows } = await client.query<{ email: string }>(
+      "UPDATE usuarios SET senha_hash = $2 WHERE id = $1 RETURNING email", [cadastro.usuarioId, hashSenha(senha)]);
     await client.query(
-      "INSERT INTO custodias (cilindro_id, local_entrega_id, data_inicio, observacao) VALUES ($1, $2, now(), 'Entrega da simulação')",
-      [cadastro.principal.cilindro.id, cadastro.localId]);
+      "INSERT INTO usuario_organizacoes (usuario_id, organizacao_id, status) VALUES ($1, $2, 'ATIVO') ON CONFLICT DO NOTHING",
+      [cadastro.usuarioId, cadastro.organizacaoId]);
+    await client.query(
+      `INSERT INTO usuario_organizacao_perfis (usuario_id, organizacao_id, perfil_id)
+       SELECT $1, $2, id FROM perfis WHERE codigo = 'ORG_ADMIN' ON CONFLICT DO NOTHING`,
+      [cadastro.usuarioId, cadastro.organizacaoId]);
+    return rows[0]!.email;
   });
 }
 

@@ -2,6 +2,9 @@ import { server } from "../src/server";
 import db from "../src/database/connection";
 import openApiSpec from "../src/docs/openapi";
 import openApiFluxidSpec from "../src/docs/openapiFluxid";
+import { FUNCOES_DISPONIVEIS } from "../src/app/router";
+import { aplicarRegrasPeriodicas } from "../src/regras/periodicas";
+import { distanciaDaRotaMetros, distanciaMetros } from "../src/regras/geo";
 
 const BASE_URL = `http://localhost:${process.env.PORT || 3000}`;
 
@@ -85,26 +88,32 @@ async function main() {
     return { passed, status: res.status, expectedStatus: 200, details: "Contém título 'API ESP32'" };
   });
 
-  await runTest("GET /api-docs-fluxid/ (proposta da API do frontend) -> 200 e cada página com o seu conteúdo", async () => {
+  await runTest("GET /api-docs-fluxid/ (API do frontend) -> 200 e cada página com o seu conteúdo", async () => {
     const page = await fetch(`${BASE_URL}/api-docs-fluxid/`);
     const fluxidInit = await (await fetch(`${BASE_URL}/api-docs-fluxid/swagger-ui-init.js`)).text();
     const oxideInit = await (await fetch(`${BASE_URL}/api-docs/swagger-ui-init.js`)).text();
     const passed =
       page.status === 200 &&
-      fluxidInit.includes("PROPOSTA") && fluxidInit.includes("query-cylinders") &&
-      oxideInit.includes("API ESP32") && !oxideInit.includes("PROPOSTA");
-    return { passed, status: page.status, expectedStatus: 200, details: "proposta e API atual em páginas separadas" };
+      fluxidInit.includes("API FluxID para o frontend") && fluxidInit.includes("query-cylinders") && fluxidInit.includes("manage-deliveries") &&
+      oxideInit.includes("API ESP32") && !oxideInit.includes("API FluxID para o frontend");
+    return { passed, status: page.status, expectedStatus: 200, details: "API do frontend e API do lacre em páginas separadas" };
   });
 
-  await runTest("Proposta FluxID: toda função tem grupo declarado e ainda não existe rota /api/v1/app", async () => {
+  await runTest("API FluxID: toda função documentada tem grupo e existe em /api/v1/app (sem login -> 401 ou 503 sem FluxID)", async () => {
     const spec = openApiFluxidSpec as any;
     const declared = new Set((spec.tags ?? []).map((tag: any) => tag.name));
     const semGrupo = Object.entries<any>(spec.paths)
       .filter(([, ops]) => !Object.values<any>(ops).every(op => (op.tags ?? []).length > 0 && op.tags.every((t: string) => declared.has(t))))
       .map(([path]) => path);
+    const documentadas = Object.keys(spec.paths).map(p => p.replace(/^\//, "")).sort();
+    const implementadas = [...FUNCOES_DISPONIVEIS].sort();
     const res = await fetch(`${BASE_URL}/api/v1/app/query-cylinders`, { method: "POST" });
-    const passed = semGrupo.length === 0 && Object.keys(spec.paths).length === 21 && res.status === 404;
-    return { passed, status: res.status, expectedStatus: 404, details: `${Object.keys(spec.paths).length} funções; sem grupo: ${semGrupo.join(",") || "nenhuma"}` };
+    const json: any = await res.json();
+    const outroMetodo = await fetch(`${BASE_URL}/api/v1/app/query-cylinders`);
+    const passed = semGrupo.length === 0 && JSON.stringify(documentadas) === JSON.stringify(implementadas) &&
+      ((res.status === 401 && json.code === "AUTH_REQUIRED") || (res.status === 503 && json.code === "UNAVAILABLE")) &&
+      outroMetodo.status === 405;
+    return { passed, status: res.status, details: `${documentadas.length} funções documentadas, ${implementadas.length} implementadas; sem grupo: ${semGrupo.join(",") || "nenhuma"}; GET -> ${outroMetodo.status}` };
   });
 
   await runTest("Swagger: toda rota tem um grupo declarado (sem grupo default)", async () => {
@@ -1335,6 +1344,120 @@ async function main() {
     const res = await api("GET", `/devices/${HASH_DEVICE_ID}`);
     const passed = res.status === 200 && !("api_key" in (res.json ?? {})) && !("api_key_hash" in (res.json ?? {}));
     return { passed, status: res.status, expectedStatus: 200, details: Object.keys(res.json ?? {}).join(",") };
+  });
+
+  // Group 11: automatic alert rules (reception and periodic) and /health
+  console.log("\n--- [11] Regras automáticas e saúde ---");
+
+  const R_DEV = "DSP-TEST-REGRA";
+  const R_KEY = "key-test-regra-12345";
+  const R_SOLTO = "DSP-TEST-REGRA-SOLTO";
+  db.prepare("INSERT INTO devices (device_id, api_key, firmware_version, active) VALUES (?, ?, '1.0.0', 1)").run(R_DEV, R_KEY);
+  db.prepare("INSERT INTO devices (device_id, api_key, firmware_version, active) VALUES (?, ?, '1.0.0', 1)").run(R_SOLTO, `${R_KEY}-solto`);
+  db.prepare("INSERT INTO seals (seal_code, nfc_uid, status) VALUES ('LCR-TEST-R', 'NFC-TEST-R', 'INSTALADO')").run();
+  db.prepare("INSERT INTO cylinders (cylinder_code, serial_number, status) VALUES ('CIL-TEST-R', 'SN-TEST-R', 'EM_TRANSITO')").run();
+  db.prepare("INSERT INTO seal_assignments (device_id, seal_code) VALUES (?, 'LCR-TEST-R')").run(R_DEV);
+  db.prepare("INSERT INTO cylinder_assignments (seal_code, cylinder_code) VALUES ('LCR-TEST-R', 'CIL-TEST-R')").run();
+  const alertasDe = (device: string, tipo: string) =>
+    db.prepare("SELECT * FROM alerts WHERE device_id = ? AND alert_type = ?").all(device, tipo) as any[];
+  const telemetria = (n: number, extra: Record<string, unknown>, device = R_DEV, key = R_KEY) =>
+    api("POST", "/iot/telemetries", { message_id: `MSG-TEST-REGRA-${n}`, device_id: device, latitude: -7.2, longitude: -39.3, seal_status: "LOCKED", ...extra }, key);
+
+  await runTest("Bateria abaixo de 15% abre BATERIA_BAIXA automático (AUT-, até 20 caracteres) e registra contato e posição", async () => {
+    const res = await telemetria(1, { battery_percent: 10 });
+    const alertas = alertasDe(R_DEV, "BATERIA_BAIXA");
+    const disp = db.prepare("SELECT last_contact_at, last_telemetry_at, last_position_at FROM devices WHERE device_id = ?").get(R_DEV) as any;
+    const fila = db.prepare("SELECT received_at FROM telemetry_queue WHERE message_id = 'MSG-TEST-REGRA-1'").get() as any;
+    const a = alertas[0];
+    const passed = res.status === 202 && alertas.length === 1 && /^AUT-[0-9A-Z]+-[0-9A-F]{4}$/.test(a.alert_id) && a.alert_id.length <= 20 &&
+      a.severity === "BAIXA" && a.status === "ABERTO" && a.sync_status === "PENDING" &&
+      Boolean(disp.last_contact_at && disp.last_telemetry_at && disp.last_position_at) && Boolean(fila?.received_at);
+    return { passed, status: res.status, expectedStatus: 202, details: `${a?.alert_id} (${a?.severity}); contato=${disp.last_contact_at}` };
+  });
+
+  await runTest("Nova leitura com bateria baixa não repete o alerta enquanto o primeiro está aberto", async () => {
+    const res = await telemetria(2, { battery_percent: 8, latitude: -7.21 });
+    const n = alertasDe(R_DEV, "BATERIA_BAIXA").length;
+    return { passed: res.status === 202 && n === 1, status: res.status, expectedStatus: 202, details: `alertas BATERIA_BAIXA: ${n}` };
+  });
+
+  await runTest("Sinal GSM abaixo de -105 dBm abre GSM_SINAL_FRACO", async () => {
+    const res = await telemetria(3, { gsm_signal: -110, latitude: -7.22 });
+    const n = alertasDe(R_DEV, "GSM_SINAL_FRACO").length;
+    return { passed: res.status === 202 && n === 1, status: res.status, expectedStatus: 202, details: `alertas GSM_SINAL_FRACO: ${n}` };
+  });
+
+  await runTest("Lacre aberto com o cilindro EM_TRANSITO abre LACRE_ABERTO_EM_TRANSITO (CRITICA) e pede TRAVAR_VALVULA", async () => {
+    const res = await telemetria(4, { seal_status: "UNLOCKED", latitude: -7.23 });
+    const alertas = alertasDe(R_DEV, "LACRE_ABERTO_EM_TRANSITO");
+    const comandos = db.prepare("SELECT * FROM commands WHERE device_id = ? AND command_type = 'TRAVAR_VALVULA' AND status = 'PENDENTE'").all(R_DEV) as any[];
+    const passed = res.status === 202 && alertas.length === 1 && alertas[0].severity === "CRITICA" && comandos.length === 1 && comandos[0].command_id.startsWith("CMD-");
+    return { passed, status: res.status, expectedStatus: 202, details: `alerta=${alertas[0]?.alert_id}; comando=${comandos[0]?.command_id}` };
+  });
+
+  await runTest("Comando confirmado com ERRO abre COMANDO_FALHOU", async () => {
+    const comando = db.prepare("SELECT command_id FROM commands WHERE device_id = ? AND status = 'PENDENTE'").get(R_DEV) as any;
+    const res = await api("POST", "/iot/commands/confirm", { command_id: comando.command_id, device_id: R_DEV, status: "ERRO", error_message: "motor travado" }, R_KEY);
+    const alertas = alertasDe(R_DEV, "COMANDO_FALHOU");
+    const passed = res.status === 200 && alertas.length === 1 && String(alertas[0].description).includes(comando.command_id);
+    return { passed, status: res.status, expectedStatus: 200, details: alertas[0]?.description };
+  });
+
+  await runTest("Dispositivo sem lacre e cilindro não recebe alerta automático (o FluxID exige os dois)", async () => {
+    const res = await telemetria(5, { battery_percent: 3 }, R_SOLTO, `${R_KEY}-solto`);
+    const n = (db.prepare("SELECT count(*) AS n FROM alerts WHERE device_id = ?").get(R_SOLTO) as any).n;
+    return { passed: res.status === 202 && n === 0, status: res.status, expectedStatus: 202, details: `alertas do dispositivo solto: ${n}` };
+  });
+
+  await runTest("Telemetria sem posição atualiza o contato mas não a última posição", async () => {
+    db.prepare("UPDATE devices SET last_position_at = '2020-01-01 00:00:00' WHERE device_id = ?").run(R_DEV);
+    const res = await api("POST", "/iot/telemetries", { message_id: "MSG-TEST-REGRA-6", device_id: R_DEV, battery_percent: 90 }, R_KEY);
+    const disp = db.prepare("SELECT last_telemetry_at, last_position_at FROM devices WHERE device_id = ?").get(R_DEV) as any;
+    const passed = res.status === 202 && disp.last_position_at === "2020-01-01 00:00:00" && disp.last_telemetry_at > "2020-01-01";
+    return { passed, status: res.status, expectedStatus: 202, details: `posição=${disp.last_position_at}; telemetria=${disp.last_telemetry_at}` };
+  });
+
+  // FluxID falso: geocerca e rota não acham nada; as regras de tempo usam só a Oxide
+  const fluxidVazio = { query: async () => ({ rows: [] }) } as any;
+
+  await runTest("Rodada periódica: GPS_SEM_SINAL (telemetria chegando sem posição há mais de 15 min)", async () => {
+    const r = await aplicarRegrasPeriodicas(fluxidVazio);
+    const n = alertasDe(R_DEV, "GPS_SEM_SINAL").length;
+    return { passed: n === 1 && r.erros.length === 0, details: `criados: ${JSON.stringify(r.alertas_criados)}` };
+  });
+
+  await runTest("Rodada periódica: SEM_COMUNICACAO (sem contato há mais de 30 min)", async () => {
+    db.prepare("UPDATE devices SET last_contact_at = datetime('now', '-2 hours') WHERE device_id = ?").run(R_DEV);
+    const r = await aplicarRegrasPeriodicas(fluxidVazio);
+    const n = alertasDe(R_DEV, "SEM_COMUNICACAO").length;
+    return { passed: n === 1 && r.erros.length === 0, details: `criados: ${JSON.stringify(r.alertas_criados)}` };
+  });
+
+  await runTest("Rodada periódica: COMANDO_SEM_RESPOSTA (pendente há mais de 10 min) e não repete na rodada seguinte", async () => {
+    db.prepare(`INSERT INTO commands (command_id, device_id, command_type, status, created_at)
+                VALUES ('CMD-TEST-REGRA-1', ?, 'DESTRAVAR_VALVULA', 'PENDENTE', datetime('now', '-1 hour'))`).run(R_DEV);
+    await aplicarRegrasPeriodicas(fluxidVazio);
+    await aplicarRegrasPeriodicas(fluxidVazio);
+    const alertas = alertasDe(R_DEV, "COMANDO_SEM_RESPOSTA");
+    return { passed: alertas.length === 1 && String(alertas[0].description).includes("CMD-TEST-REGRA-1"), details: alertas[0]?.description };
+  });
+
+  await runTest("Geocerca e rota: distâncias em metros (ponto a ~111 m da linha; mesmo ponto = 0)", async () => {
+    const rota = [{ latitude: -7.2, longitude: -39.3 }, { latitude: -7.2, longitude: -39.2 }];
+    const fora = distanciaDaRotaMetros({ latitude: -7.201, longitude: -39.25 }, rota);
+    const zero = distanciaMetros({ latitude: -7.2, longitude: -39.3 }, { latitude: -7.2, longitude: -39.3 });
+    const passed = Math.abs(fora - 111.2) < 1 && zero === 0;
+    return { passed, details: `fora da linha: ${fora.toFixed(1)} m` };
+  });
+
+  await runTest("GET /health -> 200 com Oxide, FluxID e Worker (sem expor a conexão)", async () => {
+    const res = await fetch(`${BASE_URL}/health`);
+    const json: any = await res.json();
+    const texto = JSON.stringify(json);
+    const passed = res.status === 200 && json.status === "OK" && json.oxide?.status === "OK" &&
+      typeof json.oxide?.filas?.alertas_pendentes === "number" && ["OK", "NAO_CONFIGURADO"].includes(json.fluxid?.status) &&
+      !texto.includes("postgres://");
+    return { passed, status: res.status, expectedStatus: 200, details: `fluxid=${json.fluxid?.status}; filas=${JSON.stringify(json.oxide?.filas)}` };
   });
 
   // Post-cleanup of test records

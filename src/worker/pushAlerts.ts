@@ -30,7 +30,8 @@ const withoutSeal = new Set([
 // do vínculo válido no momento do alerta (created_at), não os de agora,
 // para a auditoria (script 003). Sem vínculo naquela data, o alerta não vai
 // ao FluxID e fica parado na Oxide para o gestor. Um alerta já enviado é
-// atualizado (análise e encerramento feitos na Oxide).
+// atualizado (análise e encerramento feitos na Oxide), salvo se já foi
+// tratado pelo frontend (D5).
 export async function pushAlert(pool: Pool, row: AlertRow): Promise<SyncOutcome> {
   try {
     return await inTransaction(pool, async client => {
@@ -57,8 +58,8 @@ export async function pushAlert(pool: Pool, row: AlertRow): Promise<SyncOutcome>
         } as const;
       }
 
-      const existing = await client.query<{ dispositivo_id: string | null }>(
-        "SELECT dispositivo_id FROM public.alertas WHERE codigo = $1",
+      const existing = await client.query<{ dispositivo_id: string | null; tratado_no_fluxid: boolean }>(
+        "SELECT dispositivo_id, tratado_no_fluxid FROM public.alertas WHERE codigo = $1",
         [row.alert_id]
       );
       const current = existing.rows[0];
@@ -68,6 +69,12 @@ export async function pushAlert(pool: Pool, row: AlertRow): Promise<SyncOutcome>
           kind: "stop",
           error: `o código ${row.alert_id} já é usado no FluxID por outro alerta`
         } as const;
+      }
+
+      if (current?.tratado_no_fluxid) {
+        // Decisão D5: depois que o gestor tratou o alerta pelo frontend, o
+        // FluxID manda; a Oxide não sobrescreve análise nem encerramento
+        return { kind: "synced", note: "alerta já tratado no FluxID; nada alterado" } as const;
       }
 
       if (current) {

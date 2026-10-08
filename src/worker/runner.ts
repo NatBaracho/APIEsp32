@@ -6,6 +6,7 @@ import { AlertRow, pushAlert } from "./pushAlerts";
 import { EventRow, pushEvent } from "./pushEvents";
 import { pushTelemetry, TelemetryRow } from "./pushTelemetry";
 import { errorMessage, SyncOutcome } from "./retry";
+import { aplicarRegrasPeriodicas, ResultadoRegras } from "../regras/periodicas";
 
 const syncRepository = new SyncRepository();
 const syncLogRepository = new SyncLogRepository();
@@ -21,6 +22,7 @@ export interface CycleResult {
   status: SyncLogStatus;
   cadastro?: CadastroResult | { erro: string };
   filas: Partial<Record<SyncQueueName, QueueCount>>;
+  regras?: ResultadoRegras;
   erro?: string;
 }
 
@@ -56,7 +58,7 @@ async function drainQueue<Row extends { id: number }>(
 }
 
 // Uma rodada: cadastro FluxID → Oxide (quando pedido) e depois as filas
-// Oxide → FluxID, na ordem telemetria, eventos e alertas
+// Oxide → FluxID, na ordem telemetria, eventos, regras automáticas e alertas
 export async function runCycle(
   pool: Pool,
   options: { batchSize: number; withCadastro: boolean }
@@ -79,6 +81,14 @@ export async function runCycle(
 
     result.filas.telemetry = await drainQueue<TelemetryRow>(pool, "telemetry", options.batchSize, pushTelemetry);
     result.filas.events = await drainQueue<EventRow>(pool, "events", options.batchSize, pushEvent);
+
+    // Regras automáticas (comunicação, GPS, comandos, geocerca e rota): os
+    // alertas criados aqui já seguem na fila de alertas desta rodada
+    result.regras = await aplicarRegrasPeriodicas(pool);
+    if (result.regras.erros.length > 0) {
+      result.status = "PARCIAL";
+    }
+
     result.filas.alerts = await drainQueue<AlertRow>(pool, "alerts", options.batchSize, pushAlert);
 
     const failures = Object.values(result.filas)
