@@ -4,7 +4,7 @@
 
 **Buffer temporário de ingestão para dispositivos ESP32**
 
-**Versão:** 1.7  
+**Versão:** 1.8  
 **Projeto:** FluxID / Oxide IoT
 
 Inclui instruções de criação, modelo de dados e script SQL completo.
@@ -302,13 +302,17 @@ CREATE TABLE IF NOT EXISTS seals (
 CREATE TABLE IF NOT EXISTS cylinders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     cylinder_code TEXT NOT NULL UNIQUE,
-    serial_number TEXT NOT NULL UNIQUE,
+    -- Série única só dentro da empresa: a regra fica com o FluxID
+    serial_number TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'DISPONIVEL'
         CHECK (status IN ('DISPONIVEL', 'EM_TRANSITO', 'COM_CLIENTE',
                           'MANUTENCAO', 'EXTRAVIADO', 'INATIVO')),
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS idx_cylinders_serial_number
+    ON cylinders (serial_number);
 
 CREATE TABLE IF NOT EXISTS seal_assignments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

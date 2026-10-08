@@ -49,11 +49,6 @@ export class CylinderController {
       return;
     }
 
-    if (result.kind === "duplicate_serial") {
-      res.status(409).json({ success: false, message: "Número de série já usado por outro cilindro" });
-      return;
-    }
-
     res.status(201).json({ success: true, cylinder: result.cylinder });
   }
 

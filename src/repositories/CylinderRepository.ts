@@ -15,12 +15,6 @@ export class CylinderRepository {
       .get(cylinderCode) as Cylinder | undefined;
   }
 
-  findBySerialNumber(serialNumber: string): Cylinder | undefined {
-    return db
-      .prepare("SELECT * FROM cylinders WHERE serial_number = ?")
-      .get(serialNumber) as Cylinder | undefined;
-  }
-
   create(cylinder: Cylinder): Cylinder {
     db.prepare(`
       INSERT INTO cylinders (cylinder_code, serial_number, status)

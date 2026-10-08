@@ -224,6 +224,8 @@ Estes itens não estão implementados e não bloqueiam o MVP atual, salvo se for
 - ✅ Teste formal de sucesso, repetição, indisponibilidade do PostgreSQL e recuperação: Roteiro v1.10 (seção 5.10) executado pela IA em 07/10/2026, sem falhas; aprovado por Natã da Silva Baracho em 07/10/2026.
 - ✅ Configuração, execução e recuperação de falhas documentadas (`Integracao-Oxide-FluxID.md` v2.0, seção 6; `Desenvolvimento.md` 1.8).
 - ✅ FluxID de análise no Docker (container `fluxid-analise`).
+- ✅ Simulador do lacre (`npm run simular`): percurso completo do lacre e do operador, com fila, GPS sem sinal e todos os alertas; 58/58, aprovado por Natã da Silva Baracho em 07/10/2026.
+- ✅ Série do cilindro não única na Oxide (achado A3; identificação pelo lacre e pelo código), aprovado por Natã da Silva Baracho em 07/10/2026.
 
 ## Fase de operação e conclusão
 

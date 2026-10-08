@@ -13,6 +13,28 @@ npm start
 
 O servidor inicia na porta `3000`.
 
+### Simular um lacre (`npm run simular`)
+
+O simulador faz o percurso completo de um lacre e de um operador e confere cada passo nos dois bancos:
+
+- **Operador:** cadastro unitário de empresa, operador, cliente com endereço (geocerca de 10 m), cilindro, lacre, dispositivo e rota (entrega); erros de cadastro; cadastro em massa por `simulador/cadastro-em-massa.csv`.
+- **Lacre:** lacre ativo, trajeto, posição repetida, `message_id` repetido, GPS sem sinal, abertura em trânsito, fora da rota, dentro e fora da geocerca, violação e todos os alertas do catálogo.
+- **Fila:** FluxID fora do ar, espera do vínculo, dispositivo fora do FluxID, reenvio sem duplicar.
+- **Gestor:** encerramento do alerta.
+- **Visualização:** mapa, alertas, eventos, quarentena e histórico do cilindro.
+
+Como rodar:
+
+1. Docker Desktop aberto, com o container `fluxid-analise` rodando.
+2. `.env` apontando para `127.0.0.1:54329`. **O simulador se recusa a rodar em outro banco.**
+3. `npm run simular`.
+
+A simulação usa um `oxide.db` novo, numa pasta temporária, e a própria API na porta 3199. O `oxide.db` do projeto não é tocado, e a sua API pode continuar rodando. No fim, mostra o resultado e o caminho do relatório da rodada.
+
+**Ainda não existem:**
+- a detecção automática de geocerca e de rota (o lacre simulado envia os alertas `SAIDA_GEOCERCA` e `SAIDA_ROTA`);
+- o operador pelo frontend (as ações são feitas direto no FluxID, como a API do frontend fará).
+
 ### Worker (sincronização com o FluxID)
 
 Copie `.env.example` para `.env` e preencha `FLUXID_DATABASE_URL` (a senha fica só no `.env`, que não vai para o git). Depois, em outro terminal:

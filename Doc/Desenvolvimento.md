@@ -142,7 +142,7 @@ Para a API saber a que lacre e cilindro cada dispositivo pertence, cadastre tamb
 
 ```http
 POST /api/v1/seals          { "seal_code": "LCR-000010", "nfc_uid": "04A2B3C4D5" }
-POST /api/v1/cylinders      { "cylinder_code": "CIL-000010", "serial_number": "SN-123456" }
+POST /api/v1/cylinders      { "cylinder_code": "CIL-000010", "serial_number": "SN-123456" }   (a série pode repetir; o código, não)
 POST /api/v1/assignments/device-seal    { "device_id": "DSP-000010", "seal_code": "LCR-000010" }
 POST /api/v1/assignments/seal-cylinder  { "seal_code": "LCR-000010", "cylinder_code": "CIL-000010" }
 ```
@@ -297,7 +297,7 @@ PATCH /api/v1/iot/alerts/ALT-000001/status   { "status": "ENCERRADO", "resolved_
 ### Associação
 
 - `seals`: `seal_code`, `nfc_uid`, `status` (estados de `lacres` do FluxID).
-- `cylinders`: `cylinder_code`, `serial_number`, `status` (estados de `cilindros` do FluxID).
+- `cylinders`: `cylinder_code` (único), `serial_number` (pode repetir entre empresas; a regra "série única por empresa" é do FluxID), `status` (estados de `cilindros` do FluxID). A API chega ao cilindro **pelo lacre** e pelo código, nunca pela série.
 - `seal_assignments` (dispositivo ↔ lacre) e `cylinder_assignments` (lacre ↔ cilindro): `started_at`, `ended_at`, `end_reason`, `fluxid_id` (id do vínculo no FluxID, quando veio de lá). Vínculo ativo = `ended_at` vazio.
 
 ### Estados da fila
@@ -318,6 +318,28 @@ PATCH /api/v1/iot/alerts/ALT-000001/status   { "status": "ENCERRADO", "resolved_
 1. Copie `.env.example` para `.env` e preencha `FLUXID_DATABASE_URL` (a senha fica só no `.env`, que não vai para o git).
 2. Em outro terminal, ao lado da API: `npm run worker` (Ctrl+C encerra ao fim da rodada) ou `npm run worker -- --once` (uma rodada).
 3. Acompanhe em `GET /api/v1/sync/status`. As regras completas estão em [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md).
+
+### Simular um lacre (`npm run simular`)
+
+O simulador faz o percurso completo de um lacre e de um operador e confere cada passo nos dois bancos:
+
+- **Operador:** cadastro unitário de empresa, operador, cliente com endereço (geocerca de 10 m), cilindro, lacre, dispositivo e rota (entrega); erros de cadastro; cadastro em massa por `simulador/cadastro-em-massa.csv`.
+- **Lacre:** lacre ativo, trajeto, posição repetida, `message_id` repetido, GPS sem sinal, abertura em trânsito, fora da rota, dentro e fora da geocerca, violação e todos os alertas do catálogo.
+- **Fila:** FluxID fora do ar, espera do vínculo, dispositivo fora do FluxID, reenvio sem duplicar.
+- **Gestor:** encerramento do alerta.
+- **Visualização:** mapa, alertas, eventos, quarentena e histórico do cilindro.
+
+Como rodar:
+
+1. Docker Desktop aberto, com o container `fluxid-analise` rodando.
+2. `.env` apontando para `127.0.0.1:54329`. **O simulador se recusa a rodar em outro banco.**
+3. `npm run simular`.
+
+A simulação usa um `oxide.db` novo, numa pasta temporária, e a própria API na porta 3199. O `oxide.db` do projeto não é tocado, e a sua API pode continuar rodando. No fim, mostra o resultado e o caminho do relatório da rodada.
+
+**Ainda não existem:**
+- a detecção automática de geocerca e de rota (o lacre simulado envia os alertas `SAIDA_GEOCERCA` e `SAIDA_ROTA`);
+- o operador pelo frontend (as ações são feitas direto no FluxID, como a API do frontend fará).
 
 ## 1.9 O que ainda não existe
 
@@ -639,6 +661,24 @@ Pedido de Natã da Silva Baracho: deixar pronto tudo do lacre e da integração 
 
 Verificação técnica da IA (não substitui o teste formal): compilação; suíte 94/94 em duas rodadas e num banco criado só pelo script do `Oxidedb.md`; scripts `001` a `005` em banco novo no Docker, com nova execução sem mudança; Worker contra o FluxID do Docker, com uma cópia do `oxide.db`. Teste formal (Roteiro v1.10 completo) sem falhas. Detalhes em [Relatorio-de-Teste-2026-10-07-01h30.md](Doc_tese/Relatorio-de-Teste-2026-10-07-01h30.md). Questionário com 15/15 sim: **aprovada por Natã da Silva Baracho** em 07/10/2026.
 
+### 7.24 Simulador do lacre e série do cilindro (07/10/2026)
+Pedido de Natã da Silva Baracho: simular um lacre de ponta a ponta e um operador do sistema, com todos os erros e alertas, fila e GPS sem sinal.
+
+- **Simulador** (`src/simulador/`, `npm run simular`, CSV em `simulador/`):
+  - roda num `oxide.db` novo e numa API própria, contra o FluxID de análise no Docker, e recusa outro banco;
+  - geocerca e rota automáticas e o operador pelo frontend ficaram para depois (combinado).
+- **Achado A3**, corrigido com a aprovação de Natã: "a API deve identificar pelo identificador do lacre".
+  - O problema: na Oxide, a série do cilindro era única no banco inteiro; no FluxID, é única só dentro da empresa. Na segunda rodada da simulação, os cilindros de uma empresa nova com as mesmas séries não chegaram à Oxide.
+  - A correção: na Oxide, a série deixa de ser única. O cilindro continua identificado pelo código e encontrado pelo lacre. A tabela `cylinders` é recriada preservando os dados.
+  - O cadastro provisório `POST /api/v1/cylinders` passa a aceitar série repetida; o código repetido continua com `409`.
+- **Testes:**
+  - simulação com 58/58 em duas rodadas seguidas;
+  - migração testada numa cópia no formato antigo;
+  - suíte 96/96;
+  - Roteiro v1.10 completo no `oxide.db` real, com as mesmas 98 respostas HTTP e checksum idêntico.
+
+Relatório: [Relatorio-de-Teste-2026-10-07-18h45.md](Doc_tese/Relatorio-de-Teste-2026-10-07-18h45.md). Questionário 7/7 sim: **aprovado por Natã da Silva Baracho** em 07/10/2026.
+
 ## 9. Suíte de testes automatizados (`npm test`)
 
 A suíte `tests/api.test.ts` cobre hoje 96 casos de ponta a ponta:
@@ -676,6 +716,7 @@ Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **a
 | #12 | Alertas em português | `alert_type` com os 28 códigos do catálogo (nomes antigos convertidos); severidade padrão do catálogo; `GET /iot/alerts` com filtros; `PATCH /iot/alerts/{alert_id}/status` para analisar e encerrar, com quem e motivo |
 | #14 | Swagger em grupos | 8 grupos com explicação (Dispositivos, Telemetria, Eventos, Comandos, Alertas, Lacres, Cilindros, Vínculos), sem grupo "default"; teste que barra rota sem grupo |
 | #15 | Integração Oxide ⇄ FluxID | Chave por hash; alerta volta à fila ao mudar de status; rotas `/sync/*` e grupo "Sincronização" |
+| #17 | Simulador e série do cilindro | Cadastro provisório de cilindro aceita série repetida (o código continua único); simulador `npm run simular` |
 
 ## 3.2 Oxide (`oxide.db`)
 
@@ -687,6 +728,7 @@ Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **a
 | #8 | B — Associação | Tabelas `seals`, `cylinders`, `seal_assignments` e `cylinder_assignments`, com índices de vínculo ativo único e `ON DELETE RESTRICT`; coluna `error_type` em telemetria e eventos; `Oxidedb.md` v1.5 validado |
 | #12 | Alertas em português | `alerts` com `CHECK` do catálogo em `alert_type`, colunas `resolved_by` e `resolution_note` e `CHECK` de `ENCERRADO` com data; migração automática dos tipos em inglês; `Oxidedb.md` v1.6 validado |
 | #15 | Integração Oxide ⇄ FluxID | `next_attempt_at` na telemetria e nos eventos; `sync_*` nos alertas; `devices.api_key_hash`; `fluxid_id` nos vínculos; tabela `sync_logs`; `Oxidedb.md` v1.7 |
+| #17 | Simulador e série do cilindro | `cylinders.serial_number` sem `UNIQUE` (série única só por empresa, no FluxID); migração preservando os dados; `Oxidedb.md` v1.8 |
 
 ## 3.3 FluxID
 
@@ -702,6 +744,7 @@ Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **a
 | #13 | Alerta com cilindro e lacre | Script `003`: cilindro e lacre obrigatórios em `alertas` (salvo códigos de cadastro), com preenchimento dos 10 alertas de teste pelo vínculo da data e parada segura; validado em servidor temporário |
 | #14 | Docker e dump | FluxID de análise no Docker (container `fluxid-analise`, PostGIS 18), com `001`, `002` e `003` aplicados; dump movido para `sql/fluxid/FluxID.sql` |
 | #15 | Integração Oxide ⇄ FluxID | Script `004` (P1 a P8, gatilho FLX-26) e `005` (estruturas do frontend, histórico do cilindro integrado com a Oxide) |
+| #17 | Simulador | O simulador usa o FluxID de análise: operador (cadastro unitário, em massa por CSV, rota como entrega) e conferência dos dados que chegam |
 
 ## 3.4 Worker
 
@@ -716,3 +759,4 @@ Implementado e aprovado em 07/10/2026 (PR #15). O que levou até ele:
 | #12 | Alertas em português | O tipo do alerta passa direto, sem conversão; falta mapear `resolved_by` (texto) para o usuário do FluxID |
 | #13 | Alerta com cilindro e lacre | O Worker busca o lacre e o cilindro do vínculo válido na data do alerta; sem vínculo, o alerta fica em erro na Oxide para o gestor |
 | #15 | Integração Oxide ⇄ FluxID | Worker completo (`src/worker/`, `npm run worker`): envio da fila, tentativas, espera do P3, cadastro de volta com o hash da chave |
+| #17 | Simulador | O simulador exercita o Worker de ponta a ponta: cadastro sem conflitos, fila, FluxID fora do ar, espera do vínculo e reenvio |

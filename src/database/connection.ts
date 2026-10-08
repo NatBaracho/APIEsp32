@@ -536,11 +536,15 @@ db.exec(`
   )
 `);
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS cylinders (
+// O cilindro é identificado pelo código (e chega-se a ele pelo lacre). O
+// número de série é único só dentro da mesma empresa, regra que fica com o
+// FluxID: duas empresas podem ter cilindros com a mesma série
+function cylindersTableSql(tableName: string): string {
+  return `
+    CREATE TABLE ${tableName} (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     cylinder_code TEXT NOT NULL UNIQUE,
-    serial_number TEXT NOT NULL UNIQUE,
+    serial_number TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'DISPONIVEL'
       CHECK (status IN (
         'DISPONIVEL', 'EM_TRANSITO', 'COM_CLIENTE',
@@ -548,8 +552,41 @@ db.exec(`
       )),
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )
-`);
+    )
+  `;
+}
+
+const cylindersTable = db
+  .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'cylinders'")
+  .get() as { sql: string } | undefined;
+
+if (!cylindersTable) {
+  db.exec(cylindersTableSql("cylinders"));
+} else if (/serial_number\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(cylindersTable.sql)) {
+  // Bancos anteriores: recria sem a série única, preservando os cilindros.
+  // As chaves estrangeiras ficam desligadas só durante a troca (os vínculos
+  // apontam para o código, que não muda) e são conferidas antes de confirmar
+  db.pragma("foreign_keys = OFF");
+  try {
+    db.transaction(() => {
+      db.exec(cylindersTableSql("cylinders_migrated"));
+      db.exec(`
+        INSERT INTO cylinders_migrated (id, cylinder_code, serial_number, status, created_at, updated_at)
+        SELECT id, cylinder_code, serial_number, status, created_at, updated_at FROM cylinders
+      `);
+      db.exec("DROP TABLE cylinders");
+      db.exec("ALTER TABLE cylinders_migrated RENAME TO cylinders");
+
+      if (db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+        throw new Error("Migração de cylinders deixaria vínculos sem cilindro");
+      }
+    })();
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
+}
+
+db.exec("CREATE INDEX IF NOT EXISTS idx_cylinders_serial_number ON cylinders (serial_number)");
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS seal_assignments (
