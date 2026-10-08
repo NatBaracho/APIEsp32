@@ -4,7 +4,7 @@
 **Executor:** IA (Claude Code, modelo Claude Opus 5.5)
 **Pedido de:** Natã da Silva Baracho: "Simule um lacre. Preciso ver que está ativo, cadastrar a um cilindro e um cliente, teste de localidade e salvar os dados (nos bancos), teste de duplicidade, quero ver os erros do lacre, violação, movimentação fora da geocerca, fora da rota, ou seja, todos os alertas. Depois faça o teste com operador do sistema: cadastrar cilindro, cadastrar cliente, lacre ao cliente, criar rota para o endereço do cliente, visualização dos erros, cadastro em massa e também em unidade." Também pediu o teste de fila e de GPS sem sinal.
 **Branch:** `feat/simulador-lacre` (montada sobre o PR #16)
-**Situação:** ⏳ **Aguardando a validação de Natã da Silva Baracho** (seção 8)
+**Situação:** ✅ **Validação aprovada por Natã da Silva Baracho em 07/10/2026** (seção 8)
 
 ---
 
@@ -268,14 +268,20 @@ Depois da correção, nenhuma falha.
 
 ## 8. Validação humana (questionário)
 
-A responder por **Natã da Silva Baracho**.
+Respondido por **Natã da Silva Baracho** em 07/10/2026.
 
 | # | Pergunta | Resposta |
 | --- | --- | --- |
-| 1 | A simulação mostrou o que você pediu (lacre ativo, cadastro, localização nos dois bancos, duplicidade, erros e todos os alertas)? | |
-| 2 | O operador simulado direto no FluxID (cadastro unitário, cliente, rota como entrega, erros e cadastro em massa) atende por enquanto, até a API do frontend? | |
-| 3 | Os testes de fila (FluxID fora do ar, espera do vínculo, dispositivo fora do FluxID, reenvio e "tentar de novo") e de GPS sem sinal estão de acordo? | |
-| 4 | O simulador (`npm run simular`) e o CSV de exemplo podem ficar no projeto? | |
-| 5 | Achado A1: registrar a criação do cilindro na API do frontend (e não por gatilho agora)? | |
-| 6 | A correção do achado A3 (série não única na Oxide; cilindro identificado pelo código e pelo lacre) e os testes depois dela estão de acordo? | |
-| 7 | Pode registrar a aprovação, atualizar os documentos e enviar ao GitHub? | |
+| 1 | A simulação mostrou o que você pediu (lacre ativo, cadastro, localização nos dois bancos, duplicidade, erros e todos os alertas)? | Sim |
+| 2 | O operador simulado direto no FluxID (cadastro unitário, cliente, rota como entrega, erros e cadastro em massa) atende por enquanto, até a API do frontend? | Sim |
+| 3 | Os testes de fila (FluxID fora do ar, espera do vínculo, dispositivo fora do FluxID, reenvio e "tentar de novo") e de GPS sem sinal estão de acordo? | Sim |
+| 4 | O simulador (`npm run simular`) e o CSV de exemplo podem ficar no projeto? | Sim |
+| 5 | Achado A1: registrar a criação do cilindro na API do frontend (e não por gatilho agora)? | Sim |
+| 6 | A correção do achado A3 (série não única na Oxide; cilindro identificado pelo código e pelo lacre) e os testes depois dela estão de acordo? | Sim |
+| 7 | Pode registrar a aprovação, atualizar os documentos e enviar ao GitHub? | Sim |
+
+## 9. Conclusão
+
+**Aprovado.** O simulador (`npm run simular`) faz o percurso completo de um lacre e de um operador e confere cada passo nos dois bancos, com fila, GPS sem sinal, duplicidade e todos os alertas do catálogo. A simulação revelou o achado A3 (série do cilindro única na Oxide inteira), corrigido: o cilindro é identificado pelo código e pelo lacre. O achado A1 (registro da criação do cilindro no histórico) fica para a API do frontend. Geocerca e rota automáticas e o operador pelo frontend ficam para discussão posterior.
+
+> **Validação aprovada por Natã da Silva Baracho em 07/10/2026.**

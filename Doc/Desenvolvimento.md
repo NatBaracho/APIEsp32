@@ -677,7 +677,7 @@ Pedido de Natã da Silva Baracho: simular um lacre de ponta a ponta e um operado
   - suíte 96/96;
   - Roteiro v1.10 completo no `oxide.db` real, com as mesmas 98 respostas HTTP e checksum idêntico.
 
-Relatório: [Relatorio-de-Teste-2026-10-07-18h45.md](Doc_tese/Relatorio-de-Teste-2026-10-07-18h45.md). **Aguardando a validação de Natã da Silva Baracho.**
+Relatório: [Relatorio-de-Teste-2026-10-07-18h45.md](Doc_tese/Relatorio-de-Teste-2026-10-07-18h45.md). Questionário 7/7 sim: **aprovado por Natã da Silva Baracho** em 07/10/2026.
 
 ## 9. Suíte de testes automatizados (`npm test`)
 
@@ -716,6 +716,7 @@ Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **a
 | #12 | Alertas em português | `alert_type` com os 28 códigos do catálogo (nomes antigos convertidos); severidade padrão do catálogo; `GET /iot/alerts` com filtros; `PATCH /iot/alerts/{alert_id}/status` para analisar e encerrar, com quem e motivo |
 | #14 | Swagger em grupos | 8 grupos com explicação (Dispositivos, Telemetria, Eventos, Comandos, Alertas, Lacres, Cilindros, Vínculos), sem grupo "default"; teste que barra rota sem grupo |
 | #15 | Integração Oxide ⇄ FluxID | Chave por hash; alerta volta à fila ao mudar de status; rotas `/sync/*` e grupo "Sincronização" |
+| #17 | Simulador e série do cilindro | Cadastro provisório de cilindro aceita série repetida (o código continua único); simulador `npm run simular` |
 
 ## 3.2 Oxide (`oxide.db`)
 
@@ -727,6 +728,7 @@ Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **a
 | #8 | B — Associação | Tabelas `seals`, `cylinders`, `seal_assignments` e `cylinder_assignments`, com índices de vínculo ativo único e `ON DELETE RESTRICT`; coluna `error_type` em telemetria e eventos; `Oxidedb.md` v1.5 validado |
 | #12 | Alertas em português | `alerts` com `CHECK` do catálogo em `alert_type`, colunas `resolved_by` e `resolution_note` e `CHECK` de `ENCERRADO` com data; migração automática dos tipos em inglês; `Oxidedb.md` v1.6 validado |
 | #15 | Integração Oxide ⇄ FluxID | `next_attempt_at` na telemetria e nos eventos; `sync_*` nos alertas; `devices.api_key_hash`; `fluxid_id` nos vínculos; tabela `sync_logs`; `Oxidedb.md` v1.7 |
+| #17 | Simulador e série do cilindro | `cylinders.serial_number` sem `UNIQUE` (série única só por empresa, no FluxID); migração preservando os dados; `Oxidedb.md` v1.8 |
 
 ## 3.3 FluxID
 
@@ -742,6 +744,7 @@ Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **a
 | #13 | Alerta com cilindro e lacre | Script `003`: cilindro e lacre obrigatórios em `alertas` (salvo códigos de cadastro), com preenchimento dos 10 alertas de teste pelo vínculo da data e parada segura; validado em servidor temporário |
 | #14 | Docker e dump | FluxID de análise no Docker (container `fluxid-analise`, PostGIS 18), com `001`, `002` e `003` aplicados; dump movido para `sql/fluxid/FluxID.sql` |
 | #15 | Integração Oxide ⇄ FluxID | Script `004` (P1 a P8, gatilho FLX-26) e `005` (estruturas do frontend, histórico do cilindro integrado com a Oxide) |
+| #17 | Simulador | O simulador usa o FluxID de análise: operador (cadastro unitário, em massa por CSV, rota como entrega) e conferência dos dados que chegam |
 
 ## 3.4 Worker
 
@@ -756,3 +759,4 @@ Implementado e aprovado em 07/10/2026 (PR #15). O que levou até ele:
 | #12 | Alertas em português | O tipo do alerta passa direto, sem conversão; falta mapear `resolved_by` (texto) para o usuário do FluxID |
 | #13 | Alerta com cilindro e lacre | O Worker busca o lacre e o cilindro do vínculo válido na data do alerta; sem vínculo, o alerta fica em erro na Oxide para o gestor |
 | #15 | Integração Oxide ⇄ FluxID | Worker completo (`src/worker/`, `npm run worker`): envio da fila, tentativas, espera do P3, cadastro de volta com o hash da chave |
+| #17 | Simulador | O simulador exercita o Worker de ponta a ponta: cadastro sem conflitos, fila, FluxID fora do ar, espera do vínculo e reenvio |
