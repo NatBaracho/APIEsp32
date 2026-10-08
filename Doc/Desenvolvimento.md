@@ -13,7 +13,7 @@ Documentos relacionados:
 - [Regras-de-Negocio-e-Banco-Oxide.md](Regras-de-Negocio-e-Banco-Oxide.md): regras detalhadas e schema do SQLite.
 - [Oxidedb.md](Oxidedb.md): script de criação do banco.
 - [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md): como cada dado da Oxide vira um registro do FluxID.
-- [Contrato-API-Frontend.md](Contrato-API-Frontend.md): chamadas que a API vai oferecer ao frontend sobre o FluxID (proposta, aguardando aprovação). Com a API rodando, a proposta pode ser vista em `http://<IP_DA_API>:3000/api-docs-fluxid`.
+- [Contrato-API-Frontend.md](Contrato-API-Frontend.md): as chamadas da API do frontend sobre o FluxID (`/api/v1/app`, v1.0 implementada). Com a API rodando, veja em `http://<IP_DA_API>:3000/api-docs-fluxid`.
 - [Tipos-de-Erro.md](Tipos-de-Erro.md): catálogo de tipos de erro e ocorrências operacionais (lacre, cilindro, GPS, rota, comunicação, comandos).
 - [Doc_tese/PlanoDeTeste.md](Doc_tese/PlanoDeTeste.md) e [Doc_tese/RoteiroDeTeste.md](Doc_tese/RoteiroDeTeste.md): como a API é testada.
 - Swagger, com a API rodando: `http://<IP_DA_API>:3000/api-docs`.
@@ -49,13 +49,14 @@ O que a Oxide faz hoje:
 | Sincroniza com o FluxID | O Worker envia a fila e traz o cadastro oficial; a equipe acompanha em `/api/v1/sync/*` |
 | Executa regras operacionais | Valida o payload, detecta duplicidade, controla posições repetidas e atualiza `last_seen_at` |
 | Gerencia comandos | O ESP32 consulta comandos pendentes (ex.: travar ou destravar a válvula) e confirma `EXECUTADO` ou `ERRO` |
-| Gerencia alertas | Tipos do catálogo [Tipos-de-Erro.md](Tipos-de-Erro.md) (ex.: `LACRE_VIOLADO`, `BATERIA_BAIXA`, `SEM_COMUNICACAO`); listagem, análise e encerramento pelo gestor |
+| Gerencia alertas | Tipos do catálogo [Tipos-de-Erro.md](Tipos-de-Erro.md) (ex.: `LACRE_VIOLADO`, `BATERIA_BAIXA`, `SEM_COMUNICACAO`), enviados pelo lacre ou **abertos automaticamente** pelo servidor (bateria, GSM, lacre aberto em trânsito, comando, comunicação, GPS, rota e geocerca) |
+| Atende o frontend | `POST /api/v1/app/<função>`: login, cilindros, lacres, mapa, alertas, entregas e rotas, pessoas e auditoria, gravando direto no FluxID ([Contrato-API-Frontend.md](Contrato-API-Frontend.md)) |
 
 ### Quem faz o quê: API, Oxide, Worker e FluxID
 
 | Parte | O que é |
 | --- | --- |
-| **API** | O programa Node.js + TypeScript (`src/`) que conversa com o ESP32 |
+| **API** | O programa Node.js + TypeScript (`src/`) que conversa com o ESP32 (`/api/v1/iot`) e com o frontend (`/api/v1/app`) |
 | **Oxide** | O banco local `oxide.db` (SQLite), usado pela API |
 | **Worker** | Programa que leva os dados da Oxide para o FluxID e traz o cadastro oficial de volta (`src/worker/`, `npm run worker`) |
 | **FluxID** | O banco principal (PostgreSQL), base do sistema de negócio e do dashboard |
@@ -70,11 +71,21 @@ O que a Oxide faz hoje:
 - Lista os alertas e deixa o gestor passar um alerta para `EM_ANALISE` e `ENCERRADO`, registrando quem encerrou e o motivo.
 - Oferece as rotas provisórias de cadastro (`/devices`, `/seals`, `/cylinders`, `/assignments`) e o Swagger.
 - Confere a chave pelo **hash** vindo do FluxID (`SHA-256` da `X-API-Key`); sem hash, vale a chave em texto do cadastro provisório.
-- Mostra a situação da sincronização: `GET /sync/status`, `GET /sync/problems`, `POST /sync/retry`.
+- Mostra a situação da sincronização: `GET /sync/status`, `GET /sync/problems`, `POST /sync/retry`; e a saúde geral em `GET /health`.
+- **Atende o frontend** (`/api/v1/app`, 23 funções), lendo e gravando direto no FluxID:
+  - login com sessão própria;
+  - cilindros (as telas que o frontend já tem);
+  - lacres e dispositivos (gera a chave e guarda só o hash) e vínculos;
+  - mapa, alertas (analisar, justificar, encerrar) e trajeto;
+  - comandos de válvula com justificativa;
+  - clientes, entregas, rotas e desvios;
+  - pessoas, papéis, convites, auditoria e foto.
+- **Abre alertas automáticos no recebimento:** bateria baixa, sinal GSM fraco, comando que falhou e lacre aberto com o cilindro em trânsito (este também cria o comando `TRAVAR_VALVULA`).
+- Registra o último contato de cada dispositivo (`devices.last_contact_at`, `last_telemetry_at`, `last_position_at`).
 
 **API — fará**
-- Alertas e comandos automáticos a partir do `error_type`: geofence, saída de rota (alerta ao motorista e ao gestor), lacre aberto → `TRAVAR_VALVULA`.
-- Atender o frontend com o FluxID como banco principal (próxima etapa, depois da validação da integração).
+- Envio de e-mail (convites e recuperação de senha) e segundo fator de login (MFA).
+- Controle por perfil nas rotas abertas e provisórias da equipe (`/devices`, `/seals`, `/cylinders`, `/assignments`, `/sync`).
 
 **Oxide — faz hoje**
 - É a **fila local**: `telemetry_queue` e `events` ficam com `status = PENDING` até o Worker sincronizar. Se o FluxID estiver fora do ar, nada se perde.
@@ -84,6 +95,8 @@ O que a Oxide faz hoje:
 - As tabelas são criadas e migradas automaticamente quando a API inicia.
 - Recebe do Worker o cadastro oficial, os vínculos e o hash da chave do FluxID. O FluxID manda; o cadastro provisório local é mantido e nada é apagado.
 - Registra cada rodada do Worker em `sync_logs`.
+- Guarda a hora de chegada de cada mensagem (`received_at`) e o último contato de cada dispositivo.
+- Tem cópia consistente (`npm run backup`) e limpeza do que já foi sincronizado (`npm run retencao`).
 
 **Worker — faz hoje** (regras em [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md); testado sem falhas e aprovado por Natã da Silva Baracho em 07/10/2026)
 - Envia telemetria, eventos e alertas ao FluxID, cada linha numa transação, sem duplicar (`message_id`/`alert_id`).
@@ -92,6 +105,15 @@ O que a Oxide faz hoje:
 - Alerta: lacre e cilindro do vínculo **da hora do alarme**; sem eles, o alerta para na Oxide para o gestor. Análise e encerramento feitos na Oxide atualizam o alerta no FluxID.
 - Só marca o lacre como `SUSPEITA_VIOLACAO`; quem confirma é o gestor (P8).
 - Traz do FluxID para a Oxide o cadastro, os vínculos e o hash da chave (a cada 5 min).
+- **Regras automáticas a cada rodada:**
+  - sem comunicação;
+  - GPS sem sinal;
+  - comando sem resposta;
+  - **saída de rota** (margem de 50 m, respeitando desvios);
+  - **saída da geocerca** do cliente.
+
+  Os alertas criados seguem na mesma rodada para o FluxID.
+- **Alerta tratado pelo frontend (D5):** o Worker não sobrescreve mais o FluxID e copia o novo estado para a Oxide.
 
 **FluxID — faz hoje**
 - **Cadastro oficial:** organizações, usuários, perfis e permissões, destinatários e locais de entrega, cilindros, lacres, dispositivos e vínculos.
@@ -99,14 +121,31 @@ O que a Oxide faz hoje:
 - **Logística e conformidade:** movimentações, entregas, custódia, testes hidrostáticos, inspeções e auditoria.
 - **Histórico definitivo** de telemetrias, eventos do lacre e alertas. A posição é obrigatória porque alimenta o mapa do dashboard, com os lacres e os cilindros pelo Brasil e os alertas como pontos e cores. A data é gravada na chegada, para auditoria e relatórios (P1).
 
+- **Banco da API do frontend** (script `006`):
+  - sessões e convites;
+  - pessoa em várias organizações;
+  - permissões novas;
+  - situação de estoque;
+  - rotas e desvios;
+  - justificativa do alerta;
+  - histórico de criação do cilindro.
+
 **FluxID — fará**
-- Aplicar no `FluxID_db` os scripts `sql/fluxid/001` a `005`, validados no Docker:
+- Aplicar no `FluxID_db` principal os scripts `sql/fluxid/001` a `006`, validados no Docker, e gerar o novo dump:
   - `003`: cilindro e lacre obrigatórios em todo alerta (salvo códigos de cadastro), para a auditoria;
   - `004`: datas automáticas, quarentena, eventos do dispositivo, tipos de alerta do catálogo, colunas da Oxide e o gatilho que confere o par lacre + cilindro do alerta;
-  - `005`: estruturas que o frontend usa (tipos e identificadores de cilindro, laudo e retificação do teste hidrostático, histórico imutável do cilindro integrado com a Oxide).
-- Ser o banco da API do frontend (próxima etapa).
+  - `005`: estruturas que o frontend usa (tipos e identificadores de cilindro, laudo e retificação do teste hidrostático, histórico imutável do cilindro integrado com a Oxide);
+  - `006`: o que a API do frontend e as regras de rota usam ([Banco_FluxID.md](Banco_FluxID.md), seção 17.8).
+- Definir a senha de quem vai usar o frontend (`npm run senha -- <email>`).
 
-**Resumo:** a Oxide é uma plataforma intermediária de ingestão IoT. Ela autentica dispositivos, recebe telemetrias e eventos, controla comandos e alertas, armazena os dados temporariamente em SQLite e sincroniza com o PostgreSQL do FluxID pelo Worker. Deixou de ser apenas uma API de telemetria e está se tornando o núcleo de controle operacional dos dispositivos.
+**Resumo:** a Oxide é uma plataforma intermediária de ingestão IoT:
+- autentica dispositivos;
+- recebe telemetrias e eventos;
+- controla comandos e alertas;
+- guarda os dados temporariamente em SQLite;
+- sincroniza com o PostgreSQL do FluxID pelo Worker.
+
+A mesma API atende o frontend sobre o FluxID e abre sozinha os alertas de comunicação, GPS, comando, rota e geocerca. Ela é o núcleo de controle operacional dos dispositivos.
 
 ## 1.2 Como o ESP32 se conecta
 
@@ -324,10 +363,15 @@ PATCH /api/v1/iot/alerts/ALT-000001/status   { "status": "ENCERRADO", "resolved_
 
 O simulador faz o percurso completo de um lacre e de um operador e confere cada passo nos dois bancos:
 
-- **Operador:** cadastro unitário de empresa, operador, cliente com endereço (geocerca de 10 m), cilindro, lacre, dispositivo e rota (entrega); erros de cadastro; cadastro em massa por `simulador/cadastro-em-massa.csv`.
+- **Operador:**
+  - cadastro unitário de empresa, operador, cliente com endereço (geocerca de 10 m), cilindro, lacre, dispositivo e entrega;
+  - erros de cadastro;
+  - cadastro em massa por `simulador/cadastro-em-massa.csv`;
+  - entra pela **API do frontend** e por ela grava a rota, inicia e conclui a entrega.
 - **Lacre:** lacre ativo, trajeto, posição repetida, `message_id` repetido, GPS sem sinal, abertura em trânsito, fora da rota, dentro e fora da geocerca, violação e todos os alertas do catálogo.
+- **Detecção automática:** o servidor abre sozinho `LACRE_ABERTO_EM_TRANSITO` (com `TRAVAR_VALVULA`), `SAIDA_ROTA` e `SAIDA_GEOCERCA`.
 - **Fila:** FluxID fora do ar, espera do vínculo, dispositivo fora do FluxID, reenvio sem duplicar.
-- **Gestor:** encerramento do alerta.
+- **Gestor:** analisa e encerra o alerta e confirma a violação pela API do frontend.
 - **Visualização:** mapa, alertas, eventos, quarentena e histórico do cilindro.
 
 Como rodar:
@@ -338,23 +382,46 @@ Como rodar:
 
 A simulação usa um `oxide.db` novo, numa pasta temporária, e a própria API na porta 3199. O `oxide.db` do projeto não é tocado, e a sua API pode continuar rodando. No fim, mostra o resultado e o caminho do relatório da rodada.
 
-**Ainda não existem:**
-- a detecção automática de geocerca e de rota (o lacre simulado envia os alertas `SAIDA_GEOCERCA` e `SAIDA_ROTA`);
-- o operador pelo frontend (as ações são feitas direto no FluxID, como a API do frontend fará).
+Empresa, pessoa e cadastro em massa são preparados direto no FluxID; o restante passa pela API.
+
+### Usar a API do frontend (`/api/v1/app`)
+
+1. Aplique o script `sql/fluxid/006_api_frontend_rotas.sql` no FluxID (depois do `001` ao `005`).
+2. Defina a senha de quem vai entrar: `npm run senha -- <email>` (a senha é digitada sem aparecer).
+3. No `.env` do servidor, coloque em `APP_ORIGENS` o endereço do frontend (ex.: `http://localhost:5173`).
+4. Suba a API: `npm run dev` ou `npm start`. Os dois leem o `.env`.
+5. Contrato completo: [Contrato-API-Frontend.md](Contrato-API-Frontend.md); Swagger em `/api-docs-fluxid`.
+6. Teste automático contra o FluxID de análise no Docker: `npm run test:app`.
+
+### Saúde, backup e retenção
+
+| Comando ou rota | Para quê |
+| --- | --- |
+| `GET /health` | Situação da API, da Oxide (tamanho das filas), do FluxID e do Worker (última rodada). Responde 200 ou 503 |
+| `npm run backup` | Cópia consistente da `oxide.db` em `backups/` (pode rodar com a API ligada), conferida com `integrity_check`; mantém as 14 mais novas |
+| `npm run retencao` | Mostra o que sairia da Oxide (só o que **já foi sincronizado** há mais de 30 dias). Para apagar: `npm run retencao -- --confirmar`. Faça o backup antes |
+
+Os limites das regras automáticas ficam no `.env` (`REGRA_...`; modelo em `.env.example`).
 
 ## 1.9 O que ainda não existe
 
-- API do frontend sobre o FluxID (próxima etapa, depois da validação da integração).
+- Envio de e-mail (convite e recuperação de senha) e segundo fator de login (MFA).
 - Controle por perfil nas rotas abertas da equipe (`/devices`, `/seals`, `/cylinders`, `/assignments`, `/iot/alerts` de análise e `/sync`).
-- Criação automática de comandos e verificação dos tipos de erro do catálogo (`Tipos-de-Erro.md`), como saída de rota e GPS sem sinal.
-- Justificativa do motorista na saída de rota (fica para a entrega de geofence e rota).
-- Geofence, comandos automáticos e alertas automáticos a partir do `error_type`.
+- Alertas automáticos do catálogo que dependem de agenda: revisão do lacre vencida, teste hidrostático vencido, parada prolongada e movimentação suspeita.
+- Ligação do frontend (`fluxid_integra2026`) com a `/api/v1/app`: é a próxima etapa, junto com aalissonalmeidaq.
 
 ## 1.10 Estado atual
 
-- API em funcionamento, validada pela suíte automatizada (`npm test`, 96/96) e pelo Roteiro de Teste completo no `oxide.db` real (até a versão anterior ao Worker).
-- Worker e integração com o FluxID implementados e testados pela IA em 07/10/2026 (Roteiro v1.10, sem falhas); aprovados por Natã da Silva Baracho em 07/10/2026 (seção 7.23).
-- Próximas entregas: API do frontend sobre o FluxID; geofence e rota; regras e alertas automáticos (incluindo comandos automáticos).
+- API do lacre validada pela suíte automatizada (`npm test`, 108/108) e pelo Roteiro de Teste.
+- Worker e integração com o FluxID aprovados por Natã da Silva Baracho em 07/10/2026 (seção 7.23).
+- Implementados e testados pela IA em 07/10/2026 (`npm run test:app` 45/45, `npm run simular` 65/65), aguardando a validação de Natã (seção 7.25):
+  - API do frontend;
+  - regras automáticas, geocerca e rota;
+  - `/health`, backup e retenção.
+- Próximas entregas:
+  - ligar o frontend à `/api/v1/app`;
+  - aplicar `001` a `006` no FluxID principal;
+  - envio de e-mail.
 - Pendências conhecidas: firmware do ESP32 precisa enviar `seal_status` e `attempt_count` e tratar as respostas da seção 1.5; `nodemon` com vulnerabilidade apenas em desenvolvimento.
 
 ---
@@ -680,11 +747,48 @@ Pedido de Natã da Silva Baracho: simular um lacre de ponta a ponta e um operado
 
 Relatório: [Relatorio-de-Teste-2026-10-07-18h45.md](Doc_tese/Relatorio-de-Teste-2026-10-07-18h45.md). Questionário 7/7 sim: **aprovado por Natã da Silva Baracho** em 07/10/2026.
 
+### 7.25 Sistema completo: API do frontend, regras automáticas e manutenção (07/10/2026)
+Pedido de Natã da Silva Baracho: "preciso que tudo esteja 100% rodando e testado". As decisões D1 a D9 do contrato foram implementadas na recomendação, para validação.
+
+- **FluxID, script `006`:**
+  - sessões, convites e recuperação de senha;
+  - pessoa em várias organizações;
+  - 9 permissões novas;
+  - situação de estoque e chaves de operação;
+  - rotas e desvios;
+  - justificativa do alerta e `tratado_no_fluxid`;
+  - gatilho de `CILINDRO_CRIADO` no histórico.
+
+  Validado num banco novo e no `FluxID_db` do Docker; rodado duas vezes, sem mudança na segunda.
+- **API do frontend** (`src/app/`):
+  - `POST /api/v1/app/<função>`, com 23 funções (as 21 do contrato, mais clientes e entregas);
+  - login com scrypt e token opaco (só o hash no banco), limites de sessão e de tentativas;
+  - CORS por `APP_ORIGENS`;
+  - respostas `{ code }` iguais às do frontend.
+- **Regras automáticas** (`src/regras/`):
+  - no recebimento: bateria, GSM, comando com erro e lacre aberto em trânsito (com `TRAVAR_VALVULA`);
+  - no Worker: sem comunicação, GPS sem sinal, comando sem resposta, saída de rota (margem de 50 m, com desvios) e saída da geocerca;
+  - todas sem repetição e com limites no `.env`.
+- **Worker:** respeita o alerta tratado pelo frontend (D5) e espelha o estado na Oxide.
+- **Manutenção:** `GET /health`, `npm run backup`, `npm run retencao` e `npm run senha`; `npm start` e `npm run dev` passam a ler o `.env`.
+- **Achados corrigidos durante o desenvolvimento:**
+  - o campo `code` do registro criado (ex.: `CIL-000156`) sobrescrevia o `code: "CREATED"` da resposta. Os campos foram renomeados (`cylinder_code`, `seal_code`...) e a resposta passou a proteger o `code`;
+  - a limpeza usaria `last_seen_at`, que fica vazio na maioria das linhas, e apagaria quase toda a telemetria sincronizada. Foi criada a coluna `received_at` (hora de chegada); linhas antigas, sem ela, nunca são apagadas;
+  - o lacre aberto em trânsito só disparava pela telemetria; passou a disparar também pelo evento;
+  - `npm start` não lia o `.env`, e a API do frontend responderia `UNAVAILABLE`.
+- **Testes:**
+  - suíte da API com 108 casos (12 novos: regras automáticas e `/health`), numa cópia da `oxide.db` real, com o checksum do original igual antes e depois;
+  - `npm run test:app`: 45/45 contra o FluxID do Docker;
+  - `npm run simular`: 65/65, com o operador pela API do frontend e detecção automática;
+  - backup e retenção numa cópia.
+
+Relatório: [Relatorio-de-Teste-2026-10-07-23h45.md](Doc_tese/Relatorio-de-Teste-2026-10-07-23h45.md). **Aguardando a validação de Natã da Silva Baracho.**
+
 ## 9. Suíte de testes automatizados (`npm test`)
 
-A suíte `tests/api.test.ts` cobre hoje 96 casos de ponta a ponta:
+A suíte `tests/api.test.ts` cobre hoje 108 casos de ponta a ponta. A API do frontend tem a sua própria, `tests/app.test.ts` (seção 7.25).
 
-1. **Geral & Documentação:** `/`, `/api-docs/`, `/api-docs/swagger-ui-init.js` e a regra de que toda rota do Swagger tem um grupo declarado; página da proposta `/api-docs-fluxid` separada da atual, com as 21 funções em grupos e nenhuma rota `/api/v1/app` ainda.
+1. **Geral & Documentação:** `/`, `/api-docs/`, `/api-docs/swagger-ui-init.js` e a regra de que toda rota do Swagger tem um grupo declarado; página `/api-docs-fluxid` separada, com as mesmas funções que existem em `/api/v1/app` (sem login → `401`, ou `503` sem FluxID; `GET` → `405`).
 2. **Dispositivos:** listagem e busca sem `api_key`, `404`, validação `400`, criação `201`, `device_id` duplicado (`409`), `api_key` já usada (`409`) e `active` inválido (`400`).
 3. **Autenticação:** `401` sem header, `401` com chave inválida, `403` para dispositivo inativo e `200` com chave válida.
 4. **Telemetria:** campos obrigatórios (`400`), payload válido (`202`), `message_id` duplicado (`409`), posição repetida (`200`, sem nova linha), posição nova (nova linha), reenvio de posição repetida (`409`), `attempt_count` em `device_attempt_count`, tipo inválido (`400`), dispositivo inexistente (`404`), chave de outro dispositivo (`403`), `seal_status` inválido (`400`), mudança do lacre na mesma posição (nova linha), `attempt_count` negativo (`400`), latitude fora da faixa (`400`), só latitude (`400`) e JSON malformado (`400`).
@@ -693,7 +797,14 @@ A suíte `tests/api.test.ts` cobre hoje 96 casos de ponta a ponta:
 7. **Alertas:** sem chave (`401`), chave de outro dispositivo (`403`), tipo inválido e `toString` (`400`), severidade inválida (`400`), nome antigo convertido para português com severidade padrão (`201`), severidade informada com campos antigos ignorados (`201`), duplicidade (`409`), código do catálogo (`201`), `CHECK` de tipo, listagem e filtros, transições `EM_ANALISE`/`ENCERRADO` (`200`), transição repetida e reabertura (`409`), encerrar sem motivo (`400`), inexistente (`404`) e `CHECK` de encerramento.
 8. **Associação:** cadastro de lacres e cilindros (inclusive duplicidades), vínculos, conflitos RN04/RN05, lacre danificado que não instala, troca com `replace`, encerramento, histórico, `INSTALADO` manual bloqueado, telemetria com lacre e cilindro do vínculo e os três `error_type`.
 9. **Integração com o FluxID:** rotas `/sync/status`, `/sync/problems` e `/sync/retry`, alerta que volta à fila ao mudar de status, autenticação pelo hash da chave (a chave em texto guardada deixa de valer) e `api_key_hash` fora das respostas.
-10. **Limpeza:** remoção dos registros `DSP-TEST%`, `LCR-TEST%` e `CIL-TEST%` ao final.
+10. **Regras automáticas e saúde:**
+    - `BATERIA_BAIXA`, `GSM_SINAL_FRACO`, `COMANDO_FALHOU` e `LACRE_ABERTO_EM_TRANSITO` com `TRAVAR_VALVULA`;
+    - sem repetição, e nada para dispositivo sem lacre e cilindro;
+    - último contato e última posição;
+    - `GPS_SEM_SINAL`, `SEM_COMUNICACAO` e `COMANDO_SEM_RESPOSTA` pela rodada periódica;
+    - distâncias da rota e da geocerca;
+    - `GET /health`.
+11. **Limpeza:** remoção dos registros `DSP-TEST%`, `LCR-TEST%` e `CIL-TEST%` ao final.
 
 ### Correção no cadastro de dispositivos (fase inicial)
 - Problema: quando `active` era omitido, o valor chegava como `undefined`, virava `NULL` e violava o `NOT NULL` (erro `500`).
@@ -703,7 +814,7 @@ A suíte `tests/api.test.ts` cobre hoje 96 casos de ponta a ponta:
 
 # Parte 3 — Histórico de PRs por funcionalidade
 
-Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **aprovada por Natã da Silva Baracho**. Esta parte e a seção "Quem faz o quê" (1.1) foram conferidas por questionário (6/6 sim) e **aprovadas por Natã da Silva Baracho** em 06/10/2026. O PR que mexeu em mais de uma parte aparece em cada grupo, só com o que mudou naquela parte. A cada novo PR, esta parte é atualizada.
+Os PRs abaixo foram mesclados na `main` em 06 e 07/10/2026, com validação **aprovada por Natã da Silva Baracho**; o #19 (sistema completo) está aguardando a validação. Esta parte e a seção "Quem faz o quê" (1.1) foram conferidas por questionário (6/6 sim) e **aprovadas por Natã da Silva Baracho** em 06/10/2026. O PR que mexeu em mais de uma parte aparece em cada grupo, só com o que mudou naquela parte. A cada novo PR, esta parte é atualizada.
 
 ## 3.1 API
 
@@ -718,6 +829,7 @@ Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **a
 | #14 | Swagger em grupos | 8 grupos com explicação (Dispositivos, Telemetria, Eventos, Comandos, Alertas, Lacres, Cilindros, Vínculos), sem grupo "default"; teste que barra rota sem grupo |
 | #15 | Integração Oxide ⇄ FluxID | Chave por hash; alerta volta à fila ao mudar de status; rotas `/sync/*` e grupo "Sincronização" |
 | #17 | Simulador e série do cilindro | Cadastro provisório de cilindro aceita série repetida (o código continua único); simulador `npm run simular` |
+| #19 | Sistema completo (aguardando validação) | API do frontend `/api/v1/app` (23 funções, login próprio, CORS); alertas automáticos no recebimento (bateria, GSM, lacre aberto em trânsito com `TRAVAR_VALVULA`, comando com erro); último contato do dispositivo; `GET /health`; `npm run senha`, `backup` e `retencao`; `npm start` lê o `.env` |
 
 ## 3.2 Oxide (`oxide.db`)
 
@@ -730,6 +842,7 @@ Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **a
 | #12 | Alertas em português | `alerts` com `CHECK` do catálogo em `alert_type`, colunas `resolved_by` e `resolution_note` e `CHECK` de `ENCERRADO` com data; migração automática dos tipos em inglês; `Oxidedb.md` v1.6 validado |
 | #15 | Integração Oxide ⇄ FluxID | `next_attempt_at` na telemetria e nos eventos; `sync_*` nos alertas; `devices.api_key_hash`; `fluxid_id` nos vínculos; tabela `sync_logs`; `Oxidedb.md` v1.7 |
 | #17 | Simulador e série do cilindro | `cylinders.serial_number` sem `UNIQUE` (série única só por empresa, no FluxID); migração preservando os dados; `Oxidedb.md` v1.8 |
+| #19 | Sistema completo (aguardando validação) | `devices.last_contact_at`, `last_telemetry_at` e `last_position_at`; `received_at` na telemetria e nos eventos; alertas `AUT-...` e comandos `CMD-...` criados pelo servidor; backup e retenção; `Oxidedb.md` v1.9 |
 
 ## 3.3 FluxID
 
@@ -746,6 +859,7 @@ Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **a
 | #14 | Docker e dump | FluxID de análise no Docker (container `fluxid-analise`, PostGIS 18), com `001`, `002` e `003` aplicados; dump movido para `sql/fluxid/FluxID.sql` |
 | #15 | Integração Oxide ⇄ FluxID | Script `004` (P1 a P8, gatilho FLX-26) e `005` (estruturas do frontend, histórico do cilindro integrado com a Oxide) |
 | #17 | Simulador | O simulador usa o FluxID de análise: operador (cadastro unitário, em massa por CSV, rota como entrega) e conferência dos dados que chegam |
+| #19 | Sistema completo (aguardando validação) | Script `006` (sessões, convites, pessoa em várias organizações, permissões novas, estoque, rotas e desvios, justificativa do alerta, histórico de criação do cilindro), lido e gravado pela API do frontend; `Banco_FluxID.md` v3.4 |
 
 ## 3.4 Worker
 
@@ -761,3 +875,4 @@ Implementado e aprovado em 07/10/2026 (PR #15). O que levou até ele:
 | #13 | Alerta com cilindro e lacre | O Worker busca o lacre e o cilindro do vínculo válido na data do alerta; sem vínculo, o alerta fica em erro na Oxide para o gestor |
 | #15 | Integração Oxide ⇄ FluxID | Worker completo (`src/worker/`, `npm run worker`): envio da fila, tentativas, espera do P3, cadastro de volta com o hash da chave |
 | #17 | Simulador | O simulador exercita o Worker de ponta a ponta: cadastro sem conflitos, fila, FluxID fora do ar, espera do vínculo e reenvio |
+| #19 | Sistema completo (aguardando validação) | Regras automáticas a cada rodada (sem comunicação, GPS sem sinal, comando sem resposta, saída de rota e da geocerca); o alerta tratado pelo frontend não é sobrescrito e é espelhado na Oxide (D5) |

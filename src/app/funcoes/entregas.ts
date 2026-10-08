@@ -129,8 +129,8 @@ export async function manageDeliveries(banco: Pool, ctx: Contexto, corpo: Linha)
         if (typeof corpo.state !== "string" || !/^[A-Za-z]{2}$/.test(corpo.state)) campos.push({ field: "state", message: "UF com 2 letras." });
         if (typeof corpo.latitude !== "number" || Math.abs(corpo.latitude) > 90) campos.push({ field: "latitude", message: "Latitude inválida." });
         if (typeof corpo.longitude !== "number" || Math.abs(corpo.longitude) > 180) campos.push({ field: "longitude", message: "Longitude inválida." });
-        const raio = corpo.geofence_radius_meters ?? 200;
-        if (!Number.isInteger(raio) || raio < 10 || raio > 50000) campos.push({ field: "geofence_radius_meters", message: "Raio de 10 a 50000 metros." });
+        const raio = corpo.geofence_radius_meters ?? 10;
+        if (!Number.isInteger(raio) || raio < 5 || raio > 50000) campos.push({ field: "geofence_radius_meters", message: "Raio de 5 a 50000 metros." });
         if (campos.length) return invalido(campos);
         return transacao(banco, ctx, async client => {
           const cliente = (await client.query("SELECT id FROM public.destinatarios WHERE id = $1 AND organizacao_id = $2", [corpo.customer_id, org])).rows[0];

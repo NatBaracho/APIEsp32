@@ -1,8 +1,8 @@
 # Integração Oxide ⇄ FluxID
 
-**Versão:** 2.0 — 07/10/2026 (Worker implementado, testado e aprovado por Natã da Silva Baracho em 07/10/2026)
+**Versão:** 2.1 — 07/10/2026 (2.0 aprovada por Natã da Silva Baracho em 07/10/2026; 2.1: regras automáticas, D5 e comandos do frontend, aguardando validação)
 **Público:** equipe do projeto, quem mantém a API Oxide e quem vai construir a API do frontend sobre o FluxID.
-**Base:** API Oxide, `oxide.db` e dump `sql/fluxid/FluxID.sql` de 23/09/2026 com os scripts `sql/fluxid/001` a `005`.
+**Base:** API Oxide, `oxide.db` e dump `sql/fluxid/FluxID.sql` de 23/09/2026 com os scripts `sql/fluxid/001` a `006`.
 
 Este documento diz **como cada dado da Oxide vira um registro do FluxID**, como o **cadastro oficial do FluxID volta para a Oxide** e quais **decisões** orientam o Worker (seção 5). A versão 1.1 era só o plano; desde a 2.0, tudo o que está aqui foi implementado (`src/worker/` e scripts `004` e `005`). A verificação técnica e o teste formal da IA (Roteiro v1.10, sem falhas) estão no relatório `Doc/Doc_tese/Relatorio-de-Teste-2026-10-07-01h30.md`; questionário com 15/15 sim, aprovado por Natã da Silva Baracho em 07/10/2026.
 
@@ -14,7 +14,9 @@ Este documento diz **como cada dado da Oxide vira um registro do FluxID**, como 
 ESP32 (lacre) → API Oxide → oxide.db (fila: PENDING)
                                 ↓   Worker (npm run worker), a cada 10 s
                                 ↓   1. traz o cadastro do FluxID (a cada 5 min)
-                                ↓   2. envia telemetria, eventos e alertas
+                                ↓   2. envia telemetria e eventos
+                                ↓   3. roda as regras automáticas (seção 3.5)
+                                ↓   4. envia os alertas (os do lacre e os automáticos)
                                 ↓      (cada linha numa transação no FluxID)
                            FluxID (PostgreSQL) ← banco principal, lido pelo frontend
 ```
@@ -99,7 +101,10 @@ Casos especiais:
 - **Sem lacre ou sem cilindro naquela data:** o alerta **não vai** ao FluxID e fica parado na Oxide, com a explicação, para o gestor. O sistema nunca preenche com um vínculo de outro momento.
   - Exceções, só para códigos de cadastro: sem cilindro, `LACRE_SEM_CILINDRO`, `DISPOSITIVO_SEM_LACRE`, `DISPOSITIVO_NAO_CADASTRADO` e `CHAVE_INVALIDA`; sem lacre, só os três últimos.
 - **Código já usado no FluxID por outro alerta** (ex.: a massa de testes já tem `ALT-000001`): o alerta fica parado para o gestor.
-- **Análise e encerramento na Oxide** (`PATCH /api/v1/iot/alerts/{alert_id}/status`): o alerta volta para a fila. O Worker **atualiza** o mesmo alerta no FluxID (status, encerramento, quem e motivo).
+- **Análise e encerramento na Oxide** (`PATCH /api/v1/iot/alerts/{alert_id}/status`, rota de teste): o alerta volta para a fila. O Worker **atualiza** o mesmo alerta no FluxID (status, encerramento, quem e motivo), **desde que ele ainda não tenha sido tratado pelo frontend**.
+- **Tratado pelo frontend (D5):** quem analisa, justifica ou encerra pela API do frontend grava direto no FluxID e marca `alertas.tratado_no_fluxid = true`. A partir daí:
+  - o Worker **não sobrescreve** mais esse alerta;
+  - a cada rodada, o Worker **copia o novo estado para a Oxide**, sem reenviá-lo, para a regra de "não repetir alerta aberto" (seção 3.5) enxergar o encerramento.
 - **Gatilho FLX-26 (script `004`):** o FluxID recusa qualquer alerta cujo par lacre + cilindro não tinha vínculo naquela data, mesmo que gravado por outra via.
 - **Histórico do cilindro (script `005`):** todo alerta com cilindro entra sozinho no histórico do cilindro (`ALERTA_REGISTRADO`, e `ALERTA_ENCERRADO` ao encerrar), com origem `OXIDE`.
 
@@ -107,7 +112,41 @@ Casos especiais:
 
 ### 3.4 Comandos
 
-O FluxID não tem tabela de comandos. Os comandos (`TRAVAR_VALVULA`, `DESTRAVAR_VALVULA`) continuam **só na Oxide** (decisão da entrega D). Criar comandos pelo frontend fica para a API do frontend.
+O FluxID não tem tabela de comandos. Os comandos (`TRAVAR_VALVULA`, `DESTRAVAR_VALVULA`) ficam **só na Oxide**. Eles são criados por dois caminhos:
+- **pelo frontend** (`manage-commands`), com login, permissão `ENVIAR_COMANDOS` e justificativa (D8); a criação fica na `auditoria` do FluxID;
+- **pela regra automática** de lacre aberto em trânsito (seção 3.5).
+
+O ESP32 busca e confirma como antes. Não se cria um segundo comando pendente igual para o mesmo dispositivo.
+
+### 3.5 Alertas automáticos (gerados pela API e pelo Worker)
+
+O servidor abre alertas sozinho. Eles entram em `alerts` como os do lacre, com código `AUT-<hora>-<aleatório>` (até 20 caracteres), e vão ao FluxID pelo caminho normal (seção 3.3).
+
+| Alerta | Regra | Onde |
+| --- | --- | --- |
+| `BATERIA_BAIXA` | bateria abaixo de `REGRA_BATERIA_MINIMA` (15%) | recebimento da telemetria |
+| `GSM_SINAL_FRACO` | sinal abaixo de `REGRA_GSM_MINIMO_DBM` (-105 dBm) | recebimento da telemetria |
+| `LACRE_ABERTO_EM_TRANSITO` | lacre `UNLOCKED`/`BROKEN` com o cilindro `EM_TRANSITO`, por telemetria ou evento; cria também `TRAVAR_VALVULA` | recebimento |
+| `COMANDO_FALHOU` | comando confirmado com `ERRO` | recebimento da confirmação |
+| `SEM_COMUNICACAO` | último contato há mais de `REGRA_SEM_COMUNICACAO_MINUTOS` (30) | Worker |
+| `GPS_SEM_SINAL` | telemetria recente, mas sem posição há mais de `REGRA_GPS_SEM_SINAL_MINUTOS` (15) | Worker |
+| `COMANDO_SEM_RESPOSTA` | comando pendente há mais de `REGRA_COMANDO_SEM_RESPOSTA_MINUTOS` (10) | Worker |
+| `SAIDA_ROTA` | entrega `EM_ANDAMENTO` com rota: a última posição do cilindro depois da saída está mais longe da linha da rota que a margem (padrão 50 m, `REGRA_MARGEM_ROTA_METROS`), fora de um desvio programado ou justificado | Worker (lê o FluxID) |
+| `SAIDA_GEOCERCA` | custódia aberta (cilindro com o cliente): a última posição depois do início da custódia está fora do raio do endereço | Worker (lê o FluxID) |
+
+Regras comuns:
+- **Só com lacre e cilindro:** o alerta só é aberto se o dispositivo está num lacre que está num cilindro (o FluxID exige os dois, script `003`).
+- **Sem repetição:** não abre outro do mesmo tipo para o mesmo dispositivo enquanto houver um aberto, nem antes de `REGRA_REPETICAO_MINUTOS` (30) depois do último.
+- **Falha isolada:** se uma regra falhar, o dado do lacre é salvo do mesmo jeito e a rodada do Worker fica `PARCIAL`, com o motivo em `sync_logs`.
+- **Distâncias:** projeção plana local; o erro é desprezível em distâncias de entrega.
+- **Um Worker por FluxID:** as regras de rota e geocerca leem todas as empresas do FluxID. Duas Oxides com Workers no mesmo FluxID abririam o mesmo alerta duas vezes, uma em cada. Em produção há uma Oxide e um Worker. No FluxID de análise (Docker), cada rodada de teste tem a sua Oxide, e por isso alertas de rodadas antigas podem aparecer de novo; isso não afeta o resultado dos testes.
+
+**Último contato.** A Oxide registra três horários em `devices`, a partir de cada mensagem autenticada (telemetria, evento, busca e confirmação de comando):
+- `last_contact_at`: o último contato;
+- `last_telemetry_at`: a última telemetria;
+- `last_position_at`: a última posição.
+
+**Status do cilindro.** A Oxide só sabe que o cilindro está `EM_TRANSITO` depois da sincronização do cadastro (até 5 minutos depois de a entrega sair). Até lá, um lacre aberto não é reconhecido como "em trânsito".
 
 ## 4. FluxID → Oxide: o cadastro oficial
 
@@ -173,7 +212,17 @@ Decididas por **Natã da Silva Baracho**. Registro conferido por questionário (
 | `GET /api/v1/sync/problems?queue=telemetry\|events\|alerts` | Linhas com problema e o motivo |
 | `POST /api/v1/sync/retry` `{ "queue": "...", "key": "..." }` | Depois de corrigir a causa, manda a linha de volta para a fila (zera as tentativas) |
 
-**Ordem dos scripts no FluxID:** `001` → `002` → `003` → `004` → `005` (seção 17 do `Banco_FluxID.md`).
+**Ordem dos scripts no FluxID:** `001` → `002` → `003` → `004` → `005` → `006` (seção 17 do `Banco_FluxID.md`).
+
+**Saúde e manutenção:**
+
+| Comando ou rota | Para quê |
+| --- | --- |
+| `GET /health` | Oxide, FluxID e Worker (última rodada, atrasado ou não) e o tamanho das filas. Responde 200 ou 503. Não mostra a conexão |
+| `npm run backup` | Cópia consistente da `oxide.db` em `backups/` (funciona com a API ligada), conferida com `integrity_check`. Mantém as 14 mais novas (`BACKUP_MANTER`) |
+| `npm run retencao` | Mostra o que sairia da Oxide: telemetria e eventos **já sincronizados** há mais de 30 dias (`RETENCAO_DIAS`) e rodadas antigas do Worker. Só apaga com `npm run retencao -- --confirmar` |
+
+Linhas sem hora de chegada (`received_at`, anteriores a esta versão) nunca são apagadas pela retenção.
 
 ## 7. Situação
 
@@ -182,4 +231,6 @@ Decididas por **Natã da Silva Baracho**. Registro conferido por questionário (
 3. ✅ Worker, chave por hash e cadastro de volta implementados. Verificação técnica feita pela IA no Docker.
 4. ✅ Teste formal da IA (Roteiro v1.10, seção 5.10) em 07/10/2026, sem falhas.
 5. ✅ Validação de Natã da Silva Baracho: questionário 15/15 sim (07/10/2026).
-6. ⏳ Aplicar `001` a `005` no `FluxID_db` principal e gerar o novo dump.
+6. ✅ Regras automáticas, D5 e comandos do frontend: testados pela IA em 07/10/2026 (suíte da API, `npm run test:app` e `npm run simular`, sem falhas).
+7. ⏳ Validação de Natã da Silva Baracho da versão 2.1 (relatório `Relatorio-de-Teste-2026-10-07-23h45.md`).
+8. ⏳ Aplicar `001` a `006` no `FluxID_db` principal e gerar o novo dump.

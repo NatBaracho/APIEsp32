@@ -9,7 +9,8 @@ Este documento descreve as regras implementadas na API, o schema do SQLite Oxide
 - Banco principal do projeto: PostgreSQL FluxID.
 - Banco local SQLite: `oxide.db` no diretório de trabalho do processo (`process.cwd()`); a Oxide funciona como buffer persistente da API.
 - A conexão habilita `PRAGMA foreign_keys = ON`.
-- A API utiliza o banco local SQLite (`oxide.db`) como buffer de ingestão. Através desta API e de um Worker (como o `SyncService`, atualmente preparado como estrutura), os dados serão sincronizados com o banco principal PostgreSQL (FluxID).
+- A API utiliza o banco local SQLite (`oxide.db`) como buffer de ingestão. O Worker (`npm run worker`) sincroniza os dados com o banco principal PostgreSQL (FluxID).
+- A mesma API atende o frontend em `/api/v1/app`, lendo e gravando direto no FluxID ([Contrato-API-Frontend.md](Contrato-API-Frontend.md)).
 - O arquivo `sql/fluxid/FluxID.sql` é um dump PostgreSQL em formato custom, identificado pela assinatura `PGDMP`; apesar da extensão, não é um script SQL texto e deve ser tratado com `pg_restore`.
 
 ## 2. Rotas disponíveis
@@ -30,8 +31,12 @@ Este documento descreve as regras implementadas na API, o schema do SQLite Oxide
 | `GET/POST /api/v1/cylinders`, `GET /cylinders/:cylinderCode`, `POST /cylinders/:cylinderCode/status` | Cadastro e estado de cilindros (provisório). | `200`/`201`; `400`; `404`; `409` |
 | `GET/POST /api/v1/assignments/device-seal`, `POST /device-seal/:id/end` | Vínculo dispositivo ↔ lacre e histórico. | `200`/`201`; `400`; `404`; `409` |
 | `GET/POST /api/v1/assignments/seal-cylinder`, `POST /seal-cylinder/:id/end` | Vínculo lacre ↔ cilindro e histórico. | `200`/`201`; `400`; `404`; `409` |
+| `GET/PATCH /api/v1/iot/alerts`, `/iot/alerts/{alert_id}/status` | Lista, analisa e encerra alertas (abertas e provisórias, para teste). | `200`; `400`; `404`; `409` |
+| `GET/POST /api/v1/sync/*` | Situação da fila do Worker e nova tentativa. | `200`; `400`; `404` |
+| `GET /health` | Saúde da API, da Oxide, do FluxID e do Worker. | `200`; `503` |
+| `POST /api/v1/app/<função>` | API do frontend (login próprio; ver o contrato). | `{ code }` com o HTTP do contrato |
 
-Não existe endpoint HTTP para criar/enfileirar comandos, nem para consultar, resolver ou atualizar alertas.
+Não existe rota da API do lacre para criar comandos. Eles nascem da regra automática ou do frontend (`manage-commands`, com login, permissão e justificativa).
 
 ## 3. Autenticação e autorização atuais
 
@@ -110,8 +115,13 @@ Respostas do middleware: `401` para chave ausente ou inválida; `403` para dispo
 - Ao confirmar, o banco grava o status e `executed_at = CURRENT_TIMESTAMP`; `error_message` é gravado ou fica nulo.
 - Comando inexistente para o dispositivo retorna `404`; comando já confirmado retorna `409`.
 - Tipos de comando aceitos: `TRAVAR_VALVULA` e `DESTRAVAR_VALVULA`. O banco rejeita comando `PENDENTE` com outro tipo; comandos já executados ou com erro podem guardar tipos antigos (histórico).
-- A criação de comandos não tem rota HTTP, por decisão de segurança (uma rota aberta permitiria destravar válvulas). Os comandos são criados pelo sistema: hoje direto no banco; no futuro, pelos comandos automáticos.
-- Os comandos ficam só na Oxide; a tabela correspondente no FluxID será decidida na fase do Worker.
+- A criação de comandos não tem rota aberta, por segurança (uma rota aberta permitiria destravar válvulas). Os comandos são criados:
+  - pela regra automática: lacre aberto ou rompido com o cilindro em trânsito → `TRAVAR_VALVULA`;
+  - pelo frontend (`manage-commands`), com login, permissão `ENVIAR_COMANDOS`, justificativa e auditoria no FluxID (D8).
+
+  Não se cria um segundo comando pendente do mesmo tipo para o mesmo dispositivo. O código é `CMD-...`.
+- Confirmação com `ERRO` abre o alerta `COMANDO_FALHOU`; pendente há mais de 10 min abre `COMANDO_SEM_RESPOSTA`.
+- Os comandos ficam só na Oxide (o FluxID não tem tabela de comandos).
 
 ### 4.5 Alertas
 
@@ -125,7 +135,15 @@ Respostas do middleware: `401` para chave ausente ou inválida; `403` para dispo
 - A rota valida que a API Key pertence ao `device_id` informado.
 - `GET /api/v1/iot/alerts` lista os alertas (filtros `status` e `device_id`), do mais recente ao mais antigo.
 - `PATCH /api/v1/iot/alerts/{alert_id}/status` muda o status: `ABERTO` → `EM_ANALISE` → `ENCERRADO`, ou `ABERTO` → `ENCERRADO`. Encerrar exige `resolved_by` (quem liberou) e `resolution_note` (motivo), e a data é preenchida pelo servidor. `ENCERRADO` é final (`409`): um problema novo gera um alerta novo. As duas rotas são abertas e provisórias, até o controle por perfil do FluxID.
-- Os tipos `SAIDA_GEOCERCA` e `SAIDA_ROTA` são aceitos, mas ainda não existe lógica de geofence ou rota que os gere automaticamente.
+- **Alertas automáticos** (código `AUT-...`):
+  - no recebimento: `BATERIA_BAIXA` (< 15%), `GSM_SINAL_FRACO` (< -105 dBm), `LACRE_ABERTO_EM_TRANSITO` e `COMANDO_FALHOU`;
+  - no Worker: `SEM_COMUNICACAO` (30 min), `GPS_SEM_SINAL` (15 min), `COMANDO_SEM_RESPOSTA` (10 min), `SAIDA_ROTA` (margem de 50 m, fora de desvio) e `SAIDA_GEOCERCA` (raio do endereço do cliente).
+
+  Regras:
+  - só para dispositivo num lacre com cilindro;
+  - sem repetir enquanto houver um aberto do mesmo tipo, nem antes de 30 min do último;
+  - limites no `.env`.
+- **Alerta tratado pelo frontend (D5):** o FluxID manda. A Oxide recebe o novo estado do Worker, sem reenviar.
 
 ### 4.6 Associação dispositivo → lacre → cilindro
 
@@ -152,6 +170,8 @@ Os nomes e constraints abaixo correspondem ao `oxide.db` inspecionado e ao schem
 | `firmware_version` | `TEXT`, opcional. |
 | `active` | `INTEGER NOT NULL DEFAULT 1`; só aceita `0` ou `1` (triggers `trg_devices_active_insert`/`_update`); middleware considera ativo apenas o valor `1`. |
 | `device_status_id`, `valve_status_id`, `seal_status_id` | `INTEGER`, opcionais e sem FK atualmente. |
+| `api_key_hash` | `TEXT`, opcional; SHA-256 da chave vindo do FluxID. Quando existe, a chave em texto deixa de valer. |
+| `last_contact_at`, `last_telemetry_at`, `last_position_at` | `DATETIME` (UTC), preenchidos pela API a cada mensagem autenticada; usados por `SEM_COMUNICACAO` e `GPS_SEM_SINAL`. |
 
 ### `status`
 
@@ -183,6 +203,7 @@ A inicialização insere, se estiverem ausentes, os códigos `ACTIVE`, `INACTIVE
 | `status` | `TEXT NOT NULL DEFAULT 'PENDING'`. |
 | `attempt_count` | `INTEGER NOT NULL DEFAULT 0`. |
 | `last_error` | `TEXT`, opcional. |
+| `received_at` | `DATETIME` (UTC), hora de chegada. A retenção só apaga o que está `SYNCED` e chegou há mais de 30 dias; linhas sem essa data nunca saem. |
 
 ### `events`
 
@@ -284,9 +305,10 @@ A inicialização insere, se estiverem ausentes, os códigos `ACTIVE`, `INACTIVE
 
 ## 7. Funcionalidades ainda fora do escopo implementado
 
-- Geofence: configuração de áreas e detecção de entrada/saída.
-- Geração automática de comandos.
-- Teste formal do Worker e da integração com o PostgreSQL (implementados, testados e aprovados em 07/10/2026).
+- Alertas de agenda: revisão do lacre vencida, teste hidrostático vencido, parada prolongada e movimentação suspeita.
+- Aviso ativo ao motorista e ao gestor (SMS, e-mail ou notificação): hoje o alerta aparece no frontend.
+- Envio de e-mail (convite e recuperação de senha) e MFA.
+- Geocerca, rota e comandos automáticos: **implementados em 07/10/2026**, aguardando a validação de Natã da Silva Baracho.
 
 ## 8. Banco principal PostgreSQL FluxID
 
@@ -335,7 +357,7 @@ O fluxo completo, com as tabelas de conversão, as decisões P1 a P8 e as escolh
 - ✅ A Oxide guarda `api_key_hash` e compara o SHA-256 da `X-API-Key`.
 - ✅ Teste formal do Worker pela IA (07/10/2026, sem falhas).
 - ✅ Validação de Natã da Silva Baracho (07/10/2026).
-- ⏳ Aplicar `001` a `005` no banco principal e gerar um novo dump.
+- ⏳ Aplicar `001` a `006` no banco principal e gerar um novo dump.
 - Credenciais do PostgreSQL: só no `.env` (fora do git), nunca registradas em documento.
 
 Para o script de criação do banco e instruções do DB Browser, consulte [Oxidedb.md](Oxidedb.md). Para payloads do firmware, consulte [ESP32-envio-de-dados.md](ESP32-envio-de-dados.md).

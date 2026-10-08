@@ -1,11 +1,11 @@
 # Plano de Teste — FluxID / Oxide IoT
 
-**Versão:** 1.12
-**Data:** 06/10/2026
-**Escopo:** API Oxide (Node.js + TypeScript + Express + SQLite), sincronização com o PostgreSQL FluxID e API FluxID (NestJS) planejada
+**Versão:** 1.13
+**Data:** 07/10/2026
+**Escopo:** API Oxide (Node.js + TypeScript + Express + SQLite), sincronização com o PostgreSQL FluxID, API do frontend sobre o FluxID (`/api/v1/app`) e regras automáticas
 **Validação humana:** Natã da Silva Baracho
 
-> Este plano consolida o que já foi implementado e testado (suíte `tests/api.test.ts`, 96 casos) e o que ainda precisa ser testado conforme o `Checklist-Projeto.md`, o `Banco_FluxID.md` (v3.0) e o `Regras-de-Negocio-e-Banco-Oxide.md`. Cada caso indica sua situação: **Automatizado**, **Manual executado** ou **Pendente**.
+> Este plano consolida o que já foi implementado e testado (suíte `tests/api.test.ts`, 108 casos; `tests/app.test.ts`, 45 verificações da API do frontend) e o que ainda precisa ser testado conforme o `Checklist-Projeto.md`, o `Banco_FluxID.md` (v3.0) e o `Regras-de-Negocio-e-Banco-Oxide.md`. Cada caso indica sua situação: **Automatizado**, **Manual executado** ou **Pendente**.
 
 ---
 
@@ -341,30 +341,37 @@ Implementada na Oxide como cópia provisória do FluxID: rotas abertas `/seals`,
 | HIS-04 | Associar, desassociar e reassociar o mesmo par | Três registros distintos | P |
 | HIS-05 | Períodos sem sobreposição para o mesmo ativo | Garantido pelos índices únicos parciais (`ended_at IS NULL`) | A |
 
-### 10.3 Geofence (RN10 e RN11)
+### 10.3 Geocerca e rota (RN10 e RN11)
 
-| ID | Caso | Esperado |
-| --- | --- | --- |
-| GEO-01 | Cadastro de geofence (formato e raio, referência inicial de 10 m, configurável) | Persistido e vinculado |
-| GEO-02 | Posição dentro do raio | Nenhum alerta |
-| GEO-03 | Posição exatamente no limite | Comportamento definido e documentado |
-| GEO-04 | Saída da área | Evento e alerta `GEOFENCE_EXIT` criados |
-| GEO-05 | Múltiplas telemetrias fora da área em sequência | Um único alerta por transição (sem duplicidade) |
-| GEO-06 | Reentrada e nova saída | Novo alerta |
-| GEO-07 | Coordenadas inválidas ou ausentes | Rejeitadas ou ignoradas conforme regra; nunca geram alerta falso |
-| GEO-08 | Telemetria sem GPS | Não gera saída |
-| GEO-09 | Geofence sem dispositivo vinculado | Nenhuma avaliação |
+> Implementadas em 07/10/2026 (`src/regras/`). A geocerca é o raio do endereço do cliente (`locais_entrega.raio_geocerca_metros`), avaliada enquanto a custódia está aberta. A rota é uma linha de pontos com margem (padrão 50 m), avaliada enquanto a entrega está `EM_ANDAMENTO`. Sit.: A = automatizado (`test:app`, suíte ou simulador); P = pendente.
+
+| ID | Caso | Esperado | Sit. |
+| --- | --- | --- | --- |
+| GEO-01 | Endereço com raio e rota com pontos e margem, gravados pela API do frontend | Persistidos (`create_location`, `set_route`) | A |
+| GEO-02 | Posição dentro do raio do cliente (≈ 60 m de 200 m; 3,3 m de 10 m no simulador) | Nenhum alerta | A |
+| GEO-03 | Posição exatamente no limite | Só abre alerta se a distância for **maior** que o raio ou a margem | P (documentado) |
+| GEO-04 | Saída do raio do cliente | Alerta automático `SAIDA_GEOCERCA` (ALTA) com lacre e cilindro | A |
+| GEO-05 | Várias posições fora em sequência | Um único alerta enquanto estiver aberto (e 30 min depois de encerrado) | A |
+| GEO-06 | Encerrado o alerta e passado o intervalo, nova saída | Novo alerta | A (REG-11) |
+| GEO-07 | Pontos de rota inválidos | `set_route` recusa (`400`); rota com pontos ruins no banco vira erro da rodada, sem alerta falso | A |
+| GEO-08 | Telemetria sem GPS | Não entra na avaliação (só `telemetrias`, não a quarentena) | A |
+| GEO-09 | Cilindro sem custódia aberta ou sem entrega em andamento | Nenhuma avaliação | A |
+| GEO-10 | Posição sobre a rota (≈ 22 m da linha, margem de 50 m) | Nenhum alerta | A |
+| GEO-11 | Posição a ≈ 330 m da rota | Alerta automático `SAIDA_ROTA` (ALTA) | A |
+| GEO-12 | Desvio `JUSTIFICADO` cobrindo o momento da posição | Regra de rota suspensa; nenhum alerta novo | A |
+| GEO-13 | Distâncias | Ponto a 0,001° da linha → 111,2 m; mesmo ponto → 0 | A |
 
 ### 10.4 Comandos automáticos
 
 | ID | Caso | Esperado |
 | --- | --- | --- |
-| AUT-C01 | Condição atendida (ex.: lacre `BROKEN` ou saída de geofence) | Comando criado `PENDENTE` |
-| AUT-C02 | Condição não atendida | Nenhum comando |
-| AUT-C03 | Mesmo gatilho repetido | Idempotência: sem comando duplicado |
-| AUT-C04 | Expiração de comando não executado | Estado definido e não retornado como pendente |
-| AUT-C05 | Falha (`ERRO`) | Política de repetição conforme regra |
-| AUT-C06 | Confirmação do comando automático pelo dispositivo | Mesmo fluxo da seção 6.6 |
+| AUT-C01 | Lacre `UNLOCKED` ou `BROKEN` com o cilindro `EM_TRANSITO` (telemetria ou evento) | `TRAVAR_VALVULA` criado `PENDENTE` e alerta `LACRE_ABERTO_EM_TRANSITO` (A) |
+| AUT-C02 | Lacre aberto com o cilindro fora de trânsito | Nenhum comando (A, simulador etapa 8) |
+| AUT-C03 | Mesmo gatilho repetido | Sem segundo comando pendente igual (A) |
+| AUT-C04 | Comando sem confirmação há mais de 10 min | Alerta `COMANDO_SEM_RESPOSTA`; o comando continua pendente (não expira) (A) |
+| AUT-C05 | Confirmação com `ERRO` | Alerta `COMANDO_FALHOU`; sem nova tentativa automática (A) |
+| AUT-C06 | Confirmação do comando automático pelo dispositivo | Mesmo fluxo da seção 6.6 (A, `test:app`) |
+| AUT-C07 | Comando pelo frontend (`manage-commands send`) | Exige `ENVIAR_COMANDOS` (`403` sem ela) e justificativa (`400`); `COMMAND_QUEUED`; repetido → `COMMAND_ALREADY_PENDING`; auditoria `AUTORIZACAO` (A) |
 
 ### 10.5 Worker SQLite → PostgreSQL
 
@@ -413,7 +420,7 @@ Implementada na Oxide como cópia provisória do FluxID: rotas abertas `/seals`,
 
 ### 10.7 Simulação do lacre (`npm run simular`)
 
-Ferramenta de teste de ponta a ponta, fora da suíte: cada rodada faz cerca de 58 verificações, sobre a Oxide e o FluxID de análise no Docker. Relatório: [Relatorio-de-Teste-2026-10-07-18h45.md](Relatorio-de-Teste-2026-10-07-18h45.md).
+Ferramenta de teste de ponta a ponta, fora da suíte. Cada rodada faz 65 verificações sobre a Oxide e o FluxID de análise no Docker. Relatórios: [Relatorio-de-Teste-2026-10-07-18h45.md](Relatorio-de-Teste-2026-10-07-18h45.md) (58 verificações) e [Relatorio-de-Teste-2026-10-07-23h45.md](Relatorio-de-Teste-2026-10-07-23h45.md) (65).
 
 | ID | Caso | Esperado |
 | --- | --- | --- |
@@ -422,12 +429,65 @@ Ferramenta de teste de ponta a ponta, fora da suíte: cada rodada faz cerca de 5
 | SIM-03 | Operador: cadastro em massa (CSV) | 20 conjuntos numa transação; reimportação recusada inteira |
 | SIM-04 | Cadastro FluxID → Oxide | 0 conflitos; todos os cilindros da empresa copiados (achado A3) |
 | SIM-05 | Lacre ativo, trajeto, duplicidade e GPS sem sinal | `202`, `200` na posição repetida, `409` no `message_id` repetido, quarentena |
-| SIM-06 | Lacre aberto em trânsito, fora da rota, geocerca (dentro e fora de 10 m), violação | `error_type` `LACRE_ABERTO_EM_TRANSITO`; distâncias calculadas; alertas aceitos |
+| SIM-06 | Lacre aberto em trânsito, fora da rota, geocerca (dentro e fora de 10 m), violação | Detecção **automática**: `LACRE_ABERTO_EM_TRANSITO` com `TRAVAR_VALVULA`, `SAIDA_ROTA` e `SAIDA_GEOCERCA` no FluxID, com lacre e cilindro |
 | SIM-07 | Todos os alertas do catálogo, nome antigo e código inválido | `201` nos 28 códigos e no nome antigo; `400` no inválido |
 | SIM-08 | Fila | FluxID fora do ar sem gastar tentativa; espera do vínculo; dispositivo fora do FluxID com nova tentativa; alerta sem lacre parado; reenvio sem duplicar; nova tentativa pelo gestor |
-| SIM-09 | Gestor e visualização | Encerramento no FluxID; mapa com a cor do alerta; eventos, quarentena, histórico do cilindro e erros da sincronização |
+| SIM-09 | Gestor e visualização | Encerramento pela API do frontend (D5), espelhado na Oxide; violação confirmada (`ROMPIDO`); mapa com a cor do alerta; eventos, quarentena, histórico do cilindro e erros da sincronização |
+| SIM-10 | Operador pela API do frontend | Login (`session-login`), rota (`set_route`), saída (`start`) e entrega (`finish`) pela `/api/v1/app` |
 
-## 11. Testes da API FluxID (NestJS) — fase planejada
+### 10.8 Regras automáticas de alerta (suíte, grupo 11)
+
+| ID | Caso | Esperado | Sit. |
+| --- | --- | --- | --- |
+| REG-01 | Bateria abaixo de 15% | `BATERIA_BAIXA` (BAIXA), código `AUT-...` com até 20 caracteres, na fila do Worker | A |
+| REG-02 | Segunda leitura com bateria baixa | Sem segundo alerta | A |
+| REG-03 | Sinal GSM abaixo de -105 dBm | `GSM_SINAL_FRACO` | A |
+| REG-04 | Lacre aberto com o cilindro em trânsito | `LACRE_ABERTO_EM_TRANSITO` (CRITICA) e `TRAVAR_VALVULA` | A |
+| REG-05 | Comando confirmado com `ERRO` | `COMANDO_FALHOU` com o código do comando | A |
+| REG-06 | Dispositivo sem lacre e cilindro | Nenhum alerta automático | A |
+| REG-07 | Telemetria sem posição | Atualiza o contato e a última telemetria, não a última posição | A |
+| REG-08 | Telemetria sem posição há mais de 15 min | `GPS_SEM_SINAL` na rodada | A |
+| REG-09 | Sem contato há mais de 30 min | `SEM_COMUNICACAO` na rodada | A |
+| REG-10 | Comando pendente há mais de 10 min, duas rodadas | Um único `COMANDO_SEM_RESPOSTA` | A |
+| REG-11 | Alerta encerrado no frontend | Espelhado na Oxide; nova ocorrência só depois de 30 min (`REGRA_REPETICAO_MINUTOS`) | A (`test:app`) |
+| REG-12 | Limites no `.env` | `REGRA_*` trocam os limites sem mudar o código; valor inválido usa o padrão | P (revisão de código) |
+| REG-13 | Falha numa regra | O dado do lacre é salvo; a rodada fica `PARCIAL` com o motivo | P (revisão de código) |
+
+## 11. Testes da API do frontend (`/api/v1/app`) e do FluxID
+
+### 11.1 API do frontend (`npm run test:app`, 45 verificações)
+
+Roda contra o FluxID de análise no Docker, numa pasta temporária com uma organização própria (`ORG-T<rodada>`). Todos automatizados.
+
+| ID | Caso | Esperado |
+| --- | --- | --- |
+| APP-01 | Função inexistente, método `GET`, sem token | `404 FUNCTION_NOT_FOUND`, `405 METHOD_NOT_ALLOWED`, `401 AUTH_REQUIRED` |
+| APP-02 | Login: corpo inválido, senha errada, e-mail desconhecido | `400 INVALID_REQUEST`; `401 INVALID_CREDENTIALS` nos dois (não revela quem existe) |
+| APP-03 | Login correto | `AUTHENTICATED` com `session.access_token` e organizações com papéis; o FluxID guarda só o hash do token |
+| APP-04 | `session-status` | `SESSION_ACTIVE` (`aal1`); sem token `SESSION_INVALID` |
+| APP-05 | Organização sem vínculo | `401 AUTH_REQUIRED` (`no_membership`) |
+| APP-06 | 4ª sessão | `409 SESSION_LIMIT_REACHED` com 3 sessões; `revoke_session_id` entra e a antiga fica `SESSION_REVOKED` |
+| APP-07 | 5 falhas de login | `429 RATE_LIMITED`, mesmo com a senha certa |
+| APP-08 | 30 min sem uso | `SESSION_EXPIRED` (`inactivity`) |
+| APP-09 | Recuperação de senha | Pedido sempre aceito; token de uso único; troca encerra as sessões; nova senha entra |
+| APP-10 | `query-permissions` | Códigos do frontend calculados do FluxID; visualizador só leitura |
+| APP-11 | Cilindros: tipo, criação, conflitos (série e identificador), busca, `get`, versão, estoque idempotente, teste e retificação, inativar e reativar, identificadores (desativar, reuso recusado, transferência) | Códigos do contrato da etapa 006 do frontend; histórico com a pessoa que fez; auditoria |
+| APP-12 | Cilindro de outra organização | `404 NOT_FOUND` |
+| APP-13 | Lacre e dispositivo | Chave mostrada uma vez (48 caracteres); o FluxID guarda o SHA-256 |
+| APP-14 | Vínculos | Lacre `INSTALADO`; histórico `LACRE_VINCULADO`; conflito sem `replace` → `BINDING_CONFLICT` |
+| APP-15 | Integração com a Oxide | O Worker traz o cadastro feito pela API; o ESP32 envia com a chave gerada (`202`); a posição aparece em `query-map` e `query-telemetry` |
+| APP-16 | Comandos pelo frontend | AUT-C07; o ESP32 busca e confirma; `list` mostra `EXECUTADO` |
+| APP-17 | Alertas (D5) | Lista e `get` com posição; `analyze`, `justify` (operador), `close` (só o gestor; visualizador `403`); `tratado_no_fluxid`; o Worker espelha na Oxide e não sobrescreve |
+| APP-18 | Cliente, endereço, entrega e rota | Cilindro em outra entrega aberta → `CYLINDER_IN_OTHER_DELIVERY`; `start` → `EM_TRANSITO` na Oxide; GEO-10 a GEO-12; lacre aberto em trânsito; `finish` abre a custódia; GEO-02 e GEO-04 |
+| APP-19 | Mapa e visão geral | Cor do ponto = alerta aberto de maior severidade; `indicators`, `performance` e `movement` com `READY` |
+| APP-20 | Convite | Só `tenant.manage` convida; `accept` sem login cria a pessoa; convite usado → `INVITE_INVALID`; a pessoa entra com o papel do convite |
+| APP-21 | Vínculo bloqueado | A pessoa perde o acesso àquela organização (`401`) |
+| APP-22 | Papéis | Atribuir e remover; `FLUXID_MASTER` só pela plataforma (`403`) |
+| APP-23 | Auditoria e organizações | `query-audit` com as ações; admin da empresa não cria empresa (`403`) |
+| APP-24 | Foto | PNG salvo e lido; conteúdo que não é imagem → `400` |
+| APP-25 | Logout | `SIGNED_OUT`; o token deixa de valer |
+
+### 11.2 Banco FluxID
 
 Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 
@@ -437,8 +497,8 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | FLX-02 | Swagger exibe e executa todas as rotas CRUD | Todas funcionais |
 | FLX-03 | DTOs rejeitam dados inválidos | `400` padronizado |
 | FLX-04 | Isolamento multiempresa (RN22) | Organização A não lê nem altera dados da B |
-| FLX-05 | Autorização por perfis e permissões (RBAC) | `403` sem permissão |
-| FLX-06 | Autenticação JWT | Token ausente/expirado → `401` |
+| FLX-05 | Autorização por perfis e permissões (RBAC) | `403` sem permissão (**executado em 07/10/2026**, APP-10, APP-11, APP-16, APP-17) |
+| FLX-06 | Autenticação por sessão (token opaco; decisão D3, no lugar de JWT) | Token ausente, vencido ou revogado → `401` (**executado em 07/10/2026**, APP-01 a APP-09) |
 | FLX-07 | Operações compostas (vínculo, entrega, custódia) em transação (RNF09) | Falha parcial faz rollback |
 | FLX-08 | Sem `DELETE` físico em histórico (RN21) | Desativação lógica |
 | FLX-09 | Violação de chave única/estrangeira | Convertida em erro HTTP legível (`409`/`400`) |
@@ -458,7 +518,9 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | FLX-23 | Script `003`: alertas sem cilindro | Preenchidos pelo vínculo lacre → cilindro válido em `aberto_em`; segunda execução sem alteração; demais tabelas sem mudança (**executado em 07/10/2026**) |
 | FLX-24 | `CHECK` de cilindro e lacre no alerta | Alerta operacional sem cilindro ou sem lacre rejeitado; com os dois, aceito; exceções de cadastro aceitas (`LACRE_SEM_CILINDRO` sem cilindro, `DISPOSITIVO_SEM_LACRE` sem os dois); `LACRE_SEM_CILINDRO` sem lacre rejeitado (**executado em 07/10/2026**) |
 | FLX-25 | Alerta sem vínculo na data | O `003` para, lista o código e não altera nada (**executado em 07/10/2026**) |
-| FLX-26 | Gatilho do par lacre + cilindro | Alerta com par sem vínculo na data rejeitado (**pendente**, entrega futura) |
+| FLX-26 | Gatilho do par lacre + cilindro | Alerta com par sem vínculo na data rejeitado (**executado em 07/10/2026**, script `004` e simulador SIM-02) |
+| FLX-27 | Script `006` executado duas vezes num banco novo (dump + `001` a `006`) | Sem erros; a segunda execução não muda nada (**executado em 07/10/2026**) |
+| FLX-28 | Gatilho `CILINDRO_CRIADO` | Cilindro novo ganha o evento com a pessoa da transação (`USUARIO`) ou `SISTEMA` (**executado em 07/10/2026**, APP-11) |
 
 ---
 
@@ -466,9 +528,9 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 
 | ID | Caso | Esperado |
 | --- | --- | --- |
-| OPE-01 | Backup e restauração do `oxide.db` e do PostgreSQL | Restauração íntegra, procedimento documentado |
-| OPE-02 | Política de expurgo e retenção | Dados antigos removidos sem quebrar a sincronização |
-| OPE-03 | Observabilidade (logs e métricas do Worker e da API) | Falhas visíveis |
+| OPE-01 | Backup e restauração do `oxide.db` e do PostgreSQL | `npm run backup`: cópia íntegra (`integrity_check`), mantém as N mais novas (**executado numa cópia em 07/10/2026**); restauração e backup do PostgreSQL: pendentes |
+| OPE-02 | Política de expurgo e retenção | `npm run retencao`: sem `--confirmar` só mostra; apaga só o que está `SYNCED` e chegou há mais de 30 dias; linha sem `received_at` nunca sai (**executado numa cópia em 07/10/2026**) |
+| OPE-03 | Observabilidade (logs e métricas do Worker e da API) | `GET /health` com Oxide, FluxID, Worker e filas, sem expor a conexão (**automatizado**); métricas: pendentes |
 | OPE-04 | Carga: ingestão de telemetria em volume (frequência real a definir) | Sem perda, latência dentro do limite a definir |
 | OPE-05 | Integração completa ESP32 → API → SQLite → Worker → PostgreSQL | Dado chega íntegro ao destino |
 | OPE-06 | LGPD, RLS e retenção | Conforme definição antes da produção |
@@ -503,12 +565,14 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 
 | Indicador | Valor |
 | --- | --- |
-| Suíte automatizada (`npm test`) | 96 casos (95 testes e 1 de teardown), 96 aprovados em 07/10/2026 (teste formal com o Roteiro v1.10; aprovado por Natã da Silva Baracho) |
+| Suíte automatizada (`npm test`) | 108 casos (107 testes e 1 de teardown), 108 aprovados em 07/10/2026 numa cópia da `oxide.db` real |
+| API do frontend (`npm run test:app`) | 45/45 em 07/10/2026, contra o FluxID de análise no Docker |
+| Simulador (`npm run simular`) | 65/65 em 07/10/2026 |
 | Compilação (`npx tsc --noEmit`) | Aprovada em 06/10/2026 |
-| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas); [Relatorio-de-Teste-2026-10-06-20h00.md](Relatorio-de-Teste-2026-10-06-20h00.md): entrega E (banco FluxID); [Relatorio-de-Teste-2026-10-06-20h35.md](Relatorio-de-Teste-2026-10-06-20h35.md): entrega D (catálogo de comandos e tipos de erro); [Relatorio-de-Teste-2026-10-06-21h31.md](Relatorio-de-Teste-2026-10-06-21h31.md): entrega B (associação); [Relatorio-de-Teste-2026-10-06-23h40.md](Relatorio-de-Teste-2026-10-06-23h40.md): alertas em português, análise e encerramento; [Relatorio-de-Teste-2026-10-07-00h15.md](Relatorio-de-Teste-2026-10-07-00h15.md): FluxID, alerta com cilindro e lacre obrigatórios; [Relatorio-de-Teste-2026-10-07-00h45.md](Relatorio-de-Teste-2026-10-07-00h45.md): grupos do Swagger e FluxID no Docker; [Relatorio-de-Teste-2026-10-07-01h30.md](Relatorio-de-Teste-2026-10-07-01h30.md): integração Oxide ⇄ FluxID; [Relatorio-de-Teste-2026-10-07-18h45.md](Relatorio-de-Teste-2026-10-07-18h45.md): simulador do lacre e série do cilindro. Todos **aprovados por Natã da Silva Baracho** |
+| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas); [Relatorio-de-Teste-2026-10-06-20h00.md](Relatorio-de-Teste-2026-10-06-20h00.md): entrega E (banco FluxID); [Relatorio-de-Teste-2026-10-06-20h35.md](Relatorio-de-Teste-2026-10-06-20h35.md): entrega D (catálogo de comandos e tipos de erro); [Relatorio-de-Teste-2026-10-06-21h31.md](Relatorio-de-Teste-2026-10-06-21h31.md): entrega B (associação); [Relatorio-de-Teste-2026-10-06-23h40.md](Relatorio-de-Teste-2026-10-06-23h40.md): alertas em português, análise e encerramento; [Relatorio-de-Teste-2026-10-07-00h15.md](Relatorio-de-Teste-2026-10-07-00h15.md): FluxID, alerta com cilindro e lacre obrigatórios; [Relatorio-de-Teste-2026-10-07-00h45.md](Relatorio-de-Teste-2026-10-07-00h45.md): grupos do Swagger e FluxID no Docker; [Relatorio-de-Teste-2026-10-07-01h30.md](Relatorio-de-Teste-2026-10-07-01h30.md): integração Oxide ⇄ FluxID; [Relatorio-de-Teste-2026-10-07-18h45.md](Relatorio-de-Teste-2026-10-07-18h45.md): simulador do lacre e série do cilindro. Todos **aprovados por Natã da Silva Baracho**. [Relatorio-de-Teste-2026-10-07-23h45.md](Relatorio-de-Teste-2026-10-07-23h45.md): sistema completo (API do frontend, regras automáticas, manutenção), **aguardando validação** |
 | Cobertura da suíte | Dispositivos, autenticação, telemetria, eventos, comandos, alertas (criação, listagem, análise e encerramento) e associação |
 | Lacunas prioritárias | SEG-05, TEL-19, ALT-07/08/12, EVT-05, BD-04/06/11/16 (fora da suíte; cobertos pelo Roteiro) |
-| Entregas futuras | Todos os casos da seção 10 pendentes (funcionalidades ainda não implementadas) |
+| Entregas futuras | Ligação do frontend com a `/api/v1/app`; envio de e-mail e MFA; OPE-04 a OPE-06 |
 
 ---
 
@@ -567,4 +631,5 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | 1.9 | 07/10/2026 | FluxID, decisão de Natã da Silva Baracho: alerta com cilindro e lacre obrigatórios (script `003`); novos FLX-23 a FLX-25 executados num servidor PostgreSQL temporário e FLX-26 (gatilho) pendente; SYN-09 passa a citar o script `004` |
 | 1.10 | 07/10/2026 | Swagger organizado em grupos (novo GER-06); FluxID de análise no Docker; dump em `sql/fluxid/FluxID.sql`; suíte com 87 casos |
 | 1.12 | 07/10/2026 | Simulador do lacre (seção 10.7, SIM-01 a SIM-09); ASC-13 revisto (série repetida aceita; achado A3) |
+| 1.13 | 07/10/2026 | Sistema completo: geocerca e rota (GEO-01 a GEO-13), comandos automáticos (AUT-C01 a AUT-C07), regras automáticas (seção 10.8, REG-01 a REG-13), API do frontend (seção 11.1, APP-01 a APP-25), FLX-05, FLX-06, FLX-26 a FLX-28, OPE-01 a OPE-03; simulador com 65 verificações (SIM-06, SIM-09 e SIM-10); suíte com 108 casos |
 | 1.11 | 07/10/2026 | Integração Oxide ⇄ FluxID implementada: SYN-01 a SYN-16 revistos com as regras aprovadas, novos SYN-17 a SYN-24 e INT-01 a INT-07; BD-01 e BD-02 com `sync_logs`; página `/api-docs-fluxid` com a proposta da API do frontend (GER-07, GER-08); suíte com 96 casos. Teste formal da IA em 07/10/2026, sem falhas |

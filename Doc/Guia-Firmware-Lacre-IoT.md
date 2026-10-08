@@ -1,8 +1,8 @@
 # Guia do firmware do lacre IoT (ESP32)
 
-**Versão:** 1.0 — 07/10/2026
+**Versão:** 1.1 — 07/10/2026 (alertas automáticos do servidor; aguardando a validação de Natã da Silva Baracho)
 **Para:** quem programa o lacre IoT (ESP32 em C++)
-**Base:** API Oxide com o Worker e o simulador (PRs #15 a #17)
+**Base:** API Oxide com o Worker, o simulador e os alertas automáticos (PRs #15 a #19)
 
 Este guia diz **o que o lacre envia, quando envia, o que recebe de volta e o que fazer com cada resposta**. É tudo o que o firmware precisa saber; o resto (banco, Worker, FluxID) fica do lado do servidor. Para testar cada rota no navegador, use o Swagger: `http://<IP_DA_API>:3000/api-docs`.
 
@@ -22,8 +22,8 @@ API Oxide ──► fila local ──► FluxID (banco principal, mapa, alertas,
 | O lacre faz | O servidor faz (o lacre **não** precisa) |
 | --- | --- |
 | Lê GPS, bateria, sinal e o estado do lacre | Sabe a que **lacre** e **cilindro** o dispositivo pertence (pelo cadastro) |
-| Envia **telemetria**, **eventos** e **alertas** | Detecta **lacre aberto em trânsito**, dispositivo sem lacre e lacre sem cilindro |
-| Busca e **confirma comandos** | Vai detectar saída da **geocerca** e da **rota** (próxima etapa do projeto) |
+| Envia **telemetria**, **eventos** e **alertas** | Detecta **lacre aberto em trânsito** (e manda travar a válvula), dispositivo sem lacre e lacre sem cilindro |
+| Busca e **confirma comandos** | Detecta saída da **geocerca** e da **rota**, falta de comunicação, GPS sem sinal, bateria baixa, sinal fraco e comando que falhou ou ficou sem resposta (seção 5) |
 | Guarda o que não conseguiu enviar e reenvia | Grava a data oficial, sincroniza com o FluxID e não duplica nada |
 
 ## 2. Antes do primeiro envio
@@ -146,15 +146,17 @@ Respostas: `201` criado; `409` "Alerta duplicado" (mesmo `alert_id`: tratar como
 | Lacre rompido | Além do evento: **alerta** `LACRE_VIOLADO` |
 | GPS funcionando, mas sem posição (sem satélites) | **Telemetria sem latitude e longitude** |
 | Módulo GPS não responde | **Alerta** `GPS_INATIVO` |
-| Bateria abaixo do limite | **Alerta** `BATERIA_BAIXA` |
-| Sinal GSM abaixo do limite | **Alerta** `GSM_SINAL_FRACO` |
+| Bateria baixa | Basta mandar `battery_percent` na telemetria: abaixo de 15%, o servidor abre `BATERIA_BAIXA` sozinho |
+| Sinal GSM fraco | Basta mandar `gsm_signal` (dBm) na telemetria: abaixo de -105 dBm, o servidor abre `GSM_SINAL_FRACO` sozinho |
 | Falha de hardware ou de sensor | **Evento** `hardware_failure`/`sensor_failure` e **alerta** `DISPOSITIVO_FALHA` |
-| Comando falhou | Confirmar com `ERRO`. O alerta `COMANDO_FALHOU` automático ainda não existe no servidor; até ele existir, envie também o **alerta** `COMANDO_FALHOU` |
+| Comando falhou | Confirmar com `ERRO` e o motivo em `error_message`; o servidor abre `COMANDO_FALHOU` sozinho |
 
 **Não envie:**
 - `lacre_id` e `cilindro_id`: vêm do cadastro;
-- `LACRE_ABERTO_EM_TRANSITO`, `DISPOSITIVO_SEM_LACRE` e `LACRE_SEM_CILINDRO`: o servidor já detecta ao receber os dados;
-- `SAIDA_GEOCERCA`, `SAIDA_ROTA`, `SEM_COMUNICACAO` e `COMANDO_SEM_RESPOSTA`: serão detectados pelo servidor nas próximas entregas (geocerca e rota, alertas automáticos). A lista completa de códigos está em [Tipos-de-Erro.md](Tipos-de-Erro.md).
+- `LACRE_ABERTO_EM_TRANSITO`, `DISPOSITIVO_SEM_LACRE` e `LACRE_SEM_CILINDRO`: o servidor detecta ao receber os dados. No lacre aberto em trânsito, ele também cria o comando `TRAVAR_VALVULA`, que o lacre recebe na próxima busca de comandos;
+- `SAIDA_GEOCERCA`, `SAIDA_ROTA`, `SEM_COMUNICACAO`, `GPS_SEM_SINAL`, `COMANDO_SEM_RESPOSTA`, `COMANDO_FALHOU`, `BATERIA_BAIXA` e `GSM_SINAL_FRACO`: o servidor abre sozinho, a partir da telemetria, do último contato e das confirmações. Se o firmware também mandar `BATERIA_BAIXA` ou `GSM_SINAL_FRACO`, o alerta é aceito, mas fica duplicado; prefira deixar com o servidor.
+
+Para o servidor funcionar, o lacre precisa mandar `battery_percent`, `gsm_signal` e `seal_status` em toda telemetria e buscar comandos com frequência (a busca também conta como contato). A lista completa de códigos está em [Tipos-de-Erro.md](Tipos-de-Erro.md).
 
 > Os nomes antigos em inglês (`SEAL_BROKEN`, `LOW_BATTERY`, `DEVICE_ERROR`...) ainda são aceitos e convertidos, mas o firmware novo deve usar os códigos em português.
 
@@ -291,8 +293,8 @@ void verificarComandos() {
 | Item | Situação |
 | --- | --- |
 | Intervalo da telemetria e da busca de comandos | A definir (ex.: telemetria a cada 1 min em trânsito e 15 min parado; comandos a cada 30 s) |
-| Limites de bateria baixa e de sinal GSM fraco | A definir no catálogo de erros |
-| Tempo sem posição para o alerta `GPS_SEM_SINAL` | A definir |
+| Limites de bateria baixa e de sinal GSM fraco | Adotados para validação: 15% e -105 dBm (mudam no servidor, sem mudar o firmware) |
+| Tempo sem posição para o alerta `GPS_SEM_SINAL` | Adotado para validação: 15 min; sem comunicação: 30 min; comando sem resposta: 10 min |
 | HTTPS | A API ainda usa HTTP; planejar a troca antes da produção |
 | Leitura do NFC do lacre | Prevista para a conferência física na auditoria |
 

@@ -2,7 +2,7 @@
 # FluxID  
 ### Especificação Atualizada do MVP e do Banco de Dados  
 **Segurança • Rastreabilidade • Controle Operacional**  
-**Versão 3.3 — revisada em 07/10/2026: integração com a Oxide (script 004) e estruturas do frontend (script 005)**  
+**Versão 3.4 — revisada em 07/10/2026: API do frontend, rotas e alertas automáticos (script 006)**  
 Documento substitutivo da versão 1 anexada
 
 ---
@@ -17,8 +17,8 @@ Esta versão atualiza integralmente o documento *FluxID_Especificacao_MVP_v1.doc
 | Telemetria atual | Latitude e longitude em colunas NUMERIC |
 | PostGIS | Planejado para evolução de geocercas; ainda não refletido na tabela atual de telemetria |
 | Views e triggers | Adiados para depois dos testes CRUD da API |
-| Ajustes da entrega E e do script 003 | Scripts versionados em `sql/fluxid/` (seção 17), validados em servidor PostgreSQL temporário; aguardando aplicação no banco e novo dump |
-| Próxima fase | API NestJS + TypeScript conectada ao PostgreSQL |
+| Ajustes da entrega E e dos scripts 003 a 006 | Scripts versionados em `sql/fluxid/` (seção 17), validados no FluxID de análise (Docker); aguardando aplicação no banco principal e novo dump |
+| API | Implementada em Node.js + TypeScript (Express): lacre em `/api/v1/iot`, frontend em `/api/v1/app` ([Contrato-API-Frontend.md](Contrato-API-Frontend.md)) |
 
 ---
 
@@ -146,7 +146,7 @@ A implementação atual mantém latitude/longitude numéricas; a coluna *geograp
 ### Módulo → Tabelas
 
 **Identidade e acesso**  
-organizacoes; organizacao_contatos; usuarios; perfis; permissoes; perfil_permissoes; usuario_perfis
+organizacoes; organizacao_contatos; usuarios; perfis; permissoes; perfil_permissoes; usuario_perfis; usuario_organizacoes; usuario_organizacao_perfis; sessoes_usuario; tentativas_login; recuperacoes_senha; convites (as seis últimas no script 006)
 
 **Clientes finais e locais**  
 destinatarios; locais_entrega
@@ -158,13 +158,16 @@ cilindros; lacres; dispositivos
 vinculos_cilindro_lacre; vinculos_dispositivo_lacre
 
 **Logística**  
-movimentacoes; movimentacao_itens; entregas; entrega_itens; custodias
+movimentacoes; movimentacao_itens; entregas; entrega_itens; custodias; rotas_entrega; desvios_rota (as duas últimas no script 006)
 
 **IoT e segurança**  
-telemetrias; eventos_lacre; alertas
+telemetrias; telemetrias_quarentena; eventos_lacre; eventos_dispositivo; alertas
 
 **Conformidade**  
 testes_hidrostaticos; inspecoes_lacre
+
+**Cilindros (frontend, scripts 005 e 006)**  
+tipos_cilindro; identificadores_cilindro; historico_cilindro; chaves_operacao
 
 **Governança**  
 auditoria
@@ -363,11 +366,13 @@ Observações que continuam valendo (sem correção nesta entrega):
    2. `sql/fluxid/002_correcao_massa_de_testes.sql`;
    3. `sql/fluxid/003_alertas_cilindro_obrigatorio.sql` (seção 17.5);
    4. `sql/fluxid/004_integracao_oxide.sql` (seção 17.6);
-   5. `sql/fluxid/005_estruturas_do_frontend.sql` (seção 17.7).
+   5. `sql/fluxid/005_estruturas_do_frontend.sql` (seção 17.7);
+   6. `sql/fluxid/006_api_frontend_rotas.sql` (seção 17.8).
 
-   Os cinco podem rodar mais de uma vez. Se um deles parar com erro, nada daquele script é alterado.
+   Os seis podem rodar mais de uma vez. Se um deles parar com erro, nada daquele script é alterado.
 3. Gerar um novo dump no formato custom e substituir o `sql/fluxid/FluxID.sql` do projeto (o dump fica junto dos scripts desde 07/10/2026).
-4. Pedir a conferência do novo dump (contagens e verificações das seções 17.2, 17.5, 17.6 e 17.7).
+4. Pedir a conferência do novo dump (contagens e verificações das seções 17.2, 17.5, 17.6, 17.7 e 17.8).
+5. Definir a senha de login de quem vai usar o frontend: `npm run senha -- <email>` (seção 17.8).
 
 ### 17.4 Integração com a Oxide
 
@@ -432,3 +437,37 @@ Resultado no Docker (dump + `001` a `005`): sem erros; o `005` rodado de novo n�
 2. **Classificação dos tipos** dos cilindros já cadastrados (medicinal ou industrial).
 3. **Login, sessões, convites, recuperação de senha e limites de tentativa** (tabelas privadas do Supabase): dependem de como será o login da API do frontend.
 4. **Papéis por organização** (`memberships`/`membership_roles` no frontend) × `usuario_perfis` no FluxID.
+
+### 17.8 API do frontend, rotas e alertas — `006_api_frontend_rotas.sql` (07/10/2026)
+
+Implementa no banco as decisões D1 a D9 do [Contrato-API-Frontend.md](Contrato-API-Frontend.md), todas na recomendação da v0.1, e a base da detecção automática de rota e geocerca. **Testado pela IA no FluxID de análise (Docker) em 07/10/2026; aguardando a validação de Natã da Silva Baracho.**
+
+| Passo | O que muda | Decisão |
+| --- | --- | --- |
+| (a) | `usuario_organizacoes` (pessoa ↔ organização, `ATIVO`/`BLOQUEADO`/`INATIVO`) e `usuario_organizacao_perfis` (papel em cada organização), copiadas de `usuarios.organizacao_id` e `usuario_perfis` | D4 |
+| (b) | `sessoes_usuario` (só o hash do token; máximo de 8 h, revogação com motivo), `tentativas_login` (só o hash do e-mail), `recuperacoes_senha` (1 h, uso único), `convites` (7 dias, `ENVIADO`/`ACEITO`/`REVOGADO`/`EXPIRADO`) e `usuarios.foto_caminho` | D3, D7 |
+| (c) | 9 permissões novas: `VER_CILINDROS`, `INATIVAR_CILINDRO`, `GERENCIAR_IDENTIFICADORES`, `ENTRADA_ESTOQUE`, `REGISTRAR_TESTE_HIDROSTATICO`, `VER_HISTORICO_CILINDRO`, `ENVIAR_COMANDOS`, `JUSTIFICAR_ALERTAS` e `PLANEJAR_ROTAS`, distribuídas pelos papéis | D2, D8 |
+| (d) | `cilindros.situacao_estoque` (`EM_ESTOQUE`/`FORA_DO_ESTOQUE`; inativo sempre fora; `DISPONIVEL` começa em estoque) e `chaves_operacao` (repetição segura do `stock_in`) | D1 |
+| (e) | `rotas_entrega` (uma por entrega; pontos em JSON, de 2 a 500; margem de 5 a 5000 m, padrão 50) e `desvios_rota` (`PROGRAMADO`/`JUSTIFICADO`, com início, fim e justificativa) | Rota automática |
+| (f) | Em `alertas`: `justificativa`, `justificado_por`, `justificado_em` e `tratado_no_fluxid` | D5 |
+| (g) | Gatilho `trg_cilindro_criado_historico`: todo cilindro novo ganha `CILINDRO_CRIADO` no histórico, com a pessoa que criou (`fluxid.usuario_id` da transação) ou `SISTEMA` | Histórico completo |
+
+Papéis depois do `006`:
+- `FLUXID_MASTER` e `ORG_ADMIN`: todas as permissões;
+- `SUPERVISOR`: todas, menos criar e editar pessoas;
+- `OPERADOR`: cadastro de cilindros e lacres, identificadores, estoque, teste, histórico e justificar alerta;
+- `AUDITOR`: leitura, histórico e relatórios;
+- `VISUALIZADOR`: leitura.
+
+Resultado no Docker:
+- banco novo (dump + `001` a `006`) e depois `006` de novo: sem erros, e a segunda execução não mudou nada;
+- conferência: 3 vínculos pessoa ↔ organização, 3 papéis copiados, 19 permissões e 18 cilindros `DISPONIVEL` em estoque;
+- aplicado também no `FluxID_db` do container, onde rodaram `npm run test:app` (45 verificações) e `npm run simular` (65 verificações), sem falhas.
+
+**Senhas.** Os usuários da massa têm `HASH_PROVISORIO` e não entram. Antes de usar o frontend, defina a senha de cada um no terminal do servidor:
+
+```bash
+npm run senha -- fluxid@teste.com
+```
+
+A senha é digitada sem aparecer na tela; só o hash (scrypt) vai para o banco.

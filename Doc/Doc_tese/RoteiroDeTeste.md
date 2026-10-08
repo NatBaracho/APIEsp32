@@ -1,7 +1,7 @@
 # Roteiro de Teste para IA — API Oxide (FluxID / Oxide IoT)
 
-**Versão:** 1.10
-**Data:** 06/10/2026
+**Versão:** 1.11
+**Data:** 07/10/2026
 **Uso:** instruções executáveis para uma IA (ou pessoa) testar a API Oxide e produzir um relatório padronizado.
 **Base:** `Doc/Doc_tese/PlanoDeTeste.md` (IDs dos casos entre colchetes, ex.: `[TEL-03]`).
 
@@ -136,7 +136,7 @@ curl -s -o /dev/null -w "porta 3000: %{http_code}\n" "$BASE/"   # esperado: 000 
 npm test
 ```
 
-Registre: total, aprovados, reprovados. **Esperado:** 96 casos, 96 aprovados, saída com código `0`.
+Registre: total, aprovados, reprovados. **Esperado:** 108 casos, 108 aprovados, saída com código `0`.
 Se houver reprovação, copie o nome de cada teste que falhou para o relatório.
 
 > A suíte limpa registros `DSP-TEST%` no início e no fim. Os casos manuais abaixo usam `DSP-TEST-RT`, que **também** será limpo na seção 8.
@@ -487,7 +487,7 @@ get "/assignments/seal-cylinder?cylinder_code=CIL-RT-1"
 
 **Pré-condições** (se faltar alguma, marque `SYN-*` como `NÃO EXECUTADO` com o motivo):
 
-- Docker Desktop com o container `fluxid-analise` rodando e o banco `FluxID_db` dele com os scripts `sql/fluxid/001` a `005` aplicados. **Nunca use o banco principal.**
+- Docker Desktop com o container `fluxid-analise` rodando e o banco `FluxID_db` dele com os scripts `sql/fluxid/001` a `006` aplicados. **Nunca use o banco principal.**
 - Arquivo `.env` na raiz do projeto com `FLUXID_DATABASE_URL` apontando para esse banco (`127.0.0.1:54329`). O `.env` fica fora do git; **não registre a senha** no relatório.
 - Os dados de teste gravados no FluxID de análise ficam lá (é um banco de análise). Para recomeçar do zero, recrie o banco a partir do dump.
 
@@ -556,6 +556,49 @@ sql "SELECT id, status FROM sync_logs ORDER BY id DESC LIMIT 5"
 ```
 
 **Esperado em resumo:** `MSG-RT-SYN-1` no FluxID com `LCR-000011` e `CIL-000011`; `MSG-RT-SYN-2` na quarentena (`SEM_POSICAO`); `EVT-RT-SYN-1` como `VIOLACAO` e lacre `SUSPEITA_VIOLACAO`; `EVT-RT-SYN-2` em `eventos_dispositivo`; `ALT-RT-SYN-1` com o par lacre + cilindro e, depois do `PATCH`, `ENCERRADO`, "Gestor RT" e "Lacre conferido", com `ALERTA_REGISTRADO` e `ALERTA_ENCERRADO` de origem `OXIDE` no histórico do cilindro; `MSG-RT-SYN-3` com "dispositivo não cadastrado no FluxID".
+
+### 5.11 API do frontend, regras automáticas e manutenção — FluxID de análise no Docker
+
+**Pré-condições:** as mesmas da seção 5.10 (o `006` precisa estar aplicado). Os dois comandos abaixo sobem a própria API numa pasta temporária, com uma `oxide.db` nova. O `oxide.db` do projeto não é tocado, e a API da seção 5.1 pode continuar rodando.
+
+```bash
+# [APP-01 a APP-25, GEO-*, AUT-C*, REG-11, FLX-05, FLX-06, FLX-28]
+# Esperado: "Total: 45   Passaram: 45   Falharam: 0"
+npm run test:app 2>&1 | grep -E "^(✅|❌)|Total:"
+
+# [SIM-01 a SIM-10] Esperado: "Resultado: 65 de 65 verificações conforme; 0 falha(s)."
+npm run simular 2>&1 | grep -E "^❌|Resultado:|Relatório:"
+```
+
+Casos rápidos na API da seção 5.1 (que roda sobre o `oxide.db` real com backup):
+
+```bash
+# [OPE-03] saúde. Esperado: 200; "status":"OK"; filas com números; nenhum "postgres://"
+curl -s -w "\n%{http_code}\n" "$BASE/health"
+
+# [APP-01] API do frontend sem login. Esperado: 401 AUTH_REQUIRED (ou 503 UNAVAILABLE se o .env não tiver o FluxID); GET → 405
+curl -s -w " %{http_code}\n" -X POST "$BASE/api/v1/app/query-cylinders" -H "content-type: application/json" -d '{}'
+curl -s -w " %{http_code}\n" "$BASE/api/v1/app/query-cylinders"
+```
+
+Regras automáticas no `oxide.db` real (dispositivo de teste da seção 5.1, sem lacre). Esperado: nenhum alerta automático, porque o dispositivo não está num lacre com cilindro (REG-06); o último contato é registrado.
+
+```bash
+post /iot/telemetries "$KEY" '{"message_id":"MSG-RT-REG-1","device_id":"DSP-TEST-RT","latitude":-7.4,"longitude":-39.4,"battery_percent":5,"gsm_signal":-120}'
+sql "SELECT count(*) AS n FROM alerts WHERE device_id = 'DSP-TEST-RT' AND alert_id LIKE 'AUT-%'"
+sql "SELECT last_contact_at IS NOT NULL AS contato, last_position_at IS NOT NULL AS posicao FROM devices WHERE device_id = 'DSP-TEST-RT'"
+```
+
+Manutenção (**numa cópia**; nunca rode a retenção com `--confirmar` no `oxide.db` real durante o teste):
+
+```bash
+# [OPE-01, OPE-02] Esperado: "Backup criado" com SHA-256; a retenção só lista ("a remover")
+mkdir -p /tmp/rt-manut && cp oxide.db /tmp/rt-manut/oxide.db
+(cd /tmp/rt-manut && node --require "$OLDPWD/node_modules/ts-node/register" "$OLDPWD/src/manutencao/backup.ts")
+(cd /tmp/rt-manut && node --require "$OLDPWD/node_modules/ts-node/register" "$OLDPWD/src/manutencao/retencao.ts")
+```
+
+**Esperado em resumo:** 45/45 e 65/65; `/health` 200; `/api/v1/app` exige login; nenhum alerta automático para dispositivo sem lacre e cilindro; backup íntegro e retenção só listando.
 
 ---
 
@@ -664,10 +707,9 @@ grep -iE "erro|error" api.log || echo "sem erros no log"
 Marque como `NÃO EXECUTADO – funcionalidade pendente` no relatório (sem tentar simular):
 
 - Reassociação do mesmo par lacre ↔ cilindro (`HIS-04`).
-- Geofence (`GEO-*`) e comandos automáticos (`AUT-C*`).
-- API FluxID para o frontend (`FLX-*`). O Worker (`SYN-*`) é testado na seção 5.10, que exige o FluxID de análise no Docker.
-- Rate limiting, hash/rotação de chaves e auditoria (`SEG-09` a `SEG-11`).
-- Testes com hardware (`ESP-03`, `ESP-05`, `ESP-06`) e operação (`OPE-*`).
+- Geocerca, rota, comandos e alertas automáticos e API do frontend (`GEO-*`, `AUT-C*`, `REG-*`, `APP-*`): testados nas seções 5.11 e na suíte, que exigem o FluxID de análise no Docker. O Worker (`SYN-*`) é testado na seção 5.10.
+- Rate limiting das rotas do lacre (`SEG-09`).
+- Testes com hardware (`ESP-03`, `ESP-05`, `ESP-06`) e operação (`OPE-04` a `OPE-06`).
 
 Se o dump `sql/fluxid/FluxID.sql` e o `pg_restore` estiverem disponíveis em banco local de análise (servidor temporário ou o container Docker `fluxid-analise`), a IA pode **apenas verificar a estrutura** (tabelas `dispositivos`, `telemetrias`, `eventos_lacre`, `alertas`, `CHECK` de tipo/severidade/status) para apoiar `SYN-09` a `SYN-11`. Não escrever no banco principal e não registrar credenciais.
 
@@ -803,4 +845,5 @@ marque NÃO EXECUTADO com o motivo.
 | 1.7 | 06/10/2026 | Entrega B: nova seção 5.9 (associação, troca, encerramento, histórico e `error_type`); limpeza inclui lacres, cilindros e vínculos de teste; suíte com 71 casos |
 | 1.8 | 06/10/2026 | Entrega de alertas: tipos do catálogo em português com transição dos nomes antigos, listagem, análise e encerramento (ALT-13 a ALT-20), regras do banco (BD-19), função `patch` no arquivo de ambiente; suíte com 86 casos |
 | 1.9 | 07/10/2026 | Swagger em grupos (GER-06 na suíte); dump em `sql/fluxid/FluxID.sql` e banco de análise no Docker; suíte com 87 casos |
+| 1.11 | 07/10/2026 | Nova seção 5.11 (API do frontend com `npm run test:app`, simulador com detecção automática, `/health`, regra sem lacre no banco real, backup e retenção numa cópia); 5.10 pede o `006`; suíte com 108 casos |
 | 1.10 | 07/10/2026 | Nova seção 5.10 (Worker contra o FluxID de análise no Docker: SYN-01 a SYN-23); BD-01 e BD-02 com `sync_logs`; suíte com 96 casos (inclui a página `/api-docs-fluxid`). Executado em 07/10/2026, 01:39 às 01:40, sem falhas |

@@ -421,7 +421,7 @@ const openApiFluxidSpec = {
         legal_name: { type: "string" }, trade_name: { type: "string" }, document: { type: "string" }, email: { type: "string", format: "email" },
         name: { type: "string" }, street: { type: "string" }, number: { type: "string" }, district: { type: "string" }, city: { type: "string" },
         state: { type: "string", minLength: 2, maxLength: 2 }, zip: { type: "string" }, latitude: { type: "number" }, longitude: { type: "number" },
-        geofence_radius_meters: { type: "integer", minimum: 10, maximum: 50000, description: "Padrão 200" },
+        geofence_radius_meters: { type: "integer", minimum: 5, maximum: 50000, description: "Padrão 10 (regra do destino)" },
         cylinder_ids: { type: "array", items: uuid }, planned_at: { type: "string", format: "date-time" },
         points: { type: "array", items: { type: "object", properties: { latitude: { type: "number" }, longitude: { type: "number" } } }, minItems: 2, maxItems: 500 },
         margin_meters: { type: "integer", minimum: 5, maximum: 5000 },

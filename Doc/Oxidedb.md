@@ -4,7 +4,7 @@
 
 **Buffer temporário de ingestão para dispositivos ESP32**
 
-**Versão:** 1.8  
+**Versão:** 1.9  
 **Projeto:** FluxID / Oxide IoT
 
 Inclui instruções de criação, modelo de dados e script SQL completo.
@@ -81,10 +81,10 @@ Worker de sincronização (futuro)
 
 | Tabela | Responsabilidade |
 |----------|----------|
-| devices | Dispositivos autorizados, API Key, firmware, estado booleano e IDs opcionais de estado |
+| devices | Dispositivos autorizados, API Key (ou o hash vindo do FluxID), firmware, estado booleano, IDs opcionais de estado e o último contato (`last_contact_at`, `last_telemetry_at`, `last_position_at`), usado pelas regras automáticas de alerta |
 | status | Catálogo de códigos e descrições de estado |
-| telemetry_queue | Fila persistente de GPS, bateria, GSM, estado do lacre (`seal_status`), payload, `last_seen_at`, tentativas de envio do ESP32 (`device_attempt_count`) e `message_id` da última posição repetida (`last_repeat_message_id`) |
-| events | Fila temporária de eventos; `seal_status` representa o estado do lacre |
+| telemetry_queue | Fila persistente de GPS, bateria, GSM, estado do lacre (`seal_status`), payload, `last_seen_at`, tentativas de envio do ESP32 (`device_attempt_count`), `message_id` da última posição repetida (`last_repeat_message_id`) e hora de chegada (`received_at`, usada pela retenção) |
+| events | Fila temporária de eventos; `seal_status` representa o estado do lacre; `received_at` é a hora de chegada |
 | commands | Comandos destinados aos dispositivos e estado de execução |
 | alerts | Alertas associados a dispositivos, com tipo, estado, severidade e resolução |
 | seals / cylinders | Lacres e cilindros (cópia provisória do cadastro do FluxID) |
@@ -146,7 +146,11 @@ CREATE TABLE IF NOT EXISTS devices (
     valve_status_id INTEGER,
     seal_status_id INTEGER,
     -- SHA-256 da chave, vindo do FluxID; quando existe, a chave em texto deixa de valer
-    api_key_hash TEXT
+    api_key_hash TEXT,
+    -- Último contato (UTC), para SEM_COMUNICACAO e GPS_SEM_SINAL
+    last_contact_at DATETIME,
+    last_telemetry_at DATETIME,
+    last_position_at DATETIME
 );
 
 -- Cada dispositivo tem uma API Key exclusiva
@@ -247,6 +251,8 @@ CREATE TABLE IF NOT EXISTS telemetry_queue (
     attempt_count INTEGER NOT NULL DEFAULT 0,
     last_error TEXT,
     next_attempt_at DATETIME,
+    -- Hora de chegada (UTC); a retenção só apaga o que já foi sincronizado
+    received_at DATETIME,
 
     FOREIGN KEY(device_id)
     REFERENCES devices(device_id)
@@ -278,6 +284,7 @@ CREATE TABLE IF NOT EXISTS events (
     attempt_count INTEGER NOT NULL DEFAULT 0,
     last_error TEXT,
     next_attempt_at DATETIME,
+    received_at DATETIME,
 
     FOREIGN KEY(device_id)
     REFERENCES devices(device_id)
@@ -381,7 +388,9 @@ Tipos de alerta: os códigos em português do catálogo [Tipos-de-Erro.md](Tipos
 
 - `sync_items`: não criada. O estado de cada item já fica na própria fila (`status`, tentativas, erro e próxima tentativa); não criar foi aprovado por Natã da Silva Baracho em 07/10/2026.
 - Não existe uma tabela `telemetries`; o nome real da fila é `telemetry_queue`.
-- `POST /api/v1/iot/alerts` cria alertas; `GET /api/v1/iot/alerts` lista; `PATCH /api/v1/iot/alerts/{alert_id}/status` passa para `EM_ANALISE` ou `ENCERRADO`.
+- `POST /api/v1/iot/alerts` cria alertas; `GET /api/v1/iot/alerts` lista; `PATCH /api/v1/iot/alerts/{alert_id}/status` passa para `EM_ANALISE` ou `ENCERRADO` (rota de teste; o gestor trata o alerta pelo frontend, decisão D5).
+- Alertas automáticos (código `AUT-...`) e comandos criados pelo servidor (código `CMD-...`) usam as mesmas tabelas `alerts` e `commands` ([Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md), seção 3.5).
+- Backup: `npm run backup` (cópia consistente em `backups/`). Retenção: `npm run retencao` (simulação) e `npm run retencao -- --confirmar`.
 
 ## 10. Verificação do schema
 

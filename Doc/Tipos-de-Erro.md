@@ -1,6 +1,6 @@
 # Catálogo de Tipos de Erro (`error_type`) — FluxID / Oxide
 
-**Versão:** 1.2 — 06/10/2026 — `alert_type` da Oxide passa a usar os códigos deste catálogo
+**Versão:** 1.3 — 07/10/2026 — alertas automáticos e limites (aguardando a validação de Natã da Silva Baracho)
 **Público:** equipe do projeto, programador do ESP32 e quem for implementar o Worker e as regras automáticas.
 
 Este catálogo dá **um código único** para cada ocorrência operacional que precisa ser registrada, investigada ou tratada: problemas no lacre, no cilindro, no dispositivo, no GPS, na comunicação, na rota e nos comandos. Hoje esses tipos estão espalhados em três lugares, com nomes diferentes:
@@ -9,11 +9,19 @@ Este catálogo dá **um código único** para cada ocorrência operacional que p
 - `alertas.tipo` no FluxID (ex.: `VIOLACAO_LACRE`);
 - `eventos_lacre.tipo` no FluxID (ex.: `VIOLACAO`, `ABERTURA_NAO_AUTORIZADA`).
 
-Desde a entrega B, a API Oxide grava na coluna `error_type` de `telemetry_queue` e `events` o código detectado no recebimento (`LACRE_ABERTO_EM_TRANSITO`, `DISPOSITIVO_SEM_LACRE` ou `LACRE_SEM_CILINDRO`, nessa ordem de prioridade), sem gerar alerta. A geração automática de alertas virá na entrega de regras automáticas.
+Desde a entrega B, a API Oxide grava na coluna `error_type` de `telemetry_queue` e `events` o código detectado no recebimento (`LACRE_ABERTO_EM_TRANSITO`, `DISPOSITIVO_SEM_LACRE` ou `LACRE_SEM_CILINDRO`, nessa ordem de prioridade).
+
+**Desde 07/10/2026, o servidor abre alertas sozinho** (código `AUT-...`). São 9 códigos, marcados como "Automático" na coluna Situação. Regras comuns:
+- só para dispositivo que está num lacre com cilindro;
+- sem repetir enquanto houver um aberto do mesmo tipo, nem antes de 30 minutos depois do último;
+- limites no `.env` (`REGRA_...`).
+
+Detalhes em [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md), seção 3.5.
 
 A coluna **Equivalente atual** mostra onde cada código já existe. A coluna **Situação** diz se a detecção já está implementada:
 
 - **Implementado:** a API já recebe ou detecta;
+- **Automático:** o servidor abre o alerta sozinho (07/10/2026);
 - **Parcial:** o dado existe, mas a regra automática ainda não;
 - **Previsto:** depende de funcionalidade futura (geofence, Worker, rotas).
 
@@ -32,7 +40,7 @@ Limites ainda não decididos estão marcados como **a definir** e não devem ser
 | Código | Significado | Quem detecta / como | Severidade sugerida | Equivalente atual | Situação |
 | --- | --- | --- | --- | --- | --- |
 | `LACRE_VIOLADO` | O lacre foi rompido fisicamente | ESP32 envia `seal_status: BROKEN` | CRITICA | Oxide `LACRE_VIOLADO` (nome antigo `SEAL_BROKEN`); FluxID `VIOLACAO_LACRE` e evento `VIOLACAO` | Implementado (recebimento) |
-| `LACRE_ABERTO_EM_TRANSITO` | O lacre foi aberto enquanto o cilindro está em trânsito, onde deve estar sempre fechado (regra 3) | ESP32 envia `seal_status: UNLOCKED` ou `BROKEN` com o cilindro `EM_TRANSITO` ou a entrega `EM_ANDAMENTO` | CRITICA | — (no FluxID, entra como `ABERTURA_NAO_AUTORIZADA`) | Implementado (registrado em `error_type`, sem alerta) |
+| `LACRE_ABERTO_EM_TRANSITO` | O lacre foi aberto enquanto o cilindro está em trânsito, onde deve estar sempre fechado (regra 3) | ESP32 envia `seal_status: UNLOCKED` ou `BROKEN` (telemetria ou evento) com o cilindro `EM_TRANSITO` | CRITICA | Evento do FluxID `ABERTURA_NAO_AUTORIZADA` ou `VIOLACAO`; alerta `LACRE_ABERTO_EM_TRANSITO` | **Automático** (recebimento): alerta e comando `TRAVAR_VALVULA` |
 | `LACRE_ABERTO_SEM_AUTORIZACAO` | O lacre foi aberto no cliente sem autorização registrada (RN09) | ESP32 envia `seal_status: UNLOCKED` e não há autorização para aquele lacre | CRITICA | FluxID alerta e evento `ABERTURA_NAO_AUTORIZADA` | Parcial (falta o registro de autorização) |
 | `DISPOSITIVO_SEM_LACRE` | O dispositivo enviou dados sem estar vinculado a nenhum lacre | API Oxide: dispositivo sem vínculo ativo em `seal_assignments` | MEDIA | — | Implementado (registrado em `error_type`, sem alerta) |
 | `LACRE_SEM_CILINDRO` | O lacre está em uso (envia dados) mas não tem vínculo ativo com nenhum cilindro | API Oxide: lacre do dispositivo sem vínculo ativo em `cylinder_assignments` | ALTA | — | Implementado (registrado em `error_type`, sem alerta) |
@@ -54,10 +62,10 @@ Limites ainda não decididos estão marcados como **a definir** e não devem ser
 | Código | Significado | Quem detecta / como | Severidade sugerida | Equivalente atual | Situação |
 | --- | --- | --- | --- | --- | --- |
 | `GPS_INATIVO` | O módulo GPS não responde (falha de hardware ou desligado) | ESP32 identifica e envia evento/alerta | ALTA | Oxide `GPS_INATIVO` (antes, o genérico `DEVICE_ERROR`) | Previsto (firmware precisa enviar) |
-| `GPS_SEM_SINAL` | O GPS funciona, mas está sem posição (sem satélites) há mais tempo que o limite | Oxide: telemetrias seguidas sem latitude/longitude por mais de **[a definir]** minutos | MEDIA | — | Parcial (telemetria sem posição já é aceita) |
+| `GPS_SEM_SINAL` | O GPS funciona, mas está sem posição (sem satélites) há mais tempo que o limite | Oxide: o dispositivo continua mandando telemetria, mas sem posição há mais de **15 minutos** (`REGRA_GPS_SEM_SINAL_MINUTOS`) | MEDIA | — | **Automático** (Worker) |
 | `POSICAO_INVALIDA` | O dispositivo enviou coordenada impossível ou incompleta | API Oxide responde `400` (entrega C) | BAIXA | — | Implementado (rejeição) |
-| `SAIDA_GEOCERCA` | Depois da entrega, o lacre saiu do raio de **10 metros** do destino final (regra 1, RN10) | Geofence: distância da posição até `locais_entrega` > 10 m (`raio_geocerca_metros`, padrão 10) | ALTA | Oxide `SAIDA_GEOCERCA` (nome antigo `GEOFENCE_EXIT`); FluxID `SAIDA_GEOCERCA` | Previsto (geofence) |
-| `SAIDA_ROTA` | Durante a entrega, o cilindro saiu da rota sem desvio **justificado antes** ou **programado** (regra 2) | Comparação da posição com a rota da entrega `EM_ANDAMENTO`; não gera alerta se houver desvio justificado/programado para aquele trecho. Precisa de: rota planejada e registro de desvios no banco (não existem), e uma margem técnica para a imprecisão do GPS (**[a definir]** metros) | ALTA | — | Previsto (rotas ainda não existem no banco) |
+| `SAIDA_GEOCERCA` | Depois da entrega, o lacre saiu do raio de **10 metros** do destino final (regra 1, RN10) | Com a custódia aberta (entrega concluída): distância da última posição até o endereço > `raio_geocerca_metros` (padrão 10) | ALTA | Oxide `SAIDA_GEOCERCA` (nome antigo `GEOFENCE_EXIT`); FluxID `SAIDA_GEOCERCA` | **Automático** (Worker) |
+| `SAIDA_ROTA` | Durante a entrega, o cilindro saiu da rota sem desvio **justificado antes** ou **programado** (regra 2) | Distância da última posição até a linha da rota da entrega `EM_ANDAMENTO` > margem (`rotas_entrega.margem_metros`, padrão **50 m**); não gera alerta durante um desvio `PROGRAMADO` ou `JUSTIFICADO` (`desvios_rota`) | ALTA | FluxID `SAIDA_ROTA` | **Automático** (Worker) |
 | `MOVIMENTACAO_SUSPEITA` | Movimento incompatível com o estado: ex.: velocidade > 0 com o cilindro `COM_CLIENTE` ou `DISPONIVEL` no depósito | Regra sobre `speed_kmh` e status do cilindro (RN11) | ALTA | FluxID `MOVIMENTACAO_SUSPEITA` | Previsto |
 | `PARADA_PROLONGADA` | Em trânsito, o cilindro ficou parado fora de local conhecido por mais que o limite | Entrega `EM_ANDAMENTO` com posição repetida por mais de **[a definir]** minutos | MEDIA | — | Previsto |
 
@@ -65,9 +73,9 @@ Limites ainda não decididos estão marcados como **a definir** e não devem ser
 
 | Código | Significado | Quem detecta / como | Severidade sugerida | Equivalente atual | Situação |
 | --- | --- | --- | --- | --- | --- |
-| `BATERIA_BAIXA` | A bateria está abaixo do limite de alerta | ESP32 envia alerta, ou regra sobre `battery_percent` < **[a definir]** % | BAIXA | Oxide `BATERIA_BAIXA` (nome antigo `LOW_BATTERY`); FluxID `BATERIA_BAIXA` | Implementado (recebimento) |
-| `SEM_COMUNICACAO` | O dispositivo parou de enviar dados por mais que o limite | Servidor: último `last_seen_at`/telemetria há mais de **[a definir]** minutos | ALTA | Oxide `SEM_COMUNICACAO` (nome antigo `COMMUNICATION_LOST`); FluxID `SEM_COMUNICACAO` | Parcial (falta a rotina de monitoramento) |
-| `GSM_SINAL_FRACO` | O sinal do modem GSM está abaixo do limite, com risco de perder comunicação | Regra sobre `gsm_signal` < **[a definir]** dBm | BAIXA | — | Previsto |
+| `BATERIA_BAIXA` | A bateria está abaixo do limite de alerta | ESP32 envia alerta, ou regra sobre `battery_percent` < **15%** (`REGRA_BATERIA_MINIMA`) | BAIXA | Oxide `BATERIA_BAIXA` (nome antigo `LOW_BATTERY`); FluxID `BATERIA_BAIXA` | Implementado (recebimento) e **Automático** |
+| `SEM_COMUNICACAO` | O dispositivo parou de enviar dados por mais que o limite | Servidor: nenhum contato (telemetria, evento ou busca de comando) há mais de **30 minutos** (`REGRA_SEM_COMUNICACAO_MINUTOS`; `devices.last_contact_at`) | ALTA | Oxide `SEM_COMUNICACAO` (nome antigo `COMMUNICATION_LOST`); FluxID `SEM_COMUNICACAO` | **Automático** (Worker) |
+| `GSM_SINAL_FRACO` | O sinal do modem GSM está abaixo do limite, com risco de perder comunicação | Regra sobre `gsm_signal` < **-105 dBm** (`REGRA_GSM_MINIMO_DBM`) | BAIXA | — | **Automático** (recebimento) |
 | `DISPOSITIVO_FALHA` | Falha de hardware do ESP32 ou de sensor não coberta por outro código | ESP32 envia alerta | MEDIA | Oxide `DISPOSITIVO_FALHA` (nome antigo `DEVICE_ERROR`) | Implementado (recebimento) |
 | `DISPOSITIVO_NAO_CADASTRADO` | Um dispositivo tentou enviar dados sem estar cadastrado | API Oxide responde `404` (entrega A) | MEDIA | — | Implementado (rejeição) |
 | `CHAVE_INVALIDA` | Tentativa de envio com chave ausente, inválida ou de outro dispositivo | API Oxide responde `401`/`403` | ALTA | — | Implementado (rejeição) |
@@ -76,8 +84,8 @@ Limites ainda não decididos estão marcados como **a definir** e não devem ser
 
 | Código | Significado | Quem detecta / como | Severidade sugerida | Equivalente atual | Situação |
 | --- | --- | --- | --- | --- | --- |
-| `COMANDO_FALHOU` | O ESP32 tentou executar o comando e confirmou `ERRO` | Confirmação com `status: ERRO` | ALTA | Oxide `COMANDO_FALHOU` (nome antigo `COMMAND_FAILURE`) | Implementado (confirmação) |
-| `COMANDO_SEM_RESPOSTA` | Um comando ficou `PENDENTE` além do limite sem confirmação | Servidor: `created_at` há mais de **[a definir]** minutos e status `PENDENTE` | MEDIA | — | Previsto |
+| `COMANDO_FALHOU` | O ESP32 tentou executar o comando e confirmou `ERRO` | Confirmação com `status: ERRO` | ALTA | Oxide `COMANDO_FALHOU` (nome antigo `COMMAND_FAILURE`) | **Automático** (confirmação) |
+| `COMANDO_SEM_RESPOSTA` | Um comando ficou `PENDENTE` além do limite sem confirmação | Servidor: `created_at` há mais de **10 minutos** (`REGRA_COMANDO_SEM_RESPOSTA_MINUTOS`) e status `PENDENTE` | MEDIA | — | **Automático** (Worker) |
 | `COMANDO_DESCONTINUADO` | Comando antigo com tipo fora do catálogo, marcado na migração da entrega D | Migração: `error_message` "tipo de comando descontinuado" | BAIXA | — | Implementado (migração) |
 
 ---
@@ -106,13 +114,16 @@ Alerta ENCERRADO (com quem encerrou e quando)
 | Estados usados | `ABERTO` → `EM_ANALISE` (justificado) → `ENCERRADO` (liberado), os mesmos valores do FluxID |
 | Registro | A justificativa, quem justificou, quem encerrou e quando ficam guardados (RN20, auditoria) |
 
-O que ainda precisa existir para este fluxo funcionar:
+Como ficou implementado (07/10/2026, aguardando validação):
 
-- rota planejada da entrega e registro de desvios programados ou justificados antes;
-- campos para a justificativa e para quem encerrou o alerta (o FluxID já tem `alertas.encerrado_por` e `encerrado_em`);
-- rota da API para o motorista justificar (a de analisar e encerrar já existe: `PATCH /api/v1/iot/alerts/{alert_id}/status`, com `resolved_by` e `resolution_note`);
-- forma de avisar o motorista e o gestor (aplicativo, SMS, e-mail: **a definir**);
-- correspondência de papéis com os perfis do FluxID: hoje existem `OPERADOR` e `SUPERVISOR`, mas não "motorista" e "gestor". Sugestão: motorista → `OPERADOR`; gestor → `SUPERVISOR` ou `ORG_ADMIN`, que têm a permissão `ENCERRAR_ALERTAS`. Falta uma permissão para **justificar** alerta (**a definir**).
+- **Rota planejada e desvios:** `rotas_entrega` e `desvios_rota` (script `006`), pela API do frontend (`manage-deliveries set_route` e `add_deviation`).
+- **Alerta automático:** o Worker abre `SAIDA_ROTA` quando a última posição sai da margem (padrão 50 m), fora de um desvio.
+- **Justificativa do motorista:** `manage-alerts justify` (permissão nova `JUSTIFICAR_ALERTAS`, papel `OPERADOR`). Fica em `alertas.justificativa`, `justificado_por` e `justificado_em`.
+- **Análise e liberação pelo gestor:** `manage-alerts analyze` e `close` (permissão `ENCERRAR_ALERTAS`: `SUPERVISOR` e `ORG_ADMIN`). Grava `encerrado_por` (a pessoa logada) e o motivo.
+- **Papéis:** motorista → `OPERADOR`; gestor → `SUPERVISOR` ou `ORG_ADMIN`.
+- **Ainda a definir:**
+  - a forma de **avisar** o motorista e o gestor (aplicativo, SMS, e-mail). Hoje o alerta aparece no frontend (`query-alerts`, `query-map`);
+  - se a justificativa deve passar o alerta para `EM_ANALISE` sozinha. Hoje ela só registra, e o gestor muda o estado.
 
 ## 7. Como o catálogo se liga ao que já existe
 
@@ -137,6 +148,17 @@ Aprovadas por Natã da Silva Baracho em 06/10/2026:
 
 1. **Idioma e padrão dos códigos:** português, em maiúsculas com `_`, como no FluxID.
 2. **Uso do catálogo:** primeiro como documentação de referência; os códigos e regras são implementados aos poucos, em cada entrega (B, geofence, Worker, comandos automáticos).
-3. **Limites:** definidos o raio de 10 m no destino, a rota sem saída sem justificativa/programação e o lacre fechado em trânsito. **Ainda a definir:** minutos sem sinal de GPS, sem comunicação e sem resposta de comando; percentual de bateria; dBm de GSM; margem técnica do GPS na rota; minutos de parada prolongada.
+3. **Limites:** definidos o raio de 10 m no destino, a rota sem saída sem justificativa/programação e o lacre fechado em trânsito.
+
+   **Adotados em 07/10/2026, para validação** (todos mudam no `.env`):
+   - GPS sem sinal: 15 min;
+   - sem comunicação: 30 min;
+   - comando sem resposta: 10 min;
+   - bateria: 15%;
+   - GSM: -105 dBm;
+   - margem da rota: 50 m;
+   - repetição do mesmo alerta: 30 min.
+
+   **Ainda a definir:** minutos de parada prolongada.
 4. **`alert_type` da Oxide em português:** ✅ implementado em 06/10/2026. A API Oxide usa os códigos deste catálogo (ex.: `LACRE_VIOLADO` no lugar de `SEAL_BROKEN`), com severidade padrão igual à sugerida aqui. Na transição, os nomes antigos em inglês continuam aceitos e são convertidos, para não quebrar o firmware, até nova decisão.
 5. **Códigos que faltam:** a equipe e o programador do ESP32 podem propor novos códigos (ex.: tampa do lacre forçada, temperatura alta), que entram numa nova versão deste documento.
