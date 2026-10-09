@@ -132,3 +132,4 @@ A tabela `alerts` armazena alertas associados a dispositivos. `POST /api/v1/iot/
 - [Catálogo de tipos de erro e ocorrências](Doc/Tipos-de-Erro.md)
 - [Plano de Teste](Doc/Doc_tese/PlanoDeTeste.md)
 - [Roteiro de Teste para IA](Doc/Doc_tese/RoteiroDeTeste.md)
+- [Documentação final para o evento INTEGRA 2026](DocumentacaoFinal): registros de uso de IA e validação humana (Template 7), um por parte do projeto, do banco à integração e aos testes
