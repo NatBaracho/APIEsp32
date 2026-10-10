@@ -9,6 +9,7 @@ const controller = new IngestController();
 router.post("/telemetries", apiKeyMiddleware, apiKeyDeviceMiddleware, controller.telemetry.bind(controller));
 router.post("/events", apiKeyMiddleware, apiKeyDeviceMiddleware, controller.event.bind(controller));
 router.post("/alerts", apiKeyMiddleware, apiKeyDeviceMiddleware, controller.alert.bind(controller));
+router.post("/activations", apiKeyMiddleware, apiKeyDeviceMiddleware, controller.activation.bind(controller));
 
 // Aberta e provisória, para a equipe acompanhar os testes de todos os lacres
 router.get("/messages", controller.list.bind(controller));

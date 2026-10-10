@@ -9,7 +9,10 @@ export interface Recebedor {
   url: string;
   chave: string;
   mensagens: Map<string, Record<string, unknown>>;
-  dispositivos: Array<{ device_id: string; api_key_hash: string | null; active: boolean; firmware_version?: string }>;
+  dispositivos: Array<{
+    device_id: string; api_key_hash: string | null; active: boolean; firmware_version?: string;
+    binding?: { binding_id?: string; seal_code?: string | null; cylinder_code?: string | null; customer_code?: string | null; customer_name?: string | null; bound_at?: string } | null;
+  }>;
   comandos: Array<{ command_id: string; device_id: string; command_type: string; created_at?: string; confirmado?: string }>;
   // Liga e desliga falhas para os testes
   foraDoAr: boolean;

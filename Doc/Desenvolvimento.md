@@ -106,6 +106,7 @@ Não existe criação automática: mensagem de dispositivo não cadastrado respo
 | `POST /iot/telemetries` | Leitura periódica | `message_id`, `device_id`, `latitude`, `longitude`, `battery_percent` |
 | `POST /iot/events` | Algo aconteceu | os mesmos e `event_type` |
 | `POST /iot/alerts` | Problema identificado pelo lacre | `alert_id`, `device_id`, `alert_type`, `title`, `latitude`, `longitude`, `battery_percent` |
+| `POST /iot/activations` | Avisar que o lacre foi ativado ou desativado | os da leitura e `status` (`ATIVO` ou `INATIVO`) |
 | `GET /iot/commands/{deviceId}` | Buscar comandos pendentes | — |
 | `POST /iot/commands/confirm` | Confirmar o comando | `command_id`, `device_id`, `status` |
 
@@ -160,10 +161,12 @@ Sistema principal fica sabendo do resultado
 | Dado | Onde |
 | --- | --- |
 | Mensagem do lacre, já validada | `mensagens.payload_json` (o mesmo JSON que vai para o banco principal) |
-| Tipo da mensagem | `mensagens.tipo`: `TELEMETRIA`, `EVENTO`, `ALERTA` ou `CONFIRMACAO_COMANDO` |
+| Tipo da mensagem | `mensagens.tipo`: `TELEMETRIA`, `EVENTO`, `ALERTA`, `CONFIRMACAO_COMANDO` ou `ATIVACAO` |
 | Hora de chegada | `mensagens.received_at` |
 | Situação do envio | `mensagens.status`, `attempt_count`, `last_error`, `next_attempt_at` e `synced_at` |
 | Último estado do lacre | `devices.last_*` (contato, posição, GPS, lacre, bateria e sinal) |
+| Identificador do lacre e ativação | `devices.seal_code` (gerado pela API), `activation_status`, `activated_at` e `deactivated_at` |
+| Vínculo atual (cilindro e cliente) | `devices.cylinder_code`, `customer_code`, `customer_name`, `binding_id` e `bound_at`, mandados pelo sistema principal |
 | Comando e resultado | `commands` |
 | Última rodada do Worker | arquivo `oxide-worker.json`, ao lado do banco |
 
@@ -214,7 +217,7 @@ Roda numa pasta temporária, com uma `oxide.db` nova, a própria API na porta 31
 
 ## 1.10 Estado atual
 
-- API, fila única e Worker implementados e testados pela IA em 10/10/2026: suíte com 92/92, simulador com 23/23 e teste em massa com 24/24, contra um recebedor de teste. **Aprovado por Natã da Silva Baracho em 10/10/2026** (seções 7.26 e 7.27).
+- API, fila única e Worker implementados e testados pela IA em 10/10/2026: suíte com 110/110, simulador com 26/26 e teste em massa com 32/32, contra um recebedor de teste. **Aprovado por Natã da Silva Baracho em 10/10/2026** (seções 7.26 a 7.28).
 - O banco principal passou a ser o Supabase. O FluxID em PostgreSQL ficou como banco de teste.
 - Próximos passos:
   - o professor Alisson cria a função de recebimento e passa o endereço;
@@ -616,9 +619,38 @@ Depois da aprovação, a pedido de Natã:
 
 Relatórios: [Relatorio-de-Teste-2026-10-10-13h45.md](Doc_tese/Relatorio-de-Teste-2026-10-10-13h45.md) e [Relatorio-de-Teste-2026-10-10-14h00.md](Doc_tese/Relatorio-de-Teste-2026-10-10-14h00.md). Questionários respondidos: **aprovado por Natã da Silva Baracho em 10/10/2026**. Como o PR #20 já estava mesclado, esta entrega foi no PR #21.
 
+### 7.28 Ativação do lacre e vínculo com o cilindro e o cliente (10/10/2026)
+
+Pedido de Natã: o sistema precisa saber quais lacres estão ativos; a API gera um identificador; o sistema usa esse identificador para vincular o cliente e o cilindro; e o vínculo fica salvo na Oxide.
+
+Decisões de Natã:
+- o identificador é **um fixo por lacre**, gerado na primeira ativação;
+- o vínculo termina **quando o sistema mandar ou quando o lacre avisar que desativou**.
+
+O que foi feito:
+- **Rota nova** `POST /api/v1/iot/activations`: o lacre avisa `ATIVO` ou `INATIVO`, com posição e bateria. Na primeira ativação a API gera o `seal_code` (`LCR-` e 8 caracteres) e o devolve na resposta.
+- **Tipo novo de mensagem**, `ATIVACAO`: o aviso vai pela fila ao sistema principal, que assim tem a lista de lacres ativos.
+- **Vínculo vindo do sistema principal:** campo `binding` em `list_devices`. O Worker grava o cilindro e o cliente em `devices`. Só vale para lacre ativo e com o identificador que a API gerou.
+- **Toda mensagem** (leitura, evento, alerta, alerta automático e confirmação de comando) sai com o identificador do lacre, o cilindro e o cliente.
+- **Fim do vínculo:** pelo sistema (`binding: null`) ou pelo lacre (`INATIVO`). O vínculo encerrado pelo lacre não volta sozinho.
+- **Alerta automático novo:** `LACRE_SEM_CILINDRO`, quando o lacre ativo continua enviando sem cilindro 10 minutos depois da ativação (`REGRA_MINUTOS_SEM_VINCULO`).
+- **Banco de versão anterior:** cópia de segurança `oxide.db.bak-antes-da-atualizacao-<data>` e tabelas refeitas com as colunas novas.
+
+Defeito achado pelo teste em massa e corrigido:
+- **Posição repetida no instante em que o Worker envia a leitura:** a data nova nunca saía, porque a versão antiga era marcada como enviada logo depois. Agora a leitura volta para a fila junto com a data nova. O defeito existia desde a fila única; a leitura em si chegava, só a data da parada se perdia.
+
+Resultados:
+- suíte: 110 de 110 (18 casos novos); simulador: 26 de 26; banco: 64 de 64;
+- teste em massa: 32 de 32, três vezes seguidas; 500 lacres ativados, cada um com um identificador diferente; 14.934 mensagens com o identificador, o cilindro e o cliente certos;
+- `oxide.db` do projeto atualizado com as colunas novas, com cópia de segurança, depois da aprovação.
+
+**O que não foi testado:** o sistema de verdade (foi usado o recebedor de teste) e o lacre de verdade. O sistema ainda não trata a mensagem `ATIVACAO` nem devolve o vínculo, e o firmware ainda não envia o aviso de ativação.
+
+Relatório: [Relatorio-de-Teste-2026-10-10-20h00.md](Doc_tese/Relatorio-de-Teste-2026-10-10-20h00.md). Questionário respondido: **aprovado por Natã da Silva Baracho em 10/10/2026**.
+
 ## 9. Suíte de testes automatizados (`npm test`)
 
-A suíte `tests/api.test.ts` foi reescrita em 10/10/2026 para o modelo enxuto e cobre 92 casos: os grupos abaixo e, desde 10/10/2026, o grupo 12 (regras do banco direto no SQLite, volume com 100.000 mensagens e gravação ao mesmo tempo). Ela roda numa pasta temporária, com uma `oxide.db` nova e um recebedor de teste no lugar do Supabase.
+A suíte `tests/api.test.ts` foi reescrita em 10/10/2026 para o modelo enxuto e cobre 110 casos: os grupos abaixo e, desde 10/10/2026, o grupo 12 (regras do banco direto no SQLite, volume com 100.000 mensagens e gravação ao mesmo tempo) e o grupo 13 (ativação do lacre e vínculo com o cilindro e o cliente). Ela roda numa pasta temporária, com uma `oxide.db` nova e um recebedor de teste no lugar do Supabase.
 
 1. **Geral, documentação e banco:** `/`, Swagger, regra de que toda rota tem um grupo, banco com só 3 tabelas e rota antiga removida.
 2. **Dispositivos:** cadastro provisório, duplicidades (`409`), validações (`400`) e respostas sem a chave.
@@ -642,7 +674,7 @@ A suíte anterior (96 casos, modelo com filas separadas e envio ao FluxID) está
 
 # Parte 3 — Histórico de PRs por funcionalidade
 
-Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validação **aprovada por Natã da Silva Baracho**. O #20 (Oxide enxuta) foi **aprovado por Natã da Silva Baracho** em 10/10/2026 e mesclado no mesmo dia. O #21 (teste do banco, teste em massa e modo WAL) foi **aprovado por Natã da Silva Baracho** em 10/10/2026. Esta parte e a seção "Quem faz o quê" (1.1) foram conferidas por questionário (6/6 sim) e **aprovadas por Natã da Silva Baracho** em 06/10/2026. O PR que mexeu em mais de uma parte aparece em cada grupo, só com o que mudou naquela parte. A cada novo PR, esta parte é atualizada.
+Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validação **aprovada por Natã da Silva Baracho**. O #20 (Oxide enxuta) foi **aprovado por Natã da Silva Baracho** em 10/10/2026 e mesclado no mesmo dia. O #21 (teste do banco, teste em massa, modo WAL e, depois, ativação e vínculo) foi **aprovado por Natã da Silva Baracho** em 10/10/2026. O #22 levou à `main` o primeiro commit do #21, que tinha ficado na branch antiga; o conteúdo é o mesmo. Esta parte e a seção "Quem faz o quê" (1.1) foram conferidas por questionário (6/6 sim) e **aprovadas por Natã da Silva Baracho** em 06/10/2026. O PR que mexeu em mais de uma parte aparece em cada grupo, só com o que mudou naquela parte. A cada novo PR, esta parte é atualizada.
 
 ## 3.1 API
 
@@ -658,7 +690,7 @@ Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validaç�
 | #15 | Integração Oxide ⇄ FluxID | Chave por hash; alerta volta à fila ao mudar de status; rotas `/sync/*` e grupo "Sincronização" |
 | #17 | Simulador e série do cilindro | Cadastro provisório de cilindro aceita série repetida (o código continua único); simulador `npm run simular` |
 | #20 | Oxide enxuta e envio ao Supabase | Posição e bateria obrigatórias em toda mensagem; `gps_ok`; alertas automáticos da própria mensagem; `GET /iot/messages` e `GET /health`; saem as rotas de lacres, cilindros, vínculos e de análise de alertas e a página da proposta do frontend |
-| #21 | Teste do banco, teste em massa e modo WAL | As operações que gravam pedem a vez no início e esperam a do Worker, em vez de responder `500`; novo `npm run simular:massa` |
+| #21 | Teste do banco, teste em massa e modo WAL | As operações que gravam pedem a vez no início e esperam a do Worker, em vez de responder `500`; novo `npm run simular:massa`; **ativação e vínculo:** rota `POST /iot/activations`, identificador do lacre gerado pela API, mensagem `ATIVACAO`, cilindro e cliente em toda mensagem e alerta automático `LACRE_SEM_CILINDRO` |
 
 ## 3.2 Oxide (`oxide.db`)
 
@@ -672,7 +704,7 @@ Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validaç�
 | #15 | Integração Oxide ⇄ FluxID | `next_attempt_at` na telemetria e nos eventos; `sync_*` nos alertas; `devices.api_key_hash`; `fluxid_id` nos vínculos; tabela `sync_logs`; `Oxidedb.md` v1.7 |
 | #17 | Simulador e série do cilindro | `cylinders.serial_number` sem `UNIQUE` (série única só por empresa, no FluxID); migração preservando os dados; `Oxidedb.md` v1.8 |
 | #20 | Oxide enxuta e envio ao Supabase | De 11 para 3 tabelas (`devices`, `mensagens`, `commands`); migração com cópia de segurança (leituras antigas completas seguem para o banco principal; as demais ficam arquivadas); backup e retenção; `Oxidedb.md` v2.0 |
-| #21 | Teste do banco, teste em massa e modo WAL | A migração refaz `devices` e `commands` no formato atual; cópia de segurança antes de qualquer mudança; modo WAL (de 40 para 588 pedidos por segundo no teste com 500 lacres); backup num arquivo só; `Oxidedb.md` 2.1 |
+| #21 | Teste do banco, teste em massa e modo WAL | A migração refaz `devices` e `commands` no formato atual; cópia de segurança antes de qualquer mudança; modo WAL (de 40 para 588 pedidos por segundo no teste com 500 lacres); backup num arquivo só; `Oxidedb.md` 2.1; colunas da ativação e do vínculo em `devices` e tipo `ATIVACAO` em `mensagens`; `oxide.db` do projeto convertido; `Oxidedb.md` 2.2 |
 
 ## 3.3 FluxID
 
@@ -707,4 +739,4 @@ Implementado e aprovado em 07/10/2026 (PR #15). O que levou até ele:
 | #15 | Integração Oxide ⇄ FluxID | Worker completo (`src/worker/`, `npm run worker`): envio da fila, tentativas, espera do P3, cadastro de volta com o hash da chave |
 | #17 | Simulador | O simulador exercita o Worker de ponta a ponta: cadastro sem conflitos, fila, FluxID fora do ar, espera do vínculo e reenvio |
 | #20 | Oxide enxuta e envio ao Supabase | Worker reescrito: envia a fila única por HTTP à função de recebimento do Supabase, com resultado por mensagem, e traz os dispositivos e os comandos; simulador novo com recebedor de teste |
-| #21 | Teste do banco, teste em massa e modo WAL | Marcação do lote pede a vez de gravar no início; teste em massa com o Worker derrubado e religado no meio, sem perda e sem duplicidade |
+| #21 | Teste do banco, teste em massa e modo WAL | Marcação do lote pede a vez de gravar no início; teste em massa com o Worker derrubado e religado no meio, sem perda e sem duplicidade; o Worker traz o vínculo de cada lacre (`binding`); corrigida a posição repetida no instante do envio |

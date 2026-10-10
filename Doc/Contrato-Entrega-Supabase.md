@@ -1,6 +1,6 @@
 # Contrato de entrega: API do lacre → Supabase
 
-**Versão:** 1.0 — 10/10/2026 — proposta do backend. A implementação na API foi **aprovada por Natã da Silva Baracho em 10/10/2026**. Falta a revisão do professor Alisson
+**Versão:** 1.1 — 10/10/2026 — proposta do backend. A implementação na API foi **aprovada por Natã da Silva Baracho em 10/10/2026**. Falta a revisão do professor Alisson
 **Para:** quem mantém o Supabase (projeto `fluxid_integra2026`).
 **De:** a API do lacre (este repositório).
 
@@ -20,7 +20,7 @@ Lacre (ESP32) ──► API do lacre ──► fila local ──► Worker ─�
 - O **Worker** (um programa que roda junto da API) faz três coisas com o Supabase, a cada 10 segundos:
   1. envia as mensagens da fila;
   2. busca os comandos de válvula pendentes;
-  3. a cada 5 minutos, busca a lista de dispositivos, com o hash da chave de cada um.
+  3. a cada 5 minutos, busca a lista de dispositivos, com o hash da chave e o **vínculo** de cada um (cilindro e cliente).
 - Tudo passa por **uma função de recebimento** no Supabase (decisão: API REST, com a chave `service_role`, por uma função).
 
 ## 2. Como a API chama o Supabase
@@ -97,7 +97,20 @@ Até 100 mensagens por chamada (`WORKER_BATCH_SIZE`).
 ```json
 {
   "devices": [
-    { "device_id": "DSP-000001", "api_key_hash": "9f86d081884c7d65...", "active": true, "firmware_version": "1.0.0" }
+    {
+      "device_id": "DSP-000001",
+      "api_key_hash": "9f86d081884c7d65...",
+      "active": true,
+      "firmware_version": "1.0.0",
+      "binding": {
+        "binding_id": "5b1f...",
+        "seal_code": "LCR-JKFL6VBR",
+        "cylinder_code": "CIL-000111",
+        "customer_code": "CLI-0007",
+        "customer_name": "Hospital de Teste",
+        "bound_at": "2026-10-10T12:00:00Z"
+      }
+    }
   ]
 }
 ```
@@ -108,6 +121,7 @@ Até 100 mensagens por chamada (`WORKER_BATCH_SIZE`).
 | `api_key_hash` | SHA-256 da chave do dispositivo, em hexadecimal (64 caracteres). A chave em texto só existe no cadastro e no lacre |
 | `active` | `false` bloqueia o lacre na API (resposta `403`) |
 | `firmware_version` | Opcional |
+| `binding` | O vínculo atual do lacre: cilindro e cliente. Ver "Vínculo", logo abaixo |
 
 A API copia essa lista. Dispositivo que some da lista **não é apagado** na API; para bloquear, mande `active: false`.
 
@@ -133,16 +147,45 @@ A API copia essa lista. Dispositivo que some da lista **não é apagado** na API
 
 O lacre busca o comando na API e confirma. A confirmação volta ao Supabase como uma mensagem do tipo `CONFIRMACAO_COMANDO` (seção 4.4). Depois dela, o comando deve sair da lista de pendentes.
 
+#### Vínculo (`binding`)
+
+É por este campo que o sistema manda à API a **ordem de vinculação**: de qual cilindro e de qual cliente é o lacre.
+
+O caminho completo:
+
+1. O lacre avisa a API que está ativo.
+2. A API gera o identificador do lacre (`seal_code`, no formato `LCR-` e 8 caracteres) e envia ao Supabase uma mensagem do tipo `ATIVACAO` (seção 4.5). Com essas mensagens, o sistema sabe quais lacres estão ativos.
+3. No sistema, alguém vincula o cilindro e o cliente a esse identificador.
+4. O sistema devolve o vínculo no campo `binding` do dispositivo. A API guarda e passa a mandar o cilindro e o cliente em toda mensagem daquele lacre.
+
+| Campo de `binding` | Regra |
+| --- | --- |
+| `seal_code` | **Obrigatório.** O identificador que a API gerou. Com outro valor, a API ignora o vínculo |
+| `cylinder_code` | **Obrigatório.** Código do cilindro |
+| `binding_id` | Identificador do vínculo no sistema. Recomendado: é por ele que a API reconhece um vínculo novo |
+| `customer_code`, `customer_name` | Cliente. Opcionais (cilindro em estoque não tem cliente) |
+| `bound_at` | Data da vinculação. Opcional |
+
+| O que vem em `binding` | O que a API faz |
+| --- | --- |
+| Um vínculo, para um lacre ativo | Guarda o vínculo |
+| `null` | Desfaz o vínculo. O lacre continua ativo |
+| O campo não vem | Nada muda |
+| Um vínculo para um lacre que não está ativo | Ignora e registra um aviso |
+| O mesmo vínculo que o lacre encerrou ao desativar | Ignora. Para vincular de novo, mande um vínculo com outro `binding_id` |
+
 ## 4. As mensagens, tipo por tipo
 
 ### 4.1 Campos que toda mensagem do lacre tem
 
 | Campo | Tipo | Sempre vem? | Significado |
 | --- | --- | --- | --- |
-| `type` | texto | sim | `TELEMETRIA`, `EVENTO`, `ALERTA` ou `CONFIRMACAO_COMANDO` |
+| `type` | texto | sim | `TELEMETRIA`, `EVENTO`, `ALERTA`, `CONFIRMACAO_COMANDO` ou `ATIVACAO` |
 | `origin` | texto | sim | `lacre` (enviada pelo lacre) ou `servidor` (alerta aberto pela API) |
 | `message_id` | texto | sim | Único. No alerta do lacre, é o `alert_id` que ele enviou |
 | `device_id` | texto | sim | Código do dispositivo |
+| `seal_code` | texto | não | Identificador do lacre, gerado pela API. Vem depois que o lacre avisa a primeira ativação |
+| `cylinder_code`, `customer_code`, `customer_name`, `binding_id` | texto | não | O cilindro e o cliente do vínculo que valia **quando a mensagem chegou**. Só vêm quando o lacre está vinculado |
 | `received_at` | data ISO 8601, em UTC | sim | Hora em que a API recebeu |
 | `latitude`, `longitude` | número | sim | Posição. Nunca vêm vazias |
 | `gps_ok` | verdadeiro/falso | sim | `false` = o lacre estava sem sinal de GPS e mandou a **última posição conhecida** |
@@ -196,6 +239,31 @@ Cada um é aberto **uma vez, na mudança** (ao cruzar o limite ou quando o estad
 
 `command_status` é `EXECUTADO` ou `ERRO`. Com `ERRO`, pode vir `error_message`.
 
+### 4.5 `ATIVACAO`
+
+O lacre avisa que foi ativado ou desativado. Tem os campos comuns (posição e bateria) e mais:
+
+```json
+{
+  "type": "ATIVACAO",
+  "origin": "lacre",
+  "received_at": "2026-10-10T15:20:00.000Z",
+  "message_id": "ATV-000001",
+  "device_id": "DSP-000001",
+  "seal_code": "LCR-JKFL6VBR",
+  "activation_status": "ATIVO",
+  "latitude": -7.2091939,
+  "longitude": -39.3063666,
+  "gps_ok": true,
+  "battery_percent": 97
+}
+```
+
+| `activation_status` | O que o Supabase deve fazer |
+| --- | --- |
+| `ATIVO` | Pôr o lacre na lista de lacres ativos, pronto para receber um cilindro e um cliente. O lacre pode avisar mais de uma vez (ao religar); o `seal_code` é sempre o mesmo |
+| `INATIVO` | Encerrar o vínculo daquele lacre. A mensagem ainda traz o `cylinder_code` e o cliente do vínculo que acabou |
+
 ## 5. Quando algo dá errado
 
 | Resposta do Supabase | O que a API entende | Efeito |
@@ -213,13 +281,15 @@ O gestor acompanha pela API: `GET /api/v1/sync/status`, `GET /api/v1/sync/proble
 2. **A chave `service_role`**, colocada direto no `.env` do servidor por quem tem acesso (nunca por mensagem).
 3. **As três operações** da seção 3. Se os nomes das operações ou dos campos precisarem ser outros, por causa das tabelas que já existem aí, me diga quais são e eu ajusto a API.
 4. **As tabelas do lacre que já existem** (dispositivo e comando): os nomes e as colunas, para eu conferir se o que a API envia cobre tudo.
+5. **Tratar a mensagem `ATIVACAO`** (seção 4.5): montar a lista de lacres ativos e encerrar o vínculo quando vier `INATIVO`.
+6. **Devolver o vínculo** no campo `binding` da lista de dispositivos (seção 3.2), usando o `seal_code` que a API gerou.
 
 ## 7. Como foi testado
 
 Ainda não houve teste contra o Supabase de verdade, porque a função de recebimento não existe no repositório. A API foi testada com um **recebedor de teste** (`src/simulador/recebedor.ts`), que segue exatamente este contrato:
 - `npm run simular:massa`: 500 lacres enviando ao mesmo tempo, com a função de recebimento fora do ar no meio do teste; nada se perde e nada duplica;
-- `npm test`: 92 casos, incluindo Supabase fora do ar, chave recusada, mensagem recusada, mensagem sem resposta, reenvio sem duplicar e lotes;
-- `npm run simular`: o percurso completo de um lacre, com 23 verificações.
+- `npm test`: 110 casos, com a ativação do lacre e o vínculo, incluindo Supabase fora do ar, chave recusada, mensagem recusada, mensagem sem resposta, reenvio sem duplicar e lotes;
+- `npm run simular`: o percurso completo de um lacre, com 26 verificações.
 
 O primeiro teste de verdade será com a função do Supabase no ar.
 
@@ -228,3 +298,4 @@ O primeiro teste de verdade será com a função do Supabase no ar.
 | Versão | Data | Mudança |
 | --- | --- | --- |
 | 1.0 | 10/10/2026 | Primeira versão, depois da decisão de usar o Supabase como banco principal, com envio pela API REST por uma função de recebimento |
+| 1.1 | 10/10/2026 | Ativação do lacre e vínculo: mensagem `ATIVACAO`; identificador do lacre (`seal_code`) gerado pela API; campo `binding` em `list_devices`; cilindro e cliente em toda mensagem. **Aprovado por Natã da Silva Baracho em 10/10/2026** |

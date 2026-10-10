@@ -1,7 +1,7 @@
 import { randomBytes } from "crypto";
 import db from "../database/connection";
 import { AlertType, defaultSeverityByType } from "../models/Alert";
-import { Device } from "../models/Device";
+import { ActivationStatus, Device } from "../models/Device";
 import { LeituraComum, MessageType, SealStatus, sealStatuses } from "../models/Message";
 import { DeviceRepository } from "../repositories/DeviceRepository";
 import { MessageRepository } from "../repositories/MessageRepository";
@@ -96,8 +96,23 @@ const titulos: Partial<Record<AlertType, string>> = {
   BATERIA_BAIXA: "Bateria baixa",
   GSM_SINAL_FRACO: "Sinal fraco",
   LACRE_VIOLADO: "Lacre rompido",
-  LACRE_ABERTO_SEM_AUTORIZACAO: "Lacre aberto"
+  LACRE_ABERTO_SEM_AUTORIZACAO: "Lacre aberto",
+  LACRE_SEM_CILINDRO: "Lacre sem cilindro vinculado"
 };
+
+// O que acompanha cada mensagem: o identificador do lacre e, quando há
+// vínculo, o cilindro e o cliente
+function vinculoDe(device: Device | undefined): Record<string, string> {
+  const vinculo: Record<string, string> = {};
+  if (!device) return vinculo;
+  if (device.seal_code) vinculo.seal_code = device.seal_code;
+  if (!device.cylinder_code) return vinculo;
+  vinculo.cylinder_code = device.cylinder_code;
+  if (device.binding_id) vinculo.binding_id = device.binding_id;
+  if (device.customer_code) vinculo.customer_code = device.customer_code;
+  if (device.customer_name) vinculo.customer_name = device.customer_name;
+  return vinculo;
+}
 
 export class MessageService {
 
@@ -113,7 +128,7 @@ export class MessageService {
   // alert_type...). Tudo numa transação: mensagem, alertas e estado.
   // immediate: pede a vez de gravar logo no início e espera a do Worker,
   // em vez de falhar quando os dois gravam ao mesmo tempo
-  receive(tipo: Exclude<MessageType, "CONFIRMACAO_COMANDO">, leitura: LeituraComum, extra: Record<string, unknown>): ReceiveResult {
+  receive(tipo: "TELEMETRIA" | "EVENTO" | "ALERTA", leitura: LeituraComum, extra: Record<string, unknown>): ReceiveResult {
     return db.transaction((): ReceiveResult => {
       if (this.isDuplicate(leitura.message_id)) {
         return "duplicate";
@@ -121,7 +136,7 @@ export class MessageService {
 
       const device = this.devices.findByDeviceId(leitura.device_id)!;
       const agora = new Date().toISOString();
-      const payload: Record<string, unknown> = { type: tipo, origin: "lacre", received_at: agora, ...leitura, ...extra };
+      const payload: Record<string, unknown> = { type: tipo, origin: "lacre", received_at: agora, ...vinculoDe(device), ...leitura, ...extra };
 
       // Mesma posição e mesmo estado do lacre da última telemetria: não cria
       // outra linha, só atualiza a data e a hora da que já existe
@@ -147,13 +162,51 @@ export class MessageService {
     }).immediate();
   }
 
+  // O lacre avisa que foi ativado ou desativado. Na primeira ativação a API
+  // gera o identificador do lacre; o aviso vai para a fila e o sistema
+  // principal usa o identificador para vincular o cilindro e o cliente.
+  // Ao desativar, o vínculo acaba (a mensagem ainda sai com ele)
+  activation(leitura: LeituraComum, status: ActivationStatus): { result: "created" | "duplicate"; seal_code: string | null } {
+    return db.transaction(() => {
+      if (this.isDuplicate(leitura.message_id)) {
+        return { result: "duplicate" as const, seal_code: null };
+      }
+
+      const antes = this.devices.findByDeviceId(leitura.device_id)!;
+      const agora = new Date().toISOString();
+      if (status === "ATIVO") {
+        this.devices.activate(antes.device_id, antes.seal_code ?? this.novoCodigoDoLacre());
+      }
+      const device = this.devices.findByDeviceId(leitura.device_id)!;
+
+      this.messages.enqueue(leitura.message_id, leitura.device_id, "ATIVACAO", {
+        type: "ATIVACAO", origin: "lacre", received_at: agora, ...vinculoDe(device), ...leitura, activation_status: status
+      });
+      this.automaticAlerts(device, leitura, agora, false);
+      this.updateState(leitura);
+      if (status === "INATIVO") {
+        this.devices.deactivate(device.device_id);
+      }
+      return { result: "created" as const, seal_code: device.seal_code ?? null };
+    }).immediate();
+  }
+
+  // LCR- e 8 caracteres, sem letras e números que se confundem (0/O, 1/I)
+  private novoCodigoDoLacre(): string {
+    const letras = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    for (;;) {
+      const codigo = `LCR-${[...randomBytes(8)].map(b => letras[b % letras.length]).join("")}`;
+      if (!this.devices.sealCodeExists(codigo)) return codigo;
+    }
+  }
+
   // Confirmação de comando: vai para a fila como mensagem própria
   enqueueCommandConfirmation(deviceId: string, commandId: string, status: string, errorMessage?: string): void {
     const messageId = `CONF-${commandId}`;
     if (this.messages.exists(messageId)) return;
     this.messages.enqueue(messageId, deviceId, "CONFIRMACAO_COMANDO", {
       type: "CONFIRMACAO_COMANDO", origin: "lacre", received_at: new Date().toISOString(),
-      message_id: messageId, device_id: deviceId, command_id: commandId, command_status: status,
+      ...vinculoDe(this.devices.findByDeviceId(deviceId)), message_id: messageId, device_id: deviceId, command_id: commandId, command_status: status,
       ...(errorMessage ? { error_message: errorMessage } : {})
     });
   }
@@ -176,13 +229,13 @@ export class MessageService {
   // Alertas que saem da própria mensagem. Cada um abre só na mudança (ao
   // cruzar o limite ou quando o lacre muda de estado), para não repetir a
   // cada leitura. Rota, geocerca e tempo sem comunicar ficam no sistema principal
-  private automaticAlerts(device: Device, leitura: LeituraComum, agora: string): void {
+  private automaticAlerts(device: Device, leitura: LeituraComum, agora: string, conferirVinculo = true): void {
     const bateriaMinima = limite("REGRA_BATERIA_MINIMA", 15);
     const sinalMinimo = limite("REGRA_SINAL_MINIMO_DBM", -105);
     const abrir = (tipo: AlertType, descricao: string): void => {
       const id = `AUT-${Date.now().toString(36).toUpperCase()}-${randomBytes(2).toString("hex").toUpperCase()}`;
       this.messages.enqueue(id, leitura.device_id, "ALERTA", {
-        type: "ALERTA", origin: "servidor", received_at: agora, message_id: id, device_id: leitura.device_id,
+        type: "ALERTA", origin: "servidor", received_at: agora, ...vinculoDe(device), message_id: id, device_id: leitura.device_id,
         alert_type: tipo, severity: defaultSeverityByType[tipo], title: titulos[tipo] ?? tipo, description: descricao,
         source_message_id: leitura.message_id, latitude: leitura.latitude, longitude: leitura.longitude,
         gps_ok: leitura.gps_ok, battery_percent: leitura.battery_percent,
@@ -198,6 +251,20 @@ export class MessageService {
     const sinalAntes = device.last_signal;
     if (leitura.gsm_signal !== undefined && leitura.gsm_signal < sinalMinimo && (sinalAntes == null || sinalAntes >= sinalMinimo)) {
       abrir("GSM_SINAL_FRACO", `Sinal em ${leitura.gsm_signal} dBm (mínimo ${sinalMinimo} dBm)`);
+    }
+
+    // Lacre ativo que continua enviando sem cilindro vinculado, passado o
+    // tempo que o sistema principal tem para vincular. A mensagem é aceita
+    // (a posição não se perde) e o alerta abre uma vez
+    if (conferirVinculo) {
+      const carenciaMs = limite("REGRA_MINUTOS_SEM_VINCULO", 10) * 60000;
+      const ativoDesde = device.activated_at ? Date.parse(`${device.activated_at.replace(" ", "T")}Z`) : NaN;
+      const falta: AlertType | null = device.activation_status === "ATIVO" && !device.cylinder_code && Date.now() - ativoDesde >= carenciaMs
+        ? "LACRE_SEM_CILINDRO" : null;
+      if (falta !== (device.binding_alert ?? null)) {
+        if (falta) abrir(falta, `O lacre ${device.seal_code} está ativo e enviando dados sem cilindro vinculado no sistema principal`);
+        this.devices.setBindingAlert(device.device_id, falta);
+      }
     }
 
     if (leitura.seal_status && leitura.seal_status !== (device.last_seal_status ?? null)) {

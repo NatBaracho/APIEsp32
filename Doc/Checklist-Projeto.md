@@ -49,10 +49,13 @@ Os itens com ✅ foram feitos e testados pela IA e **aprovados por Natã da Silv
 - ✅ Teste do banco direto no SQLite (64 casos) e 21 casos de banco dentro da suíte: regras, volume com 100.000 mensagens e gravação ao mesmo tempo.
 - ✅ Teste em massa (`npm run simular:massa`): 500 lacres num cenário como o do sistema principal, com quedas da API, do Worker e do banco principal; 24 de 24.
 - ✅ Correções achadas pelos testes: banco migrado igual ao banco novo; cópia de segurança antes de qualquer mudança; API espera o Worker em vez de responder `500`; modo WAL (de 40 para 588 pedidos por segundo).
-- ✅ Documentação final para o evento INTEGRA 2026 (`DocumentacaoFinal/`): 19 registros no PR #19, o registro 20 no PR #20 e o registro 21 (teste do banco e teste em massa) no PR #21.
+- ✅ Documentação final para o evento INTEGRA 2026 (`DocumentacaoFinal/`): 19 registros no PR #19, o registro 20 no PR #20 e os registros 21 (teste do banco e teste em massa) e 22 (ativação do lacre e vínculo) no PR #21.
 - ✅ Documentos atualizados para o modelo enxuto; documentos do FluxID marcados como referência histórica.
 - ✅ Novo documento `Como-o-Sistema-se-Comporta.md`: o comportamento do sistema em linguagem simples.
 - ✅ `oxide.db` do projeto convertido para o modelo atual (3 tabelas) em 10/10/2026 e enviado ao GitHub.
+- ✅ Ativação do lacre e vínculo: o lacre avisa que está ativo, a API gera o identificador (`LCR-…`), o sistema vincula o cilindro e o cliente e o vínculo fica salvo na Oxide; toda mensagem sai com o cilindro e o cliente. Suíte 110/110, simulador 26/26 e teste em massa 32/32.
+- [ ] Sistema principal tratar a mensagem `ATIVACAO` e devolver o vínculo (`binding`) na lista de dispositivos (professor Alisson).
+- [ ] Firmware enviar o aviso de ativação ao ligar (Simão).
 
 ### Ainda a fazer, fora desta entrega
 

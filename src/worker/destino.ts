@@ -1,3 +1,4 @@
+import { Vinculo } from "../models/Device";
 import { WorkerConfig } from "./config";
 
 // Conversa com o banco principal (Supabase) pela função de recebimento.
@@ -22,6 +23,8 @@ export interface DispositivoPrincipal {
   api_key_hash: string | null;
   active: boolean;
   firmware_version?: string | null;
+  // Ordem de vinculação. Ausente: nada muda; null: desfazer o vínculo
+  binding?: Vinculo | null;
 }
 
 export interface ComandoPrincipal {
@@ -92,6 +95,18 @@ export async function enviarMensagens(config: WorkerConfig, mensagens: Array<Rec
   return resultados;
 }
 
+const texto = (valor: unknown): string | null =>
+  typeof valor === "string" && valor.trim() !== "" ? valor.trim() : typeof valor === "number" && Number.isFinite(valor) ? String(valor) : null;
+
+function lerVinculo(bruto: unknown): Vinculo | null {
+  if (!bruto || typeof bruto !== "object") return null;
+  const v = bruto as Record<string, unknown>;
+  return {
+    binding_id: texto(v.binding_id), seal_code: texto(v.seal_code), cylinder_code: texto(v.cylinder_code),
+    customer_code: texto(v.customer_code), customer_name: texto(v.customer_name), bound_at: texto(v.bound_at)
+  };
+}
+
 export async function listarDispositivos(config: WorkerConfig): Promise<DispositivoPrincipal[]> {
   const corpo = await chamar(config, "list_devices");
   if (!Array.isArray(corpo.devices)) {
@@ -103,7 +118,8 @@ export async function listarDispositivos(config: WorkerConfig): Promise<Disposit
       device_id: (d.device_id as string).trim(),
       api_key_hash: typeof d.api_key_hash === "string" && /^[0-9a-f]{64}$/i.test(d.api_key_hash) ? d.api_key_hash.toLowerCase() : null,
       active: d.active !== false,
-      firmware_version: typeof d.firmware_version === "string" ? d.firmware_version : null
+      firmware_version: typeof d.firmware_version === "string" ? d.firmware_version : null,
+      ...("binding" in d ? { binding: lerVinculo(d.binding) } : {})
     }));
 }
 

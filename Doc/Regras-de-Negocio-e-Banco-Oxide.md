@@ -19,6 +19,7 @@ Este documento descreve as regras que a API aplica hoje. O banco local está em 
 | `POST /api/v1/iot/telemetries` | Leitura periódica do lacre | `202` nova; `200` posição repetida; `400`; `401`; `403`; `404`; `409` |
 | `POST /api/v1/iot/events` | Evento do lacre | `202`; `400`; `401`; `403`; `404`; `409` |
 | `POST /api/v1/iot/alerts` | Alerta identificado pelo lacre | `201`; `400`; `401`; `403`; `404`; `409` |
+| `POST /api/v1/iot/activations` | O lacre avisa que foi ativado ou desativado | `202`; `400`; `401`; `403`; `404`; `409` |
 | `GET /api/v1/iot/commands/:deviceId` | Comandos pendentes do dispositivo | `200`; `401`; `403`; `404` |
 | `POST /api/v1/iot/commands/confirm` | Confirma execução ou erro de comando | `200`; `400`; `404`; `409` |
 | `GET /api/v1/iot/messages` | Últimas mensagens recebidas (aberta e provisória) | `200`; `400` |
@@ -77,6 +78,7 @@ A API abre sozinha os alertas que saem da própria mensagem. Eles entram na fila
 | `GSM_SINAL_FRACO` | O sinal cai abaixo de `REGRA_SINAL_MINIMO_DBM` (-105 dBm) |
 | `LACRE_VIOLADO` | O lacre passa a `BROKEN` |
 | `LACRE_ABERTO_SEM_AUTORIZACAO` | O lacre passa a `UNLOCKED` |
+| `LACRE_SEM_CILINDRO` | O lacre está ativo e continua enviando sem cilindro vinculado, passados `REGRA_MINUTOS_SEM_VINCULO` (10 minutos) da ativação |
 
 - Cada alerta é aberto **na mudança**: ao cruzar o limite ou quando o estado do lacre muda. Enquanto a situação continua a mesma, não repete.
 - A API não sabe se a abertura do lacre era autorizada. Quem confere é o sistema principal.
@@ -97,6 +99,33 @@ A API abre sozinha os alertas que saem da própria mensagem. Eles entram na fila
 - O que vem do banco principal manda. Nada é apagado: para bloquear um lacre, o banco principal manda `active: false`.
 - `POST /devices` é provisório, para testes de bancada: `device_id` e `api_key` obrigatórios; repetidos respondem `409`; `active` só `0` ou `1`.
 - A API guarda o último estado de cada dispositivo (contato, posição, GPS, lacre, bateria e sinal).
+
+### 4.8 Ativação do lacre e vínculo com o cilindro e o cliente
+
+**Ativação**
+
+- O lacre avisa em `POST /iot/activations`, com `status` `ATIVO` ou `INATIVO`, posição e bateria. Outro `status`: `400`.
+- Na **primeira** ativação, a API gera o identificador do lacre (`seal_code`): `LCR-` e 8 caracteres, único. Ele nunca muda; ativar de novo devolve o mesmo.
+- O aviso entra na fila como mensagem `ATIVACAO` e segue para o sistema principal, que assim sabe quais lacres estão ativos.
+- Mesmo `message_id` de novo: `409`.
+
+**Vínculo**
+
+- O vínculo (cilindro e cliente) é feito no sistema principal, pelo identificador do lacre. O Worker o traz junto com o cadastro e grava em `devices`.
+- O vínculo só vale para lacre **ativo** e com o identificador que a API gerou. Fora disso é ignorado, com aviso na rodada do Worker.
+- Com vínculo, toda mensagem do lacre sai com `seal_code`, `cylinder_code`, `customer_code`, `customer_name` e `binding_id`. Sem vínculo, só com `seal_code`.
+- Quando o vínculo muda, as mensagens novas saem com o cilindro novo. As já gravadas ficam com o que valia quando chegaram.
+
+**Fim do vínculo**
+
+- O sistema principal desfaz o vínculo: a Oxide apaga o cilindro e o cliente; o lacre continua ativo.
+- O lacre avisa `INATIVO`: o aviso sai ainda com o cilindro e o cliente, e em seguida o vínculo acaba.
+- Vínculo encerrado pelo lacre não volta, mesmo que o sistema principal ainda o mande. Para usar de novo, o lacre é ativado outra vez e o sistema manda um vínculo novo.
+
+**Sem vínculo**
+
+- A API nunca recusa a mensagem por falta de vínculo, para não perder a posição de um lacre em campo.
+- Lacre que nunca avisou a ativação é aceito como antes, sem identificador.
 
 ## 5. Fila e envio ao banco principal
 
@@ -121,3 +150,4 @@ A API abre sozinha os alertas que saem da própria mensagem. Eles entram na fila
 | --- | --- | --- |
 | 1.x | até 07/10/2026 | Regras do modelo com filas separadas, cópia do cadastro de lacres e cilindros e envio ao FluxID |
 | 2.0 | 10/10/2026 | Modelo enxuto: fila única, posição e bateria obrigatórias, alertas automáticos só da própria mensagem e envio ao Supabase |
+| 2.1 | 10/10/2026 | Ativação do lacre, identificador gerado pela API e vínculo com o cilindro e o cliente (seção 4.8); alerta automático `LACRE_SEM_CILINDRO`. **Aprovado por Natã da Silva Baracho em 10/10/2026** |
