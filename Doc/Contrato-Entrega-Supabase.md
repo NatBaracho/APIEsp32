@@ -217,7 +217,8 @@ O gestor acompanha pela API: `GET /api/v1/sync/status`, `GET /api/v1/sync/proble
 ## 7. Como foi testado
 
 Ainda não houve teste contra o Supabase de verdade, porque a função de recebimento não existe no repositório. A API foi testada com um **recebedor de teste** (`src/simulador/recebedor.ts`), que segue exatamente este contrato:
-- `npm test`: 71 casos, incluindo Supabase fora do ar, chave recusada, mensagem recusada, mensagem sem resposta, reenvio sem duplicar e lotes;
+- `npm run simular:massa`: 500 lacres enviando ao mesmo tempo, com a função de recebimento fora do ar no meio do teste; nada se perde e nada duplica;
+- `npm test`: 92 casos, incluindo Supabase fora do ar, chave recusada, mensagem recusada, mensagem sem resposta, reenvio sem duplicar e lotes;
 - `npm run simular`: o percurso completo de um lacre, com 23 verificações.
 
 O primeiro teste de verdade será com a função do Supabase no ar.

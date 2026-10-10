@@ -110,7 +110,9 @@ export class MessageService {
   }
 
   // Grava a mensagem do lacre. extra = campos próprios do tipo (event_type,
-  // alert_type...). Tudo numa transação: mensagem, alertas e estado
+  // alert_type...). Tudo numa transação: mensagem, alertas e estado.
+  // immediate: pede a vez de gravar logo no início e espera a do Worker,
+  // em vez de falhar quando os dois gravam ao mesmo tempo
   receive(tipo: Exclude<MessageType, "CONFIRMACAO_COMANDO">, leitura: LeituraComum, extra: Record<string, unknown>): ReceiveResult {
     return db.transaction((): ReceiveResult => {
       if (this.isDuplicate(leitura.message_id)) {
@@ -142,7 +144,7 @@ export class MessageService {
       this.automaticAlerts(device, leitura, agora);
       this.updateState(leitura);
       return "created";
-    })();
+    }).immediate();
   }
 
   // Confirmação de comando: vai para a fila como mensagem própria

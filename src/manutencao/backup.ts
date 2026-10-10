@@ -25,7 +25,9 @@ async function main(): Promise<void> {
     db.close();
   }
 
-  const copia = new Database(destino, { readonly: true });
+  // A cópia sai num arquivo só (sem -wal e -shm ao lado), pronta para guardar
+  const copia = new Database(destino);
+  copia.pragma("journal_mode = DELETE");
   const integridade = copia.pragma("integrity_check", { simple: true }) as string;
   copia.close();
   if (integridade !== "ok") throw new Error(`cópia com problema de integridade: ${integridade}`);

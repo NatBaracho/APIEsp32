@@ -51,13 +51,25 @@ Lacre ──► API (valida) ──► mensagens (fila) ──► Worker ──�
 
 Se a API encontrar um banco no modelo antigo, ela faz, nesta ordem:
 
-1. uma **cópia de segurança** do arquivo inteiro, ao lado do original: `oxide.db.bak-antes-da-fila-unica-<data>`;
-2. passa para `mensagens` tudo o que estava nas filas antigas (`telemetry_queue`, `events` e `alerts`):
+1. uma **cópia de segurança** do arquivo inteiro, ao lado do original e **antes de qualquer mudança**: `oxide.db.bak-antes-da-fila-unica-<data>`. A cópia sai igual ao arquivo antigo;
+2. refaz no formato atual as tabelas que continuam e têm definição diferente (`devices` e `commands`), com os mesmos dados. Assim o banco migrado fica igual a um banco novo;
+3. passa para `mensagens` tudo o que estava nas filas antigas (`telemetry_queue`, `events` e `alerts`):
    - a leitura que tem posição e bateria é convertida para o formato atual e entra na fila (`PENDING`), para seguir ao banco principal. Se ela já existir lá, o banco principal responde "repetida" e não duplica;
    - o que não tem posição ou bateria fica guardado como `ARQUIVADA`;
-3. remove as tabelas que saíram do modelo e as três colunas antigas de `devices` que não eram usadas.
+4. remove as tabelas que saíram do modelo.
 
-Os dispositivos e os comandos são mantidos. A migração roda uma vez só.
+Os dispositivos e os comandos são mantidos. A migração roda uma vez só. Se uma linha antiga não couber nas regras atuais, a API não sobe e nada é alterado; a cópia de segurança já terá sido feita.
+
+## 4.1 Modo de gravação (WAL) e gravação ao mesmo tempo
+
+A API e o Worker são processos diferentes e gravam no mesmo arquivo.
+
+- **Modo WAL.** O banco anota as mudanças no arquivo `oxide.db-wal` e as passa depois para o `oxide.db`. Quem lê não trava quem grava. Ao lado do banco ficam `oxide.db-wal` e `oxide.db-shm` (os dois fora do Git).
+- **Vez de gravar.** Toda operação que grava pede a vez logo no início e espera a do outro processo (até 5 segundos), em vez de falhar.
+- **Cópia do banco.** Com a API ligada, copiar só o `oxide.db` à mão pode levar uma cópia incompleta. Use sempre `npm run backup`: ele gera um arquivo só, completo.
+- **Pasta sincronizada (OneDrive e parecidos).** O sincronizador pode copiar o `oxide.db` sem os dois arquivos ao lado. Para o banco em uso, prefira uma pasta que não seja sincronizada.
+
+Medida no teste em massa de 10/10/2026 (500 lacres, 15.010 pedidos): 40 pedidos por segundo antes do modo WAL e 588 depois; a resposta mais lenta caiu de 7.258 ms para 220 ms.
 
 # 5. Script SQL de referência
 
@@ -65,6 +77,7 @@ Igual ao que a API cria (`src/database/connection.ts`).
 
 ```sql
 PRAGMA foreign_keys = ON;
+PRAGMA journal_mode = WAL;
 
 CREATE TABLE IF NOT EXISTS devices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -157,3 +170,4 @@ PRAGMA foreign_key_check;
 | --- | --- | --- |
 | 1.0 a 1.8 | até 07/10/2026 | Modelo com filas separadas, alertas, lacres, cilindros, vínculos e registro das rodadas do Worker |
 | 2.0 | 10/10/2026 | Modelo enxuto: `devices`, `mensagens` e `commands`; migração automática com cópia de segurança |
+| 2.1 | 10/10/2026 | Depois do teste do banco e do teste em massa: a migração refaz `devices` e `commands` no formato atual; cópia de segurança antes de qualquer mudança; modo WAL; operações de gravação pedem a vez no início (nova seção 4.1). **Aprovado por Natã da Silva Baracho em 10/10/2026** |

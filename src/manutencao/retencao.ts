@@ -35,10 +35,12 @@ db.transaction(() => {
     if (confirmar && n > 0) db.prepare(`DELETE FROM ${tabela} WHERE ${onde}`).run(...regra.params);
     console.log(`- ${regra.nome}: ${n}${confirmar ? " removida(s)" : " a remover"}`);
   }
-})();
+}).immediate();
 
 if (confirmar) {
   db.exec("VACUUM");
+  // Passa o que foi compactado para o arquivo principal, que só então diminui
+  db.pragma("wal_checkpoint(TRUNCATE)");
   console.log("Banco compactado (VACUUM).");
 }
 db.close();
