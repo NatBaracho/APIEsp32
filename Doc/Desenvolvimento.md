@@ -16,7 +16,9 @@ Documentos relacionados:
 - [Doc_tese/PlanoDeTeste.md](Doc_tese/PlanoDeTeste.md) e [Doc_tese/RoteiroDeTeste.md](Doc_tese/RoteiroDeTeste.md): como a API é testada.
 - Swagger, com a API rodando: `http://<IP_DA_API>:3000/api-docs`.
 
-Referência histórica (o banco principal seria o FluxID em PostgreSQL; hoje é o Supabase): [Banco_FluxID.md](Banco_FluxID.md), [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md), [Contrato-API-Frontend.md](Contrato-API-Frontend.md) e [ESP32-envio-de-dados.md](ESP32-envio-de-dados.md).
+Referência histórica (o banco principal seria o FluxID em PostgreSQL; hoje é o Supabase): [Banco_FluxID.md](Banco_FluxID.md), [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md) e [Contrato-API-Frontend.md](Contrato-API-Frontend.md).
+
+Exemplos de cada mensagem do lacre, campo por campo: [ESP32-envio-de-dados.md](ESP32-envio-de-dados.md) (versão 2.0, reescrito em 10/10/2026 para o contrato atual).
 
 ---
 

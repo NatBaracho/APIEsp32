@@ -122,6 +122,7 @@ Use **Try it out** para executar as requisições. Para as rotas do lacre, cliqu
 
 - [Como o sistema se comporta](Doc/Como-o-Sistema-se-Comporta.md): explicação simples do que acontece em cada situação (comece por aqui)
 - [Guia do firmware do lacre IoT](Doc/Guia-Firmware-Lacre-IoT.md): o contrato entre o lacre e a API
+- [ESP32: como enviar dados](Doc/ESP32-envio-de-dados.md): o exemplo de cada mensagem e de cada resposta, campo por campo
 - [Contrato de entrega ao Supabase](Doc/Contrato-Entrega-Supabase.md): o que a API envia ao banco principal
 - [Banco local Oxide](Doc/Oxidedb.md)
 - [Desenvolvimento: como a API funciona e histórico](Doc/Desenvolvimento.md)
@@ -135,4 +136,4 @@ Use **Try it out** para executar as requisições. Para as rotas do lacre, cliqu
 - [Banco PostgreSQL FluxID](Doc/Banco_FluxID.md) e scripts em [`sql/fluxid/`](sql/fluxid)
 - [Integração Oxide ⇄ FluxID](Doc/Integracao-Oxide-FluxID.md)
 - [Contrato da API para o frontend](Doc/Contrato-API-Frontend.md) (proposta não seguida)
-- [Payloads antigos do ESP32](Doc/ESP32-envio-de-dados.md) (substituído pelo guia do firmware 2.0)
+
