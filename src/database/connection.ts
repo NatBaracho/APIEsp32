@@ -11,6 +11,10 @@ const databasePath = path.resolve(process.cwd(), "oxide.db");
 const db: Database.Database = new Database(databasePath);
 
 db.pragma("foreign_keys = ON");
+// WAL: quem lê não trava quem grava, e a API e o Worker gravam sem fila longa.
+// Cria os arquivos oxide.db-wal e oxide.db-shm ao lado do banco; para copiar
+// o banco com a API ligada, usar sempre npm run backup
+db.pragma("journal_mode = WAL");
 
 const tabelaExiste = (nome: string): boolean =>
   Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(nome));
@@ -18,8 +22,10 @@ const tabelaExiste = (nome: string): boolean =>
 const colunasDe = (tabela: string): string[] =>
   (db.prepare(`PRAGMA table_info(${tabela})`).all() as Array<{ name: string }>).map(c => c.name);
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS devices (
+// Definição das três tabelas. Uma tabela que já existe com outra definição
+// (banco criado por uma versão anterior) é refeita neste formato.
+const tabelas: Array<[string, string]> = [
+  ["devices", `(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     device_id TEXT NOT NULL UNIQUE,
     api_key TEXT NOT NULL,
@@ -37,9 +43,8 @@ db.exec(`
     last_signal INTEGER,
     last_telemetry_message_id TEXT,
     last_repeat_message_id TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS mensagens (
+  )`],
+  ["mensagens", `(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     message_id TEXT NOT NULL UNIQUE,
     device_id TEXT NOT NULL,
@@ -56,12 +61,8 @@ db.exec(`
     synced_at DATETIME,
     FOREIGN KEY (device_id) REFERENCES devices(device_id)
       ON UPDATE CASCADE ON DELETE RESTRICT
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_mensagens_fila ON mensagens (status, next_attempt_at, id);
-  CREATE INDEX IF NOT EXISTS idx_mensagens_device ON mensagens (device_id, id);
-
-  CREATE TABLE IF NOT EXISTS commands (
+  )`],
+  ["commands", `(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     command_id TEXT NOT NULL UNIQUE,
     device_id TEXT NOT NULL,
@@ -74,22 +75,103 @@ db.exec(`
     CHECK (status <> 'PENDENTE' OR command_type IN ('TRAVAR_VALVULA', 'DESTRAVAR_VALVULA')),
     FOREIGN KEY (device_id) REFERENCES devices(device_id)
       ON UPDATE CASCADE ON DELETE RESTRICT
-  );
-`);
-
-// Banco criado por uma versão anterior: acrescenta o que falta em devices
-const colunasNovas: Array<[string, string]> = [
-  ["api_key_hash", "TEXT"], ["last_contact_at", "DATETIME"], ["last_latitude", "REAL"],
-  ["last_longitude", "REAL"], ["last_gps_ok", "INTEGER"], ["last_seal_status", "TEXT"],
-  ["last_battery_percent", "REAL"], ["last_signal", "INTEGER"],
-  ["last_telemetry_message_id", "TEXT"], ["last_repeat_message_id", "TEXT"]
+  )`]
 ];
-const colunasDevices = new Set(colunasDe("devices"));
-for (const [coluna, tipo] of colunasNovas) {
-  if (!colunasDevices.has(coluna)) db.exec(`ALTER TABLE devices ADD COLUMN ${coluna} ${tipo}`);
+
+// Só o que vem depois do nome, sem diferença de espaços: é o que se compara
+const definicao = (sql: string): string => sql.slice(sql.indexOf("(")).replace(/\s+/g, " ").trim();
+const definicaoAtual = (tabela: string): string =>
+  definicao((db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(tabela) as { sql: string }).sql);
+
+const tabelasAntigas = [
+  "cylinder_assignments", "seal_assignments", "seals", "cylinders",
+  "alerts", "events", "telemetry_queue", "sync_logs", "sync_items", "status"
+].filter(tabelaExiste);
+const tabelasARefazer = tabelas
+  .filter(([nome, sql]) => tabelaExiste(nome) && definicaoAtual(nome) !== definicao(sql))
+  .map(([nome]) => nome);
+const modeloAntigo = tabelasAntigas.length > 0 || tabelasARefazer.length > 0;
+
+// Migração do modelo antigo (filas separadas, lacres, cilindros, vínculos).
+// 1. Cópia de segurança do arquivo inteiro, antes de qualquer mudança.
+// 2. As tabelas que continuam (devices, commands) são refeitas no formato
+//    atual, com os mesmos dados.
+// 3. O que estava nas filas antigas vai para mensagens. A leitura antiga que
+//    tem posição e bateria entra na fila (PENDING) e segue para o banco
+//    principal, no formato atual. A que não tem (o banco principal exige as
+//    duas) fica guardada como ARQUIVADA e não é enviada.
+// 4. As tabelas que saíram do modelo são removidas.
+if (modeloAntigo) {
+  const carimbo = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15);
+  const copia = `${databasePath}.bak-antes-da-fila-unica-${carimbo}`;
+  db.prepare("VACUUM INTO ?").run(copia);
+  console.log(`📦 Modelo antigo encontrado. Cópia de segurança: ${copia}`);
 }
 
+db.pragma("foreign_keys = OFF");
+db.transaction(() => {
+  for (const [nome, sql] of tabelas) {
+    if (!tabelaExiste(nome)) {
+      db.exec(`CREATE TABLE ${nome} ${sql}`);
+    } else if (tabelasARefazer.includes(nome)) {
+      db.exec(`CREATE TABLE ${nome}_novo ${sql}`);
+      const novas = new Set(colunasDe(`${nome}_novo`));
+      const comuns = colunasDe(nome).filter(c => novas.has(c)).map(c => `"${c}"`).join(", ");
+      db.exec(`INSERT INTO ${nome}_novo (${comuns}) SELECT ${comuns} FROM ${nome}`);
+      db.exec(`DROP TABLE ${nome}`);
+      db.exec(`ALTER TABLE ${nome}_novo RENAME TO ${nome}`);
+    }
+  }
+
+  if (tabelasAntigas.length === 0) return;
+  const filas: Array<[string, string, string]> = [
+    ["telemetry_queue", "message_id", "TELEMETRIA"],
+    ["events", "message_id", "EVENTO"],
+    ["alerts", "alert_id", "ALERTA"]
+  ];
+  // Leituras antigas completas: convertidas para o formato atual e enviadas.
+  // json_patch remove os campos opcionais vazios
+  const colunasTelemetria = tabelasAntigas.includes("telemetry_queue") ? new Set(colunasDe("telemetry_queue")) : new Set<string>();
+  if (["latitude", "longitude", "battery_percent"].every(c => colunasTelemetria.has(c))) {
+    const opcional = (coluna: string): string => (colunasTelemetria.has(coluna) ? `, '${coluna}', "${coluna}"` : "");
+    const enviadas = db.prepare(`
+      INSERT OR IGNORE INTO mensagens (message_id, device_id, tipo, payload_json, status)
+      SELECT message_id, device_id, 'TELEMETRIA', json_patch('{}', json_object(
+        'type', 'TELEMETRIA', 'origin', 'lacre', 'legacy', json('true'),
+        'received_at', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        'message_id', message_id, 'device_id', device_id,
+        'latitude', latitude, 'longitude', longitude, 'gps_ok', json('true'), 'battery_percent', battery_percent
+        ${opcional("seal_status")}${opcional("speed_kmh")}${opcional("gsm_signal")}
+        ${opcional("device_attempt_count")}${opcional("last_seen_at")}
+      )), 'PENDING'
+      FROM telemetry_queue
+      WHERE device_id IN (SELECT device_id FROM devices)
+        AND latitude BETWEEN -90 AND 90 AND longitude BETWEEN -180 AND 180
+        AND battery_percent BETWEEN 0 AND 100
+    `).run().changes;
+    console.log(`   telemetry_queue: ${enviadas} leitura(s) completa(s) na fila para o banco principal`);
+  }
+
+  for (const [tabela, chave, tipo] of filas) {
+    if (!tabelasAntigas.includes(tabela)) continue;
+    const pares = colunasDe(tabela).map(c => `'${c}', "${c}"`).join(", ");
+    const guardadas = db.prepare(`
+      INSERT OR IGNORE INTO mensagens (message_id, device_id, tipo, payload_json, status)
+      SELECT ${chave}, device_id, '${tipo}', json_object(${pares}), 'ARQUIVADA'
+      FROM ${tabela}
+      WHERE device_id IN (SELECT device_id FROM devices)
+    `).run().changes;
+    console.log(`   ${tabela}: ${guardadas} linha(s) sem posição ou bateria guardada(s) como ARQUIVADA`);
+  }
+  for (const tabela of tabelasAntigas) db.exec(`DROP TABLE ${tabela}`);
+})();
+db.pragma("foreign_keys = ON");
+if (tabelasARefazer.length > 0) console.log(`   Tabelas refeitas no formato atual: ${tabelasARefazer.join(", ")}`);
+if (tabelasAntigas.length > 0) console.log(`   Tabelas removidas: ${tabelasAntigas.join(", ")}`);
+
 db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_mensagens_fila ON mensagens (status, next_attempt_at, id);
+  CREATE INDEX IF NOT EXISTS idx_mensagens_device ON mensagens (device_id, id);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_api_key_hash
     ON devices(api_key_hash) WHERE api_key_hash IS NOT NULL;
 `);
@@ -100,74 +182,8 @@ if (chavesRepetidas.length === 0) {
   console.warn("⚠️ Existem API Keys duplicadas em devices; índice único não criado");
 }
 
-// Migração do modelo antigo (filas separadas, lacres, cilindros, vínculos).
-// 1. Cópia de segurança do arquivo inteiro, antes de qualquer mudança.
-// 2. O que estava nas filas antigas vai para mensagens. A leitura antiga que
-//    tem posição e bateria entra na fila (PENDING) e segue para o banco
-//    principal, no formato atual. A que não tem (o banco principal exige as
-//    duas) fica guardada como ARQUIVADA e não é enviada.
-// 3. As tabelas que saíram do modelo são removidas.
-const tabelasAntigas = [
-  "cylinder_assignments", "seal_assignments", "seals", "cylinders",
-  "alerts", "events", "telemetry_queue", "sync_logs", "sync_items", "status"
-].filter(tabelaExiste);
-
-if (tabelasAntigas.length > 0) {
-  const carimbo = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15);
-  const copia = `${databasePath}.bak-antes-da-fila-unica-${carimbo}`;
-  db.prepare("VACUUM INTO ?").run(copia);
-  console.log(`📦 Modelo antigo encontrado. Cópia de segurança: ${copia}`);
-
-  const filas: Array<[string, string, string]> = [
-    ["telemetry_queue", "message_id", "TELEMETRIA"],
-    ["events", "message_id", "EVENTO"],
-    ["alerts", "alert_id", "ALERTA"]
-  ];
-
-  db.pragma("foreign_keys = OFF");
-  db.transaction(() => {
-    // Leituras antigas completas: convertidas para o formato atual e enviadas.
-    // json_patch remove os campos opcionais vazios
-    const colunasTelemetria = tabelasAntigas.includes("telemetry_queue") ? new Set(colunasDe("telemetry_queue")) : new Set<string>();
-    if (["latitude", "longitude", "battery_percent"].every(c => colunasTelemetria.has(c))) {
-      const opcional = (coluna: string): string => (colunasTelemetria.has(coluna) ? `, '${coluna}', "${coluna}"` : "");
-      const enviadas = db.prepare(`
-        INSERT OR IGNORE INTO mensagens (message_id, device_id, tipo, payload_json, status)
-        SELECT message_id, device_id, 'TELEMETRIA', json_patch('{}', json_object(
-          'type', 'TELEMETRIA', 'origin', 'lacre', 'legacy', json('true'),
-          'received_at', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-          'message_id', message_id, 'device_id', device_id,
-          'latitude', latitude, 'longitude', longitude, 'gps_ok', json('true'), 'battery_percent', battery_percent
-          ${opcional("seal_status")}${opcional("speed_kmh")}${opcional("gsm_signal")}
-          ${opcional("device_attempt_count")}${opcional("last_seen_at")}
-        )), 'PENDING'
-        FROM telemetry_queue
-        WHERE device_id IN (SELECT device_id FROM devices)
-          AND latitude BETWEEN -90 AND 90 AND longitude BETWEEN -180 AND 180
-          AND battery_percent BETWEEN 0 AND 100
-      `).run().changes;
-      console.log(`   telemetry_queue: ${enviadas} leitura(s) completa(s) na fila para o banco principal`);
-    }
-
-    for (const [tabela, chave, tipo] of filas) {
-      if (!tabelasAntigas.includes(tabela)) continue;
-      const pares = colunasDe(tabela).map(c => `'${c}', "${c}"`).join(", ");
-      const guardadas = db.prepare(`
-        INSERT OR IGNORE INTO mensagens (message_id, device_id, tipo, payload_json, status)
-        SELECT ${chave}, device_id, '${tipo}', json_object(${pares}), 'ARQUIVADA'
-        FROM ${tabela}
-        WHERE device_id IN (SELECT device_id FROM devices)
-      `).run().changes;
-      console.log(`   ${tabela}: ${guardadas} linha(s) sem posição ou bateria guardada(s) como ARQUIVADA`);
-    }
-    for (const tabela of tabelasAntigas) db.exec(`DROP TABLE ${tabela}`);
-    for (const coluna of ["device_status_id", "valve_status_id", "seal_status_id"]) {
-      if (colunasDevices.has(coluna)) db.exec(`ALTER TABLE devices DROP COLUMN ${coluna}`);
-    }
-  })();
-  db.pragma("foreign_keys = ON");
-  console.log(`   Tabelas removidas: ${tabelasAntigas.join(", ")}`);
-}
+const soltas = db.pragma("foreign_key_check") as unknown[];
+if (soltas.length > 0) console.warn(`⚠️ ${soltas.length} linha(s) apontam para um dispositivo que não existe`);
 
 console.log("✅ SQLite conectado:", databasePath);
 

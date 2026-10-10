@@ -47,7 +47,7 @@ export class CommandService {
       this.devices.touch(deviceId);
       this.messages.enqueueCommandConfirmation(deviceId, commandId, status, errorMessage);
       return "confirmed";
-    })();
+    }).immediate();
   }
 
 }

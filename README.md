@@ -20,7 +20,7 @@ npm start        # ou npm run dev (recarrega ao salvar)
 
 O servidor inicia na porta `3000`. As tabelas são criadas sozinhas.
 
-Se a `oxide.db` for de uma versão anterior, a API faz uma cópia de segurança ao lado do arquivo (`oxide.db.bak-antes-da-fila-unica-<data>`), passa as mensagens antigas para a fila nova (as que têm posição e bateria seguem para o banco principal; as outras ficam arquivadas) e remove as tabelas que saíram. Detalhes: [Oxidedb.md](Doc/Oxidedb.md).
+Se a `oxide.db` for de uma versão anterior, a API faz uma cópia de segurança ao lado do arquivo (`oxide.db.bak-antes-da-fila-unica-<data>`), passa as mensagens antigas para a fila nova (as que têm posição e bateria seguem para o banco principal; as outras ficam arquivadas) refaz `devices` e `commands` no formato atual e remove as tabelas que saíram. Detalhes: [Oxidedb.md](Doc/Oxidedb.md).
 
 O npm 11 avisa que os scripts de instalação do `better-sqlite3` ainda não estão autorizados (`allowScripts`); hoje é só um aviso e o módulo instala normalmente. Se uma versão futura do npm bloquear o script e a API não conseguir abrir o banco, rode `npm install-scripts approve better-sqlite3` e depois `npm install`.
 
@@ -48,6 +48,12 @@ Faz o percurso completo de um lacre, sem o equipamento e sem o Supabase:
 
 Roda numa pasta temporária, com uma `oxide.db` nova e um recebedor de teste no lugar do Supabase. O `oxide.db` do projeto não é tocado.
 
+### Teste em massa (`npm run simular:massa`)
+
+Põe 500 lacres (um por cilindro) enviando ao mesmo tempo, num cenário como o do sistema principal: organizações, clientes, unidades com geocerca, veículos e motoristas. A API e o Worker rodam em processos separados e são derrubados no meio do teste, junto com o banco principal. No fim, o teste confere que nada se perdeu e nada duplicou.
+
+Roda numa pasta temporária, com o recebedor de teste no lugar do Supabase. Ajustes: `MASSA_LACRES`, `MASSA_PONTOS`, `MASSA_PARALELO`, `MASSA_PORTA` e `MASSA_SEMENTE`.
+
 ### Manutenção
 
 ```bash
@@ -56,14 +62,18 @@ npm run retencao                  # mostra o que sairia (só o já enviado, há 
 npm run retencao -- --confirmar   # apaga de fato; faça o backup antes
 ```
 
+O banco grava em modo WAL: ao lado do `oxide.db` ficam os arquivos `oxide.db-wal` e `oxide.db-shm`. **Com a API ligada, não copie o `oxide.db` à mão:** a cópia pode sair incompleta. Use sempre `npm run backup`, que gera um arquivo só.
+
 ## Testes
 
 ```bash
 npx tsc --noEmit
 npm test
+npm run simular
+npm run simular:massa
 ```
 
-A suíte roda numa pasta temporária, com uma `oxide.db` nova e um recebedor de teste no lugar do Supabase. Ela não toca no `oxide.db` do projeto nem no banco principal, e pode rodar com a sua API ligada. Resultado atual: 71/71.
+A suíte roda numa pasta temporária, com uma `oxide.db` nova e um recebedor de teste no lugar do Supabase. Ela não toca no `oxide.db` do projeto nem no banco principal, e pode rodar com a sua API ligada. Resultado atual: suíte 92/92, simulador 23/23 e teste em massa 24/24.
 
 O registro de cada entrega (validação da IA e do responsável) fica em `Doc/Doc_tese/Relatorio-de-Teste-*.md`.
 

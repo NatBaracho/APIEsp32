@@ -214,7 +214,7 @@ Roda numa pasta temporária, com uma `oxide.db` nova, a própria API na porta 31
 
 ## 1.10 Estado atual
 
-- API, fila única e Worker implementados e testados pela IA em 10/10/2026: suíte com 71/71 e simulador com 23/23, contra um recebedor de teste. **Aprovado por Natã da Silva Baracho em 10/10/2026** (seção 7.26).
+- API, fila única e Worker implementados e testados pela IA em 10/10/2026: suíte com 92/92, simulador com 23/23 e teste em massa com 24/24, contra um recebedor de teste. **Aprovado por Natã da Silva Baracho em 10/10/2026** (seções 7.26 e 7.27).
 - O banco principal passou a ser o Supabase. O FluxID em PostgreSQL ficou como banco de teste.
 - Próximos passos:
   - o professor Alisson cria a função de recebimento e passa o endereço;
@@ -567,9 +567,9 @@ O que foi feito:
 - **API:** validação comum de posição e bateria; `gps_ok`; `satelites`, `hdop` e `device_state` aceitos; alertas automáticos abertos na mudança de estado; `GET /iot/messages`; `GET /health`.
 - **Worker:** envio em lotes por HTTP, com resultado por mensagem (`stored`, `duplicate`, `rejected`); cadastro de dispositivos e comandos trazidos do banco principal.
 - **Removido:** rotas de lacres, cilindros e vínculos; análise e encerramento de alertas; envio ao FluxID; a página da proposta da API do frontend; a dependência `pg`.
-- **Manutenção:** `npm run backup` e `npm run retencao`.
+- **Manutenção:** `npm run backup` e `npm run retencao`. O banco grava em modo WAL: com a API ligada, a cópia do banco é sempre pelo `npm run backup`.
 - **Documentos:** novo `Contrato-Entrega-Supabase.md`; guia do firmware 2.0, feito a partir do repositório `fluxid-firmware`; `Oxidedb.md` 2.0; regras 2.0.
-- **Documentação final do evento:** novo registro 20 em `DocumentacaoFinal/` (Oxide enxuta e envio ao Supabase) e registro 19 atualizado com as respostas do professor Alisson. A pasta passa a ter 20 registros.
+- **Documentação final do evento:** novo registro 20 em `DocumentacaoFinal/` (Oxide enxuta e envio ao Supabase) e registro 19 atualizado com as respostas do professor Alisson. A pasta passa a ter 20 registros; com o registro 21 (teste do banco e teste em massa), 21.
 
 Achado: a suíte antiga precisava de uma cópia da `oxide.db` real para rodar. A nova roda numa pasta temporária, com banco novo, e não toca no banco do projeto.
 
@@ -587,9 +587,34 @@ Ajustes pedidos na validação e já feitos:
 
 Relatório: [Relatorio-de-Teste-2026-10-10-12h40.md](Doc_tese/Relatorio-de-Teste-2026-10-10-12h40.md). Questionário respondido: **aprovado por Natã da Silva Baracho em 10/10/2026**, com duas confirmações pendentes (o código do alerta de lacre aberto e o envio do contrato ao professor Alisson).
 
+### 7.27 Teste do banco, teste em massa e modo WAL (10/10/2026)
+
+Pedido de Natã: testar o banco Oxide por inteiro e fazer um teste em massa, com os lacres enviando pela API num cenário como o do sistema principal.
+
+O que foi feito:
+- **Teste direto no banco:** 64 casos no SQLite, sem passar pelas rotas (estrutura, regras de cada tabela, volume com 100.000 mensagens e migração numa cópia do `oxide.db` do projeto).
+- **Suíte:** de 71 para 92 casos, com o novo grupo 12 (banco direto no SQLite, volume e gravação ao mesmo tempo).
+- **Teste em massa** (`npm run simular:massa`, arquivo `src/simulador/massa.ts`): 3 organizações, 18 clientes, 36 unidades com geocerca, 24 veículos, 24 motoristas e 500 cilindros, cada um com um lacre. A API e o Worker rodam em processos separados e são derrubados no meio, junto com o banco principal.
+
+Defeitos achados e corrigidos:
+- **Banco migrado diferente do banco novo:** a tabela `commands` antiga ficava sem a data de criação padrão. A migração agora refaz `devices` e `commands` no formato atual.
+- **Cópia de segurança:** passou a ser feita antes de qualquer mudança; sai igual ao arquivo antigo.
+- **Erro `500` com dois processos gravando:** a API lia e só depois pedia para gravar; se o Worker estivesse gravando, o SQLite recusava na hora. As operações que gravam agora pedem a vez no início e esperam.
+- **API lenta sob carga:** 40 pedidos por segundo e respostas de mais de 5 segundos com 40 lacres enviando sem pausa. Com o modo WAL: 588 pedidos por segundo e resposta mais lenta de 220 ms.
+- **Backup e retenção ajustados ao modo WAL:** a cópia do backup sai num arquivo só; a retenção devolve o espaço ao arquivo principal.
+
+Resultados finais:
+- banco: 64 de 64; suíte: 92 de 92; simulador: 23 de 23;
+- teste em massa: 24 de 24; 15.010 pedidos com a resposta esperada; 14.327 mensagens iguais na Oxide e no banco principal de teste; nenhum erro `500`;
+- `oxide.db` do projeto intacto (checksum igual).
+
+**O que não foi testado:** o Supabase de verdade (foi usado o recebedor de teste) e queda de energia no meio de uma gravação.
+
+Relatórios: [Relatorio-de-Teste-2026-10-10-13h45.md](Doc_tese/Relatorio-de-Teste-2026-10-10-13h45.md) e [Relatorio-de-Teste-2026-10-10-14h00.md](Doc_tese/Relatorio-de-Teste-2026-10-10-14h00.md). Questionários respondidos: **aprovado por Natã da Silva Baracho em 10/10/2026**.
+
 ## 9. Suíte de testes automatizados (`npm test`)
 
-A suíte `tests/api.test.ts` foi reescrita em 10/10/2026 para o modelo enxuto e cobre 71 casos. Ela roda numa pasta temporária, com uma `oxide.db` nova e um recebedor de teste no lugar do Supabase.
+A suíte `tests/api.test.ts` foi reescrita em 10/10/2026 para o modelo enxuto e cobre 92 casos: os grupos abaixo e, desde 10/10/2026, o grupo 12 (regras do banco direto no SQLite, volume com 100.000 mensagens e gravação ao mesmo tempo). Ela roda numa pasta temporária, com uma `oxide.db` nova e um recebedor de teste no lugar do Supabase.
 
 1. **Geral, documentação e banco:** `/`, Swagger, regra de que toda rota tem um grupo, banco com só 3 tabelas e rota antiga removida.
 2. **Dispositivos:** cadastro provisório, duplicidades (`409`), validações (`400`) e respostas sem a chave.
@@ -628,7 +653,7 @@ Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validaç�
 | #14 | Swagger em grupos | 8 grupos com explicação (Dispositivos, Telemetria, Eventos, Comandos, Alertas, Lacres, Cilindros, Vínculos), sem grupo "default"; teste que barra rota sem grupo |
 | #15 | Integração Oxide ⇄ FluxID | Chave por hash; alerta volta à fila ao mudar de status; rotas `/sync/*` e grupo "Sincronização" |
 | #17 | Simulador e série do cilindro | Cadastro provisório de cilindro aceita série repetida (o código continua único); simulador `npm run simular` |
-| #20 | Oxide enxuta e envio ao Supabase | Posição e bateria obrigatórias em toda mensagem; `gps_ok`; alertas automáticos da própria mensagem; `GET /iot/messages` e `GET /health`; saem as rotas de lacres, cilindros, vínculos e de análise de alertas e a página da proposta do frontend |
+| #20 | Oxide enxuta e envio ao Supabase | Posição e bateria obrigatórias em toda mensagem; `gps_ok`; alertas automáticos da própria mensagem; `GET /iot/messages` e `GET /health`; saem as rotas de lacres, cilindros, vínculos e de análise de alertas e a página da proposta do frontend; depois do teste em massa, as operações que gravam esperam a vez do Worker em vez de responder `500` |
 
 ## 3.2 Oxide (`oxide.db`)
 
@@ -641,7 +666,7 @@ Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validaç�
 | #12 | Alertas em português | `alerts` com `CHECK` do catálogo em `alert_type`, colunas `resolved_by` e `resolution_note` e `CHECK` de `ENCERRADO` com data; migração automática dos tipos em inglês; `Oxidedb.md` v1.6 validado |
 | #15 | Integração Oxide ⇄ FluxID | `next_attempt_at` na telemetria e nos eventos; `sync_*` nos alertas; `devices.api_key_hash`; `fluxid_id` nos vínculos; tabela `sync_logs`; `Oxidedb.md` v1.7 |
 | #17 | Simulador e série do cilindro | `cylinders.serial_number` sem `UNIQUE` (série única só por empresa, no FluxID); migração preservando os dados; `Oxidedb.md` v1.8 |
-| #20 | Oxide enxuta e envio ao Supabase | De 11 para 3 tabelas (`devices`, `mensagens`, `commands`); migração com cópia de segurança (leituras antigas completas seguem para o banco principal; as demais ficam arquivadas); backup e retenção; `Oxidedb.md` v2.0 |
+| #20 | Oxide enxuta e envio ao Supabase | De 11 para 3 tabelas (`devices`, `mensagens`, `commands`); migração com cópia de segurança (leituras antigas completas seguem para o banco principal; as demais ficam arquivadas); backup e retenção; `Oxidedb.md` v2.0; depois do teste do banco: migração refaz `devices` e `commands` no formato atual, cópia de segurança antes de qualquer mudança e modo WAL |
 
 ## 3.3 FluxID
 
@@ -675,4 +700,4 @@ Implementado e aprovado em 07/10/2026 (PR #15). O que levou até ele:
 | #13 | Alerta com cilindro e lacre | O Worker busca o lacre e o cilindro do vínculo válido na data do alerta; sem vínculo, o alerta fica em erro na Oxide para o gestor |
 | #15 | Integração Oxide ⇄ FluxID | Worker completo (`src/worker/`, `npm run worker`): envio da fila, tentativas, espera do P3, cadastro de volta com o hash da chave |
 | #17 | Simulador | O simulador exercita o Worker de ponta a ponta: cadastro sem conflitos, fila, FluxID fora do ar, espera do vínculo e reenvio |
-| #20 | Oxide enxuta e envio ao Supabase | Worker reescrito: envia a fila única por HTTP à função de recebimento do Supabase, com resultado por mensagem, e traz os dispositivos e os comandos; simulador novo com recebedor de teste |
+| #20 | Oxide enxuta e envio ao Supabase | Worker reescrito: envia a fila única por HTTP à função de recebimento do Supabase, com resultado por mensagem, e traz os dispositivos e os comandos; simulador novo com recebedor de teste; teste em massa (`npm run simular:massa`) com o Worker derrubado e religado no meio |

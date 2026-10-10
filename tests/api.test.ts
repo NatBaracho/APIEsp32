@@ -2,7 +2,7 @@
 // Roda numa pasta temporária, com uma oxide.db nova e um recebedor de teste no
 // lugar do Supabase: o oxide.db do projeto e o banco principal não são tocados.
 
-import { execFileSync } from "child_process";
+import { execFileSync, spawn } from "child_process";
 import { createHash } from "crypto";
 import fs from "fs";
 import os from "os";
@@ -27,7 +27,8 @@ async function teste(nome: string, corpo: () => Promise<{ passou: boolean; detal
     passou = r.passou;
     detalhe = r.detalhe ?? "";
   } catch (erro) {
-    detalhe = `erro: ${erro instanceof Error ? erro.message : String(erro)}`;
+    const causa = erro instanceof Error && erro.cause instanceof Error ? ` (${erro.cause.message})` : "";
+    detalhe = `erro: ${erro instanceof Error ? erro.message : String(erro)}${causa}`;
   }
   resultados.push({ nome, passou });
   console.log(`${passou ? "✅" : "❌"} ${nome}${detalhe ? ` (${detalhe})` : ""}`);
@@ -518,8 +519,9 @@ async function main(): Promise<void> {
 
   // ------------------------------------------ [11] migração e manutenção
   console.log("\n--- [11] Migração do modelo antigo e manutenção ---");
+  const pastaAntiga = fs.mkdtempSync(path.join(os.tmpdir(), "oxide-antigo-"));
   await teste("Banco no modelo antigo: cópia de segurança; leitura completa vai para a fila, incompleta fica ARQUIVADA; tabelas antigas removidas", () => {
-    const antiga = fs.mkdtempSync(path.join(os.tmpdir(), "oxide-antigo-"));
+    const antiga = pastaAntiga;
     const velho = new Database(path.join(antiga, "oxide.db"));
     velho.exec(`
       CREATE TABLE devices (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL UNIQUE, api_key TEXT NOT NULL,
@@ -586,6 +588,249 @@ async function main(): Promise<void> {
     const real = rodar("src/manutencao/retencao.ts", pasta, ["--confirmar"]);
     return { passou: /mensagens enviadas há mais de 30 dias: 2 a remover/.test(simulacao) && depoisDaSimulacao === antes && /2 removida/.test(real) && total() === antes - 2 && total("message_id = 'M-T14'") === 1 };
   });
+
+  await teste("Banco migrado: mesma definição de um banco novo; cópia de segurança sem nenhuma tabela nova", () => {
+    const definicoes = (banco: Database.Database): string =>
+      (banco.prepare("SELECT name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all() as any[])
+        .map(l => `${l.name}:${String(l.sql).slice(String(l.sql).indexOf("(")).replace(/\s+/g, " ")}`).join("\n");
+    const migrado = new Database(path.join(pastaAntiga, "oxide.db"));
+    const igual = definicoes(migrado) === definicoes(db);
+    // Antes, a tabela commands antiga ficava sem a data padrão
+    migrado.prepare("INSERT INTO commands (command_id, device_id, command_type) VALUES ('CMD-SEM-DATA', 'DSP-000001', 'TRAVAR_VALVULA')").run();
+    const comData = (migrado.prepare("SELECT created_at FROM commands WHERE command_id = 'CMD-SEM-DATA'").get() as any).created_at;
+    const antigo = migrado.prepare("SELECT created_at, status FROM commands WHERE command_id = 'CMD-OLD-1'").get() as any;
+    const integro = migrado.pragma("integrity_check", { simple: true }) === "ok" && (migrado.pragma("foreign_key_check") as unknown[]).length === 0;
+    migrado.close();
+    const copias = fs.readdirSync(pastaAntiga).filter(f => f.includes(".bak-antes-da-fila-unica-"));
+    const copia = new Database(path.join(pastaAntiga, copias[0]!), { readonly: true });
+    const naCopia = (copia.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as any[]).map(t => t.name);
+    const colunasCopia = (copia.prepare("PRAGMA table_info(devices)").all() as any[]).map(c => c.name);
+    copia.close();
+    return {
+      passou: igual && Boolean(comData) && antigo.created_at === "2026-10-01 10:00:00" && antigo.status === "PENDENTE" && integro &&
+        !naCopia.includes("mensagens") && naCopia.length === 11 && colunasCopia.includes("device_status_id") && !colunasCopia.includes("last_contact_at"),
+      detalhe: `cópia com ${naCopia.length} tabelas, como o arquivo antigo`
+    };
+  });
+
+  // ------------------------------------------------ [12] banco, direto no SQLite
+  console.log("\n--- [12] Banco Oxide: regras, direto no SQLite ---");
+  // O comando tem de ser recusado pelo próprio banco, com a regra esperada
+  const recusa = (sql: string, regra: string, ...p: unknown[]): { passou: boolean; detalhe: string } => {
+    try {
+      db.prepare(sql).run(...p);
+      return { passou: false, detalhe: "o banco aceitou" };
+    } catch (erro) {
+      const texto = erro instanceof Error ? erro.message : String(erro);
+      return { passou: texto.includes(regra), detalhe: texto };
+    }
+  };
+  const todas = (...r: Array<{ passou: boolean; detalhe: string }>) => ({ passou: r.every(x => x.passou), detalhe: r.filter(x => !x.passou).map(x => x.detalhe).join("; ") });
+  const novoDev = "INSERT INTO devices (device_id, api_key, api_key_hash, active) VALUES (?, ?, ?, ?)";
+  const novaMsg = "INSERT INTO mensagens (message_id, device_id, tipo, payload_json, status) VALUES (?, ?, ?, ?, ?)";
+  const novoCmd = "INSERT INTO commands (command_id, device_id, command_type, status) VALUES (?, ?, ?, ?)";
+  const colunas = (tabela: string): string => (db.prepare(`PRAGMA table_info(${tabela})`).all() as any[]).map(c => c.name).join(",");
+  const plano = (sql: string, ...p: unknown[]): string => (db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...p) as any[]).map(l => l.detail).join(" | ");
+  const BD = "DSP-BD-1";
+
+  await teste("Estrutura: só as três tabelas, com as colunas e os índices do modelo", () => {
+    const nomes = (tipo: string): string => (db.prepare("SELECT name FROM sqlite_master WHERE type = ? AND name NOT LIKE 'sqlite_%' ORDER BY name").all(tipo) as any[]).map(l => l.name).join(",");
+    return {
+      passou: nomes("table") === "commands,devices,mensagens" &&
+        nomes("index") === "idx_devices_api_key,idx_devices_api_key_hash,idx_mensagens_device,idx_mensagens_fila" && nomes("trigger") === "" &&
+        colunas("devices") === "id,device_id,api_key,api_key_hash,firmware_version,active,last_contact_at,last_latitude,last_longitude,last_gps_ok,last_seal_status,last_battery_percent,last_signal,last_telemetry_message_id,last_repeat_message_id" &&
+        colunas("mensagens") === "id,message_id,device_id,tipo,payload_json,received_at,status,attempt_count,last_error,next_attempt_at,synced_at" &&
+        colunas("commands") === "id,command_id,device_id,command_type,status,created_at,executed_at,error_message"
+    };
+  });
+  await teste("Estrutura: mensagens e commands apontam para devices (troca em cascata, exclusão barrada)", () => {
+    const certo = (tabela: string): boolean => {
+      const l = db.prepare(`PRAGMA foreign_key_list(${tabela})`).all() as any[];
+      return l.length === 1 && l[0].table === "devices" && l[0].to === "device_id" && l[0].on_update === "CASCADE" && l[0].on_delete === "RESTRICT";
+    };
+    return { passou: certo("mensagens") && certo("commands") && db.pragma("foreign_keys", { simple: true }) === 1 };
+  });
+  await teste("Estrutura: banco em modo WAL (quem lê não trava quem grava)", () => {
+    const modo = db.pragma("journal_mode", { simple: true });
+    return { passou: modo === "wal" && fs.existsSync(path.join(pasta, "oxide.db-wal")), detalhe: String(modo) };
+  });
+  await teste("devices: cadastro com os valores padrão (ativo, sem hash, sem estado)", () => {
+    db.prepare("INSERT INTO devices (device_id, api_key) VALUES (?, 'k-bd-1')").run(BD);
+    const d = umaLinha<any>("SELECT * FROM devices WHERE device_id = ?", BD);
+    return { passou: d.active === 1 && d.api_key_hash === null && d.last_contact_at === null };
+  });
+  await teste("devices: device_id, api_key e hash repetidos são recusados", () => {
+    db.prepare(novoDev).run("DSP-BD-H", "k-bd-h", "hash-bd", 1);
+    return todas(
+      recusa(novoDev, "UNIQUE constraint failed: devices.device_id", BD, "k-bd-outra", null, 1),
+      recusa(novoDev, "UNIQUE constraint failed: devices.api_key", "DSP-BD-2", "k-bd-1", null, 1),
+      recusa(novoDev, "UNIQUE constraint failed: devices.api_key_hash", "DSP-BD-3", "k-bd-3", "hash-bd", 1)
+    );
+  });
+  await teste("devices: device_id e api_key vazios e active fora de 0 e 1 são recusados", () => todas(
+    recusa(novoDev, "NOT NULL constraint failed: devices.device_id", null, "k-bd-n", null, 1),
+    recusa(novoDev, "NOT NULL constraint failed: devices.api_key", "DSP-BD-N", null, null, 1),
+    recusa(novoDev, "CHECK constraint failed", "DSP-BD-C", "k-bd-c", null, 2),
+    recusa("UPDATE devices SET active = 5 WHERE device_id = ?", "CHECK constraint failed", BD)
+  ));
+  await teste("devices: vários dispositivos sem hash são aceitos", () => {
+    db.prepare(novoDev).run("DSP-BD-S1", "k-bd-s1", null, 1);
+    db.prepare(novoDev).run("DSP-BD-S2", "k-bd-s2", null, 0);
+    return { passou: true };
+  });
+  await teste("mensagens: entra como PENDING, com 0 tentativas e a data de chegada", () => {
+    db.prepare("INSERT INTO mensagens (message_id, device_id, tipo, payload_json) VALUES ('BD-M1', ?, 'TELEMETRIA', '{}')").run(BD);
+    const m = umaLinha<any>("SELECT * FROM mensagens WHERE message_id = 'BD-M1'");
+    return { passou: m.status === "PENDING" && m.attempt_count === 0 && /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(m.received_at) && m.synced_at === null };
+  });
+  await teste("mensagens: message_id repetido, dispositivo inexistente, tipo e situação desconhecidos são recusados", () => todas(
+    recusa(novaMsg, "UNIQUE constraint failed: mensagens.message_id", "BD-M1", BD, "EVENTO", "{}", "PENDING"),
+    recusa(novaMsg, "FOREIGN KEY constraint failed", "BD-MX", "DSP-NAO-EXISTE", "TELEMETRIA", "{}", "PENDING"),
+    recusa(novaMsg, "CHECK constraint failed", "BD-MT", BD, "OUTRO", "{}", "PENDING"),
+    recusa(novaMsg, "CHECK constraint failed", "BD-MS", BD, "TELEMETRIA", "{}", "ENVIADA")
+  ));
+  await teste("mensagens: campos obrigatórios vazios são recusados", () => todas(
+    recusa(novaMsg, "NOT NULL constraint failed: mensagens.message_id", null, BD, "EVENTO", "{}", "PENDING"),
+    recusa(novaMsg, "NOT NULL constraint failed: mensagens.device_id", "BD-MN1", null, "EVENTO", "{}", "PENDING"),
+    recusa(novaMsg, "NOT NULL constraint failed: mensagens.tipo", "BD-MN2", BD, null, "{}", "PENDING"),
+    recusa(novaMsg, "NOT NULL constraint failed: mensagens.payload_json", "BD-MN3", BD, "EVENTO", null, "PENDING")
+  ));
+  await teste("mensagens: os quatro tipos e as cinco situações são aceitos", () => {
+    ["TELEMETRIA", "EVENTO", "ALERTA", "CONFIRMACAO_COMANDO"].forEach((t, i) => db.prepare(novaMsg).run(`BD-TIPO-${i}`, BD, t, "{}", "ARQUIVADA"));
+    ["PENDING", "PROCESSING", "SYNCED", "ERROR", "ARQUIVADA"].forEach((s, i) => db.prepare(novaMsg).run(`BD-SIT-${i}`, BD, "EVENTO", "{}", s));
+    return { passou: total("message_id LIKE 'BD-TIPO-%' OR message_id LIKE 'BD-SIT-%'") === 9 };
+  });
+  await teste("mensagens: dispositivo com mensagens não pode ser apagado; trocar o device_id leva as mensagens junto", () => {
+    const barrado = recusa("DELETE FROM devices WHERE device_id = ?", "FOREIGN KEY constraint failed", BD);
+    db.prepare(novoDev).run("DSP-BD-TROCA", "k-bd-troca", null, 1);
+    db.prepare(novaMsg).run("BD-TROCA", "DSP-BD-TROCA", "EVENTO", "{}", "ARQUIVADA");
+    db.prepare("UPDATE devices SET device_id = 'DSP-BD-TROCADO' WHERE device_id = 'DSP-BD-TROCA'").run();
+    const dono = umaLinha<any>("SELECT device_id FROM mensagens WHERE message_id = 'BD-TROCA'").device_id;
+    return { passou: barrado.passou && dono === "DSP-BD-TROCADO", detalhe: barrado.detalhe };
+  });
+  await teste("mensagens: o JSON com acentos e números volta igual; operação desfeita não deixa nada pela metade", () => {
+    const p = { device_id: BD, latitude: -3.731912, longitude: -38.526704, battery_percent: 14.5, texto: "violação às 12h — ção", gps_ok: false };
+    db.prepare(novaMsg).run("BD-JSON", BD, "ALERTA", JSON.stringify(p), "ARQUIVADA");
+    const lido = umaLinha<any>("SELECT payload_json, json_extract(payload_json, '$.latitude') AS lat FROM mensagens WHERE message_id = 'BD-JSON'");
+    const antes = total();
+    try {
+      db.transaction(() => {
+        db.prepare(novaMsg).run("BD-RB", BD, "EVENTO", "{}", "ARQUIVADA");
+        db.prepare(novaMsg).run("BD-RB", BD, "EVENTO", "{}", "ARQUIVADA");
+      })();
+    } catch { /* esperado: a segunda é repetida */ }
+    return { passou: lido.payload_json === JSON.stringify(p) && lido.lat === -3.731912 && total() === antes && total("message_id = 'BD-RB'") === 0 };
+  });
+  await teste("commands: entra como PENDENTE, com a data de criação", () => {
+    db.prepare("INSERT INTO commands (command_id, device_id, command_type) VALUES ('BD-C1', ?, 'TRAVAR_VALVULA')").run(BD);
+    const c = umaLinha<any>("SELECT * FROM commands WHERE command_id = 'BD-C1'");
+    return { passou: c.status === "PENDENTE" && Boolean(c.created_at) && c.executed_at === null };
+  });
+  await teste("commands: repetido, dispositivo inexistente, situação desconhecida e pendente de tipo desconhecido são recusados", () => {
+    db.prepare(novoCmd).run("BD-C2", BD, "TIPO_ANTIGO", "EXECUTADO");
+    return todas(
+      recusa(novoCmd, "UNIQUE constraint failed: commands.command_id", "BD-C1", BD, "DESTRAVAR_VALVULA", "PENDENTE"),
+      recusa(novoCmd, "FOREIGN KEY constraint failed", "BD-CX", "DSP-NAO-EXISTE", "TRAVAR_VALVULA", "PENDENTE"),
+      recusa(novoCmd, "CHECK constraint failed", "BD-CS", BD, "TRAVAR_VALVULA", "CANCELADO"),
+      recusa(novoCmd, "CHECK constraint failed", "BD-CT", BD, "REINICIAR", "PENDENTE"),
+      recusa("UPDATE commands SET status = 'PENDENTE' WHERE command_id = ?", "CHECK constraint failed", "BD-C2")
+    );
+  });
+  await teste("commands: campos obrigatórios vazios são recusados; dispositivo com comandos não pode ser apagado", () => {
+    db.prepare(novoDev).run("DSP-BD-CMD", "k-bd-cmd", null, 1);
+    db.prepare(novoCmd).run("BD-C3", "DSP-BD-CMD", "DESTRAVAR_VALVULA", "ERRO");
+    return todas(
+      recusa(novoCmd, "NOT NULL constraint failed: commands.command_id", null, BD, "TRAVAR_VALVULA", "PENDENTE"),
+      recusa(novoCmd, "NOT NULL constraint failed: commands.device_id", "BD-CN1", null, "TRAVAR_VALVULA", "PENDENTE"),
+      recusa(novoCmd, "NOT NULL constraint failed: commands.command_type", "BD-CN2", BD, null, "EXECUTADO"),
+      recusa("DELETE FROM devices WHERE device_id = ?", "FOREIGN KEY constraint failed", "DSP-BD-CMD")
+    );
+  });
+
+  const VOLUME = 100000;
+  const buscaDaFila = "SELECT id FROM mensagens WHERE status IN ('PENDING', 'ERROR') AND (next_attempt_at IS NULL OR next_attempt_at <= ?) ORDER BY id LIMIT 50";
+  await teste(`Volume: ${VOLUME} mensagens gravadas; a busca do próximo lote continua rápida e usa o índice da fila`, () => {
+    const corpo = JSON.stringify({ type: "TELEMETRIA", device_id: BD, latitude: -3.7319, longitude: -38.5267, gps_ok: true, battery_percent: 80, gsm_signal: -70, seal_status: "LOCKED" });
+    const inserir = db.prepare(novaMsg);
+    let inicio = Date.now();
+    db.transaction(() => { for (let i = 0; i < VOLUME; i++) inserir.run(`BD-VOL-${i}`, BD, "TELEMETRIA", corpo, i % 10 === 0 ? "PENDING" : "SYNCED"); })();
+    const gravar = Date.now() - inicio;
+    inicio = Date.now();
+    let lote = 0;
+    for (let i = 0; i < 100; i++) lote = db.prepare(buscaDaFila).all("9999-12-31").length;
+    const buscar = (Date.now() - inicio) / 100;
+    return {
+      passou: total("message_id LIKE 'BD-VOL-%'") === VOLUME && lote === 50 && buscar < 50 && plano(buscaDaFila, "9999-12-31").includes("idx_mensagens_fila"),
+      detalhe: `gravar: ${gravar} ms; buscar o lote: ${buscar.toFixed(2)} ms`
+    };
+  });
+  await teste("Volume: as buscas por dispositivo e por message_id usam índice; o banco continua íntegro", () => ({
+    passou: plano("SELECT id FROM mensagens WHERE device_id = ? ORDER BY id DESC LIMIT 20", BD).includes("idx_mensagens_device") &&
+      /USING (COVERING )?INDEX/.test(plano("SELECT 1 FROM mensagens WHERE message_id = ?", "BD-VOL-5")) &&
+      db.pragma("integrity_check", { simple: true }) === "ok" && (db.pragma("foreign_key_check") as unknown[]).length === 0
+  }));
+  await teste("Volume: apagar as enviadas mantém as pendentes e devolve o espaço", () => {
+    const arquivo = path.join(pasta, "oxide.db");
+    const antes = fs.statSync(arquivo).size;
+    const apagadas = db.prepare("DELETE FROM mensagens WHERE status = 'SYNCED' AND message_id LIKE 'BD-VOL-%'").run().changes;
+    db.exec("VACUUM");
+    db.pragma("wal_checkpoint(TRUNCATE)");
+    const depois = fs.statSync(arquivo).size;
+    return {
+      passou: apagadas === VOLUME * 0.9 && total("status = 'PENDING' AND message_id LIKE 'BD-VOL-%'") === VOLUME / 10 && depois < antes,
+      detalhe: `${(antes / 1048576).toFixed(1)} MB -> ${(depois / 1048576).toFixed(1)} MB`
+    };
+  });
+  db.prepare("DELETE FROM mensagens WHERE message_id LIKE 'BD-VOL-%'").run();
+
+  await teste("Gravação ao mesmo tempo: dois processos e a API gravam juntos sem erro e sem perder mensagem", async () => {
+    const POR_PROCESSO = 150;
+    // Cada processo faz o papel da API ou do Worker: abre o mesmo arquivo e grava, uma mensagem por vez
+    const codigo = `
+      const [arquivo, prefixo, device, quantas] = process.argv.slice(1);
+      const db = new (require(${JSON.stringify(path.join(PROJETO, "node_modules", "better-sqlite3"))}))(arquivo);
+      db.pragma("foreign_keys = ON");
+      const inserir = db.prepare("INSERT INTO mensagens (message_id, device_id, tipo, payload_json, status) VALUES (?, ?, 'EVENTO', '{}', 'ARQUIVADA')");
+      const marcar = db.prepare("UPDATE mensagens SET attempt_count = attempt_count + 1 WHERE message_id = ?");
+      let erros = 0;
+      for (let i = 0; i < Number(quantas); i++) {
+        try { inserir.run(prefixo + i, device); marcar.run(prefixo + i); } catch (e) { erros++; console.error(e.message); }
+      }
+      db.close();
+      console.log("ERROS=" + erros);
+    `;
+    const processo = (prefixo: string): Promise<string> => new Promise(resolve => {
+      const filho = spawn(process.execPath, ["-e", codigo, path.join(pasta, "oxide.db"), prefixo, BD, String(POR_PROCESSO)]);
+      let saida = "";
+      filho.stdout.on("data", d => { saida += String(d); });
+      filho.stderr.on("data", d => { saida += String(d); });
+      filho.on("close", () => resolve(saida));
+    });
+    await fetch(`${BASE}/`).catch(() => null);
+    const filhos = [processo("BD-PAR-A-"), processo("BD-PAR-B-")];
+    // Enquanto isso, a API recebe mensagens do lacre pelo caminho normal
+    let recusadas = 0;
+    let maisLenta = 0;
+    for (let i = 0; i < POR_PROCESSO; i++) {
+      const t0 = Date.now();
+      const r = await api("POST", "/api/v1/iot/events", { message_id: `BD-PAR-API-${i}`, device_id: DEV, event_type: "startup", ...POS }, KEY);
+      if (r.status !== 202) recusadas++;
+      maisLenta = Math.max(maisLenta, Date.now() - t0);
+    }
+    const saidas = await Promise.all(filhos);
+    const gravadas = total("message_id LIKE 'BD-PAR-%'");
+    const marcadas = total("message_id LIKE 'BD-PAR-A-%' AND attempt_count = 1") + total("message_id LIKE 'BD-PAR-B-%' AND attempt_count = 1");
+    return {
+      passou: saidas.every(s => s.includes("ERROS=0")) && recusadas === 0 && gravadas === POR_PROCESSO * 3 && marcadas === POR_PROCESSO * 2 &&
+        db.pragma("integrity_check", { simple: true }) === "ok",
+      detalhe: `${gravadas} de ${POR_PROCESSO * 3} gravadas; ${saidas.map(s => s.trim().split("\n").pop()).join(", ")}; API recusou ${recusadas}; resposta mais lenta: ${maisLenta} ms`
+    };
+  });
+
+  // O que este grupo criou sai do banco
+  db.prepare("DELETE FROM mensagens WHERE message_id LIKE 'BD-%'").run();
+  db.prepare("DELETE FROM commands WHERE command_id LIKE 'BD-%'").run();
+  db.prepare("DELETE FROM devices WHERE device_id LIKE 'DSP-BD-%'").run();
 
   // ---------------------------------------------------------------- resumo
   const falhas = resultados.filter(r => !r.passou);
