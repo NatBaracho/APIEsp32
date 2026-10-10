@@ -16,3 +16,7 @@ big.json
 dist/
 *.log
 .env
+
+# Cópias da oxide.db (npm run backup) e estado da última rodada do Worker
+backups/
+oxide-worker.json

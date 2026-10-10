@@ -1,53 +1,43 @@
 import { Request, Response } from "express";
-import { SyncLogRepository } from "../repositories/syncLogRepository";
-import { isSyncQueueName, SyncRepository, syncQueueNames } from "../repositories/SyncRepository";
+import { MessageRepository } from "../repositories/MessageRepository";
+import { lerUltimaRodada } from "../worker/runner";
 
-const queuesText = syncQueueNames.join(", ");
-
-// Acompanhamento da sincronização Oxide → FluxID pela equipe e pelo gestor.
-// Rotas abertas e provisórias, como /devices
+// Acompanhamento da fila (rotas abertas e provisórias, para a equipe)
 export class SyncController {
 
-  private repository = new SyncRepository();
-  private logs = new SyncLogRepository();
+  private messages = new MessageRepository();
 
-  async status(_req: Request, res: Response): Promise<void> {
+  status(req: Request, res: Response): void {
+    res.status(200).json({ fila: this.messages.counts(), ultima_rodada: lerUltimaRodada() });
+  }
+
+  problems(req: Request, res: Response): void {
     res.status(200).json({
-      success: true,
-      filas: this.repository.summary(),
-      ultimas_rodadas: this.logs.latest(5)
+      itens: this.messages.problems(200).map(m => ({
+        message_id: m.message_id,
+        device_id: m.device_id,
+        type: m.tipo,
+        situacao: m.next_attempt_at ? "nova tentativa agendada" : "parada: precisa do gestor",
+        tentativas: m.attempt_count,
+        proxima_tentativa: m.next_attempt_at,
+        erro: m.last_error
+      }))
     });
   }
 
-  async problems(req: Request, res: Response): Promise<void> {
-    const queue = req.query.queue;
+  retry(req: Request, res: Response): void {
+    const messageId = req.body?.message_id;
 
-    if (!isSyncQueueName(queue)) {
-      res.status(400).json({ success: false, message: `queue deve ser ${queuesText}` });
+    if (typeof messageId !== "string" || !messageId) {
+      res.status(400).json({ success: false, message: "message_id é obrigatório" });
+      return;
+    }
+    if (!this.messages.retry(messageId)) {
+      res.status(404).json({ success: false, message: "Mensagem com erro não encontrada" });
       return;
     }
 
-    const itens = this.repository.problems(queue);
-    res.status(200).json({ success: true, queue, total: itens.length, itens });
-  }
-
-  async retry(req: Request, res: Response): Promise<void> {
-    const { queue, key } = req.body ?? {};
-
-    if (!isSyncQueueName(queue) || typeof key !== "string" || !key.trim()) {
-      res.status(400).json({
-        success: false,
-        message: `queue (${queuesText}) e key (message_id ou alert_id) são obrigatórios`
-      });
-      return;
-    }
-
-    if (!this.repository.retry(queue, key)) {
-      res.status(404).json({ success: false, message: "Item não encontrado ou já sincronizado" });
-      return;
-    }
-
-    res.status(200).json({ success: true, message: "Item voltou para a fila do Worker" });
+    res.status(200).json({ success: true, message: "Mensagem devolvida à fila" });
   }
 
 }

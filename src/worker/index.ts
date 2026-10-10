@@ -1,8 +1,7 @@
 import { loadWorkerConfig } from "./config";
-import { createFluxidPool } from "./fluxid";
 import { resetInterrupted, runCycle } from "./runner";
 
-// Worker Oxide ⇄ FluxID.
+// Worker Oxide → banco principal (Supabase).
 //   npm run worker            roda sem parar (Ctrl+C encerra)
 //   npm run worker -- --once  faz uma rodada completa e sai
 // Configuração: arquivo .env (modelo em .env.example).
@@ -11,7 +10,6 @@ const once = process.argv.includes("--once");
 
 async function main(): Promise<void> {
   const config = loadWorkerConfig();
-  const pool = createFluxidPool(config.fluxidDatabaseUrl);
   let stopping = false;
   let lastCadastro = 0;
 
@@ -24,7 +22,7 @@ async function main(): Promise<void> {
 
   const interrupted = resetInterrupted();
   if (interrupted > 0) {
-    console.log(`${interrupted} linha(s) interrompidas voltaram para a fila`);
+    console.log(`${interrupted} mensagem(ns) interrompidas voltaram para a fila`);
   }
 
   console.log(
@@ -35,7 +33,7 @@ async function main(): Promise<void> {
 
   do {
     const withCadastro = Date.now() - lastCadastro >= config.cadastroIntervalSeconds * 1000;
-    const result = await runCycle(pool, { batchSize: config.batchSize, withCadastro });
+    const result = await runCycle(config, { withCadastro });
 
     if (withCadastro && result.status !== "FALHOU") {
       lastCadastro = Date.now();
@@ -49,8 +47,6 @@ async function main(): Promise<void> {
 
     await new Promise(resolve => setTimeout(resolve, config.intervalSeconds * 1000));
   } while (!stopping);
-
-  await pool.end();
 }
 
 main().catch(error => {
