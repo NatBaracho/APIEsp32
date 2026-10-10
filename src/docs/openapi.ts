@@ -1,757 +1,233 @@
 import { alertTypes } from "../models/Alert";
 
-const jsonBody = (properties: object, required: string[]) => ({
+// Especificação da API do lacre (Swagger em /api-docs)
+
+const jsonBody = (properties: object, required: string[], example: object) => ({
   required: true,
   content: {
     "application/json": {
-      schema: { type: "object", required, properties }
+      schema: { type: "object", required, properties },
+      example
     }
   }
 });
 
-const codeParam = (name: string, example: string) => ({
-  name,
-  in: "path",
-  required: true,
-  schema: { type: "string" },
-  example
+const resposta = (description: string, example?: object) => ({
+  description,
+  ...(example ? { content: { "application/json": { example } } } : {})
 });
 
-const sealStatusEnum = [
-  "EM_ESTOQUE", "INSTALADO", "SUSPEITA_VIOLACAO", "ROMPIDO",
-  "REMOVIDO", "DANIFICADO", "INUTILIZADO"
-];
-
-const cylinderStatusEnum = [
-  "DISPONIVEL", "EM_TRANSITO", "COM_CLIENTE", "MANUTENCAO", "EXTRAVIADO", "INATIVO"
-];
-
-const historyQuery = [
-  { name: "device_id", in: "query", schema: { type: "string" } },
-  { name: "seal_code", in: "query", schema: { type: "string" } },
-  { name: "cylinder_code", in: "query", schema: { type: "string" } },
-  { name: "active", in: "query", schema: { type: "string", enum: ["true"] }, description: "true = só vínculos ativos" }
-];
-
-const idParam = [{ name: "id", in: "path", required: true, schema: { type: "integer" } }];
-
-const endBody = jsonBody({ reason: { type: "string", example: "Retirada para manutenção" } }, []);
-
-const endResponses = {
-  "200": { description: "Vínculo encerrado (fica no histórico)" },
-  "404": { description: "Vínculo não encontrado" },
-  "409": { description: "Vínculo já encerrado" }
+// Campos que toda mensagem do lacre leva
+const leitura = {
+  device_id: { type: "string", example: "DSP-000001", description: "Código do dispositivo cadastrado" },
+  latitude: { type: "number", minimum: -90, maximum: 90, example: -7.2091939 },
+  longitude: { type: "number", minimum: -180, maximum: 180, example: -39.3063666 },
+  gps_ok: { type: "boolean", default: true, description: "false = sem sinal de GPS; latitude e longitude são a última posição conhecida" },
+  battery_percent: { type: "number", minimum: 0, maximum: 100, example: 87 },
+  seal_status: { type: "string", enum: ["LOCKED", "UNLOCKED", "BROKEN"], description: "Estado do lacre" },
+  speed_kmh: { type: "number", example: 42 },
+  gsm_signal: { type: "integer", example: -71, description: "Força do sinal, em dBm" },
+  satellites: { type: "integer", example: 9, description: "Também aceito como satelites" },
+  hdop: { type: "number", example: 0.9 },
+  device_state: { type: "string", example: "OPERACIONAL", description: "Estado informado pelo firmware" },
+  attempt_count: { type: "integer", minimum: 0, description: "Quantas vezes o lacre tentou enviar esta mensagem" }
 };
 
-// Associação dispositivo → lacre → cilindro (entrega B). Rotas abertas e
-// provisórias até o Worker trazer o cadastro oficial do FluxID
-const assetPaths = {
-  "/api/v1/seals": {
-    get: { tags: ["Lacres"], summary: "Listar lacres", responses: { "200": { description: "Lista de lacres" } } },
-    post: {
-      tags: ["Lacres"],
-      summary: "Cadastrar lacre (provisório até o FluxID)",
-      requestBody: jsonBody({
-        seal_code: { type: "string", example: "LCR-000001" },
-        nfc_uid: { type: "string", example: "04A2B3C4D5" },
-        status: { type: "string", enum: sealStatusEnum.filter(s => s !== "INSTALADO"), example: "EM_ESTOQUE" }
-      }, ["seal_code", "nfc_uid"]),
-      responses: {
-        "201": { description: "Lacre cadastrado (EM_ESTOQUE por padrão)" },
-        "400": { description: "Campos obrigatórios ou status inválido (INSTALADO só pelo vínculo)" },
-        "409": { description: "Código ou UID NFC já cadastrado" }
-      }
-    }
-  },
-  "/api/v1/seals/{sealCode}": {
-    get: {
-      tags: ["Lacres"], summary: "Buscar lacre", parameters: [codeParam("sealCode", "LCR-000001")],
-      responses: { "200": { description: "Lacre" }, "404": { description: "Lacre não encontrado" } }
-    }
-  },
-  "/api/v1/seals/{sealCode}/status": {
-    post: {
-      tags: ["Lacres"], summary: "Alterar estado do lacre", parameters: [codeParam("sealCode", "LCR-000001")],
-      requestBody: jsonBody({ status: { type: "string", enum: sealStatusEnum, example: "SUSPEITA_VIOLACAO" } }, ["status"]),
-      responses: {
-        "200": { description: "Estado alterado" },
-        "400": { description: "Estado inválido" },
-        "404": { description: "Lacre não encontrado" },
-        "409": { description: "INSTALADO só pelo vínculo; EM_ESTOQUE/REMOVIDO só sem cilindro ativo" }
-      }
-    }
-  },
-  "/api/v1/cylinders": {
-    get: { tags: ["Cilindros"], summary: "Listar cilindros", responses: { "200": { description: "Lista de cilindros" } } },
-    post: {
-      tags: ["Cilindros"],
-      summary: "Cadastrar cilindro (provisório até o FluxID)",
-      requestBody: jsonBody({
-        cylinder_code: { type: "string", example: "CIL-000001" },
-        serial_number: { type: "string", example: "SN-123456" },
-        status: { type: "string", enum: cylinderStatusEnum, example: "DISPONIVEL" }
-      }, ["cylinder_code", "serial_number"]),
-      responses: {
-        "201": { description: "Cilindro cadastrado (DISPONIVEL por padrão)" },
-        "400": { description: "Campos obrigatórios ou status inválido" },
-        "409": { description: "Código do cilindro já cadastrado (o número de série pode repetir entre empresas; a regra por empresa é do FluxID)" }
-      }
-    }
-  },
-  "/api/v1/cylinders/{cylinderCode}": {
-    get: {
-      tags: ["Cilindros"], summary: "Buscar cilindro", parameters: [codeParam("cylinderCode", "CIL-000001")],
-      responses: { "200": { description: "Cilindro" }, "404": { description: "Cilindro não encontrado" } }
-    }
-  },
-  "/api/v1/cylinders/{cylinderCode}/status": {
-    post: {
-      tags: ["Cilindros"], summary: "Alterar estado do cilindro", parameters: [codeParam("cylinderCode", "CIL-000001")],
-      requestBody: jsonBody({ status: { type: "string", enum: cylinderStatusEnum, example: "EM_TRANSITO" } }, ["status"]),
-      responses: { "200": { description: "Estado alterado" }, "400": { description: "Estado inválido" }, "404": { description: "Cilindro não encontrado" } }
-    }
-  },
-  "/api/v1/assignments/device-seal": {
-    get: {
-      tags: ["Vínculos"], summary: "Histórico dispositivo ↔ lacre (mais recente primeiro)", parameters: historyQuery,
-      responses: { "200": { description: "Vínculos" } }
-    },
-    post: {
-      tags: ["Vínculos"],
-      summary: "Vincular dispositivo a lacre (RN05)",
-      requestBody: jsonBody({
-        device_id: { type: "string", example: "DSP-000001" },
-        seal_code: { type: "string", example: "LCR-000001" },
-        replace: { type: "boolean", description: "true = troca: encerra os vínculos em conflito e cria o novo", example: false }
-      }, ["device_id", "seal_code"]),
-      responses: {
-        "201": { description: "Vínculo criado" },
-        "400": { description: "Campos obrigatórios" },
-        "404": { description: "Dispositivo ou lacre não encontrado" },
-        "409": { description: "Dispositivo ou lacre já tem vínculo ativo (use replace: true)" }
-      }
-    }
-  },
-  "/api/v1/assignments/device-seal/{id}/end": {
-    post: {
-      tags: ["Vínculos"], summary: "Encerrar vínculo dispositivo ↔ lacre",
-      parameters: idParam, requestBody: endBody, responses: endResponses
-    }
-  },
-  "/api/v1/assignments/seal-cylinder": {
-    get: {
-      tags: ["Vínculos"], summary: "Histórico lacre ↔ cilindro (mais recente primeiro)", parameters: historyQuery,
-      responses: { "200": { description: "Vínculos" } }
-    },
-    post: {
-      tags: ["Vínculos"],
-      summary: "Instalar lacre em cilindro (RN04); lacre vira INSTALADO",
-      requestBody: jsonBody({
-        seal_code: { type: "string", example: "LCR-000001" },
-        cylinder_code: { type: "string", example: "CIL-000001" },
-        replace: { type: "boolean", description: "true = troca: encerra os vínculos em conflito; o lacre substituído vira REMOVIDO", example: false }
-      }, ["seal_code", "cylinder_code"]),
-      responses: {
-        "201": { description: "Vínculo criado" },
-        "400": { description: "Campos obrigatórios" },
-        "404": { description: "Lacre ou cilindro não encontrado" },
-        "409": { description: "Vínculo ativo em conflito ou lacre fora de EM_ESTOQUE/REMOVIDO" }
-      }
-    }
-  },
-  "/api/v1/assignments/seal-cylinder/{id}/end": {
-    post: {
-      tags: ["Vínculos"], summary: "Encerrar vínculo lacre ↔ cilindro; lacre INSTALADO vira REMOVIDO",
-      parameters: idParam, requestBody: endBody, responses: endResponses
-    }
-  }
+const obrigatorios = ["device_id", "latitude", "longitude", "battery_percent"];
+
+const errosDoLacre = {
+  "400": resposta("Campo obrigatório ausente ou valor inválido", { success: false, message: "latitude, longitude e battery_percent são obrigatórios" }),
+  "401": resposta("X-API-Key ausente ou inválida", { success: false, message: "API Key obrigatória" }),
+  "403": resposta("Chave de outro dispositivo, ou dispositivo desativado", { success: false, message: "API Key não pertence ao dispositivo" }),
+  "404": resposta("Dispositivo não cadastrado", { success: false, message: "Dispositivo não encontrado" }),
+  "409": resposta("Mensagem já recebida (não reenviar)", { success: false, message: "Mensagem duplicada" })
 };
+
+const chave = [{ ApiKeyAuth: [] }];
 
 const openApiSpec = {
   openapi: "3.0.3",
   info: {
     title: "API ESP32",
-    version: "1.0.0",
-    description: "API Oxide: recebe os dados do ESP32 (telemetria, eventos, alertas e comandos) e mantém a fila local até a sincronização com o FluxID. As rotas de cadastro, de associação e de análise de alertas são abertas e provisórias, até o controle por perfil do FluxID."
+    version: "2.0.0",
+    description: [
+      "API que recebe os dados do lacre (ESP32), valida, guarda numa fila local (Oxide) e envia ao banco principal (Supabase) pelo Worker.",
+      "",
+      "Toda mensagem do lacre leva **posição e bateria**. Sem sinal de GPS, o lacre manda a última posição conhecida com `gps_ok: false`.",
+      "",
+      "Para as rotas do lacre, clique em **Authorize** e informe a chave do dispositivo (`X-API-Key`)."
+    ].join("\n")
   },
+  servers: [{ url: "http://localhost:3000", description: "Servidor local" }],
   tags: [
-    { name: "Dispositivos", description: "Cadastro e consulta de dispositivos. Provisório até o Worker trazer o cadastro oficial do FluxID; a api_key só aparece no cadastro" },
-    { name: "Telemetria", description: "O ESP32 envia posição, bateria, sinal e estado do lacre (exige a X-API-Key do próprio dispositivo)" },
-    { name: "Eventos", description: "O ESP32 envia ocorrências: reinício, falha, mudança do lacre (exige a X-API-Key do próprio dispositivo)" },
-    { name: "Comandos", description: "O ESP32 busca comandos pendentes (TRAVAR_VALVULA, DESTRAVAR_VALVULA) e confirma EXECUTADO ou ERRO" },
-    { name: "Alertas", description: "O ESP32 cria alertas com os códigos do catálogo Tipos-de-Erro.md; o gestor lista, analisa e encerra (rotas abertas e provisórias)" },
-    { name: "Lacres", description: "Cadastro e estado dos lacres. Cópia provisória do cadastro do FluxID" },
-    { name: "Cilindros", description: "Cadastro e estado dos cilindros. Cópia provisória do cadastro do FluxID" },
-    { name: "Vínculos", description: "Dispositivo ↔ lacre e lacre ↔ cilindro, com troca, encerramento e histórico. Nada é apagado" },
-    { name: "Sincronização", description: "Acompanhamento do Worker Oxide ⇄ FluxID: filas, itens com problema e nova tentativa (rotas abertas e provisórias)" }
-  ],
-  servers: [
-    {
-      url: "http://localhost:3000",
-      description: "Servidor local"
-    }
+    { name: "Lacre", description: "O que o lacre envia: telemetria, eventos e alertas (exige a X-API-Key do próprio dispositivo)" },
+    { name: "Comandos", description: "O lacre busca os comandos pendentes (TRAVAR_VALVULA, DESTRAVAR_VALVULA) e confirma EXECUTADO ou ERRO" },
+    { name: "Dispositivos", description: "Consulta e cadastro provisório. O cadastro oficial vem do banco principal; a chave nunca aparece nas respostas" },
+    { name: "Acompanhamento", description: "Mensagens recebidas, situação da fila, erros de envio e saúde da API (rotas abertas e provisórias)" }
   ],
   components: {
     securitySchemes: {
-      ApiKeyAuth: {
-        type: "apiKey",
-        in: "header",
-        name: "X-API-Key"
-      }
-    },
-    schemas: {
-      Device: {
-        type: "object",
-        properties: {
-          id: { type: "integer", example: 1 },
-          device_id: { type: "string", example: "DSP-000001" },
-          firmware_version: { type: "string", example: "1.0.0" },
-          active: { type: "integer", enum: [0, 1], example: 1 },
-          device_status_id: { type: "integer", nullable: true, example: 1 },
-          valve_status_id: { type: "integer", nullable: true, example: null },
-          seal_status_id: { type: "integer", nullable: true, example: 3 }
-        }
-      },
-      Error: {
-        type: "object",
-        properties: {
-          success: { type: "boolean", example: false },
-          message: { type: "string", example: "API Key inválida" }
-        }
-      },
-      Telemetry: {
-        type: "object",
-        properties: {
-          id: { type: "integer", example: 1 },
-          message_id: { type: "string", example: "MSG-000001" },
-          device_id: { type: "string", example: "DSP-000001" },
-          latitude: { type: "number", example: -23.5505 },
-          longitude: { type: "number", example: -46.6333 },
-          speed_kmh: { type: "number", example: 42 },
-          battery_percent: { type: "number", example: 88 },
-          gsm_signal: { type: "number", example: 31 },
-          last_seen_at: { type: "string", format: "date-time", nullable: true },
-          status: { type: "string", example: "PENDING" }
-        }
-      },
-      DeviceCommand: {
-        type: "object",
-        properties: {
-          id: { type: "integer", example: 1 },
-          command_id: { type: "string", example: "CMD-000001" },
-          device_id: { type: "string", example: "DSP-000001" },
-          command_type: { type: "string", example: "TRAVAR_VALVULA" },
-          status: { type: "string", example: "PENDENTE" },
-          created_at: { type: "string", format: "date-time" },
-          executed_at: { type: "string", format: "date-time", nullable: true },
-          error_message: { type: "string", nullable: true }
-        }
-      },
-      Alert: {
-        type: "object",
-        properties: {
-          id: { type: "integer", example: 1 },
-          alert_id: { type: "string", example: "ALT-000001" },
-          device_id: { type: "string", example: "DSP-000001" },
-          alert_type: {
-            type: "string",
-            enum: [...alertTypes],
-            example: "LACRE_VIOLADO"
-          },
-          severity: { type: "string", enum: ["BAIXA", "MEDIA", "ALTA", "CRITICA"], example: "CRITICA" },
-          status: { type: "string", enum: ["ABERTO", "EM_ANALISE", "ENCERRADO"], example: "ABERTO" },
-          title: { type: "string", example: "Lacre rompido" },
-          description: { type: "string", nullable: true },
-          created_at: { type: "string", format: "date-time" },
-          resolved_at: { type: "string", format: "date-time", nullable: true },
-          resolved_by: { type: "string", nullable: true, example: "Maria (gestora)" },
-          resolution_note: { type: "string", nullable: true, example: "Desvio justificado pelo motorista: obra na via" }
-        }
-      }
+      ApiKeyAuth: { type: "apiKey", in: "header", name: "X-API-Key" }
     }
   },
   paths: {
-    "/api/v1/devices": {
-      get: {
-        tags: ["Dispositivos"],
-        summary: "Listar dispositivos",
-        responses: {
-          "200": {
-            description: "Lista de dispositivos",
-            content: {
-              "application/json": {
-                schema: {
-                  type: "array",
-                  items: { $ref: "#/components/schemas/Device" }
-                }
-              }
-            }
-          }
-        }
-      },
-      post: {
-        tags: ["Dispositivos"],
-        summary: "Cadastrar dispositivo",
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["device_id", "api_key"],
-                properties: {
-                  device_id: { type: "string", example: "DSP-000002" },
-                  api_key: { type: "string", example: "chave-secreta" },
-                  firmware_version: { type: "string", example: "1.0.0" },
-                  active: { type: "integer", enum: [0, 1], example: 1 },
-                  device_status_id: { type: "integer", nullable: true, example: 1 },
-                  valve_status_id: { type: "integer", nullable: true, example: null },
-                  seal_status_id: { type: "integer", nullable: true, example: 3 }
-                }
-              }
-            }
-          }
-        },
-        responses: {
-          "201": { description: "Dispositivo criado" },
-          "409": {
-            description: "Dispositivo duplicado pelo device_id ou API Key já em uso",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Error" },
-                example: { success: false, message: "Dispositivo duplicado" }
-              }
-            }
-          },
-          "400": {
-            description: "Campos obrigatórios ausentes ou active diferente de 0/1",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Error" }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/devices/{deviceId}": {
-      get: {
-        tags: ["Dispositivos"],
-        summary: "Buscar dispositivo pelo identificador",
-        parameters: [
-          {
-            name: "deviceId",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-            example: "DSP-000001"
-          }
-        ],
-        responses: {
-          "200": {
-            description: "Dispositivo encontrado",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Device" }
-              }
-            }
-          },
-          "404": { description: "Dispositivo não encontrado" }
-        }
-      }
-    },
     "/api/v1/iot/telemetries": {
-      get: {
-        tags: ["Telemetria"],
-        summary: "Listar telemetrias da fila",
-        description: "Retorna todas as telemetrias, da mais recente para a mais antiga.",
-        security: [{ ApiKeyAuth: [] }],
-        responses: {
-          "200": {
-            description: "Lista de telemetrias",
-            content: {
-              "application/json": {
-                schema: {
-                  type: "array",
-                  items: { $ref: "#/components/schemas/Telemetry" }
-                }
-              }
-            }
-          },
-          "401": {
-            description: "API Key ausente ou inválida",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Error" }
-              }
-            }
-          },
-          "403": { description: "Dispositivo desativado" }
-        }
-      },
       post: {
-        tags: ["Telemetria"],
-        summary: "Enviar telemetria",
-        security: [{ ApiKeyAuth: [] }],
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["message_id", "device_id"],
-                properties: {
-                  message_id: { type: "string", example: "MSG-000001" },
-                  device_id: { type: "string", example: "DSP-000001" },
-                  latitude: { type: "number", minimum: -90, maximum: 90, description: "Enviar junto com longitude", example: -23.5505 },
-                  longitude: { type: "number", minimum: -180, maximum: 180, description: "Enviar junto com latitude", example: -46.6333 },
-                  speed_kmh: { type: "number", example: 42 },
-                  battery_percent: { type: "number", example: 88 },
-                  gsm_signal: { type: "number", example: 31 },
-                  payload_json: { type: "string", example: "{}" },
-                  last_seen_at: {
-                    type: "string",
-                    format: "date-time",
-                    example: "2026-10-04T15:30:00.000Z"
-                  },
-                  seal_status: {
-                    type: "string",
-                    enum: ["LOCKED", "UNLOCKED", "BROKEN"],
-                    example: "LOCKED"
-                  },
-                  attempt_count: {
-                    type: "integer",
-                    minimum: 0,
-                    description: "Tentativas de envio do ESP32; gravado em device_attempt_count",
-                    example: 1
-                  }
-                }
-              }
-            }
-          }
-        },
+        tags: ["Lacre"],
+        summary: "Enviar a leitura periódica",
+        description: "Posição e estado do lacre iguais aos da última leitura: responde `200` e só atualiza a data e a hora da leitura anterior, sem criar outra.",
+        security: chave,
+        requestBody: jsonBody(
+          { message_id: { type: "string", example: "MSG-000123", description: "Único por mensagem; repetir no reenvio" }, ...leitura },
+          ["message_id", ...obrigatorios],
+          { message_id: "MSG-000123", device_id: "DSP-000001", latitude: -7.2091939, longitude: -39.3063666, gps_ok: true, battery_percent: 87, seal_status: "LOCKED", satellites: 9, hdop: 0.9 }
+        ),
         responses: {
-          "200": { description: "Posição e estado do lacre iguais à última telemetria; data e hora atualizadas" },
-          "202": { description: "Telemetria recebida" },
-          "400": { description: "message_id e device_id são obrigatórios ou campo com tipo inválido" },
-          "404": { description: "Dispositivo não encontrado" },
-          "409": {
-            description: "Mensagem duplicada pelo message_id (inclusive de posição repetida)",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Error" },
-                example: { success: false, message: "Mensagem duplicada" }
-              }
-            }
-          },
-          "401": {
-            description: "API Key ausente ou inválida",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Error" }
-              }
-            }
-          },
-          "403": { description: "Dispositivo desativado ou API Key de outro dispositivo" }
+          "202": resposta("Leitura recebida", { success: true, message: "Telemetria recebida" }),
+          "200": resposta("Posição repetida", { success: true, message: "Posição já registrada; data e hora atualizadas" }),
+          ...errosDoLacre
         }
       }
     },
     "/api/v1/iot/events": {
       post: {
-        tags: ["Eventos"],
-        summary: "Enviar evento",
-        security: [{ ApiKeyAuth: [] }],
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["message_id", "device_id", "event_type"],
-                properties: {
-                  message_id: { type: "string", example: "EVT-000001" },
-                  device_id: { type: "string", example: "DSP-000001" },
-                  event_type: { type: "string", example: "door_open" },
-                  seal_status: {
-                    type: "string",
-                    enum: ["LOCKED", "UNLOCKED", "BROKEN"],
-                    example: "LOCKED"
-                  },
-                  payload_json: { type: "string", example: "{\"source\":\"sensor\"}" },
-                  attempt_count: {
-                    type: "integer",
-                    minimum: 0,
-                    description: "Tentativas de envio do ESP32; gravado em device_attempt_count",
-                    example: 1
-                  }
-                }
-              }
-            }
-          }
-        },
+        tags: ["Lacre"],
+        summary: "Enviar um evento (algo aconteceu)",
+        description: "Exemplos de `event_type`: `startup`, `seal_changed`, `hardware_failure`.",
+        security: chave,
+        requestBody: jsonBody(
+          { message_id: { type: "string", example: "EVT-000045" }, event_type: { type: "string", example: "seal_changed" }, description: { type: "string" }, ...leitura },
+          ["message_id", "event_type", ...obrigatorios],
+          { message_id: "EVT-000045", device_id: "DSP-000001", event_type: "seal_changed", seal_status: "BROKEN", latitude: -7.2091939, longitude: -39.3063666, battery_percent: 86 }
+        ),
+        responses: { "202": resposta("Evento recebido", { success: true, message: "Evento recebido" }), ...errosDoLacre }
+      }
+    },
+    "/api/v1/iot/alerts": {
+      post: {
+        tags: ["Lacre"],
+        summary: "Enviar um alerta identificado pelo lacre",
+        description: "O servidor também abre sozinho, a partir das mensagens: `BATERIA_BAIXA`, `GSM_SINAL_FRACO`, `LACRE_VIOLADO` (lacre `BROKEN`) e `LACRE_ABERTO_SEM_AUTORIZACAO` (lacre `UNLOCKED`). Esses o lacre não precisa mandar.",
+        security: chave,
+        requestBody: jsonBody(
+          {
+            alert_id: { type: "string", example: "ALT-000010", description: "Único por alerta" },
+            alert_type: { type: "string", enum: [...alertTypes] },
+            title: { type: "string", example: "GPS não responde" },
+            severity: { type: "string", enum: ["BAIXA", "MEDIA", "ALTA", "CRITICA"], description: "Sem ela, vale a do catálogo" },
+            description: { type: "string" },
+            ...leitura
+          },
+          ["alert_id", "alert_type", "title", ...obrigatorios],
+          { alert_id: "ALT-000010", device_id: "DSP-000001", alert_type: "GPS_INATIVO", title: "GPS não responde", latitude: -7.2091939, longitude: -39.3063666, gps_ok: false, battery_percent: 80 }
+        ),
         responses: {
-          "202": { description: "Evento recebido" },
-          "400": {
-            description: "message_id, device_id e event_type são obrigatórios",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Error" }
-              }
-            }
-          },
-          "409": {
-            description: "Mensagem duplicada",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Error" },
-                example: { success: false, message: "Mensagem duplicada" }
-              }
-            }
-          },
-          "401": { description: "API Key ausente ou inválida" },
-          "403": { description: "Dispositivo desativado ou API Key de outro dispositivo" },
-          "404": { description: "Dispositivo não cadastrado (não há criação automática)" }
+          "201": resposta("Alerta registrado", { success: true, message: "Alerta registrado", alert: { alert_id: "ALT-000010", alert_type: "GPS_INATIVO", severity: "ALTA", title: "GPS não responde" } }),
+          ...errosDoLacre,
+          "409": resposta("Alerta já recebido", { success: false, message: "Alerta duplicado" })
         }
       }
     },
     "/api/v1/iot/commands/{deviceId}": {
       get: {
         tags: ["Comandos"],
-        summary: "Listar comandos pendentes do dispositivo",
-        security: [{ ApiKeyAuth: [] }],
-        parameters: [
-          {
-            name: "deviceId",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-            example: "DSP-000001"
-          }
-        ],
+        summary: "Buscar os comandos pendentes do dispositivo",
+        security: chave,
+        parameters: [{ name: "deviceId", in: "path", required: true, schema: { type: "string" }, example: "DSP-000001" }],
         responses: {
-          "200": {
-            description: "Comandos pendentes, em ordem de criação",
-            content: {
-              "application/json": {
-                schema: {
-                  type: "array",
-                  items: { $ref: "#/components/schemas/DeviceCommand" }
-                }
-              }
-            }
-          },
-          "401": { description: "API Key ausente ou inválida" },
-          "403": { description: "API Key não pertence ao dispositivo" },
-          "404": { description: "Dispositivo não encontrado" }
+          "200": resposta("Lista (vazia quando não há comando)", [{ command_id: "CMD-000007", device_id: "DSP-000001", command_type: "TRAVAR_VALVULA", status: "PENDENTE", created_at: "2026-10-10 12:00:00" }] as unknown as object),
+          "401": errosDoLacre["401"], "403": errosDoLacre["403"], "404": errosDoLacre["404"]
         }
       }
     },
     "/api/v1/iot/commands/confirm": {
       post: {
         tags: ["Comandos"],
-        summary: "Confirmar execução de comando",
-        security: [{ ApiKeyAuth: [] }],
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["command_id", "device_id", "status"],
-                properties: {
-                  command_id: { type: "string", example: "CMD-000001" },
-                  device_id: { type: "string", example: "DSP-000001" },
-                  status: { type: "string", enum: ["EXECUTADO", "ERRO"], example: "EXECUTADO" },
-                  error_message: { type: "string", nullable: true, example: null }
-                }
-              }
-            }
-          }
-        },
+        summary: "Confirmar que o comando foi executado (ou falhou)",
+        security: chave,
+        requestBody: jsonBody(
+          {
+            command_id: { type: "string" }, device_id: { type: "string" },
+            status: { type: "string", enum: ["EXECUTADO", "ERRO"] }, error_message: { type: "string" }
+          },
+          ["command_id", "device_id", "status"],
+          { command_id: "CMD-000007", device_id: "DSP-000001", status: "EXECUTADO" }
+        ),
         responses: {
-          "200": { description: "Comando confirmado" },
-          "400": { description: "Campos obrigatórios ou status inválidos" },
-          "401": { description: "API Key ausente ou inválida" },
-          "403": { description: "API Key não pertence ao dispositivo" },
-          "404": { description: "Comando não encontrado para este dispositivo" },
-          "409": { description: "Comando já confirmado" }
+          "200": resposta("Comando confirmado", { success: true, message: "Comando confirmado" }),
+          "400": resposta("Dados inválidos"), "401": errosDoLacre["401"], "403": errosDoLacre["403"],
+          "404": resposta("Comando não encontrado para este dispositivo"),
+          "409": resposta("Comando já confirmado")
         }
       }
     },
-    "/api/v1/iot/alerts": {
-      post: {
-        tags: ["Alertas"],
-        summary: "Registrar alerta",
-        security: [{ ApiKeyAuth: [] }],
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["alert_id", "device_id", "alert_type", "title"],
-                properties: {
-                  alert_id: { type: "string", example: "ALT-000001" },
-                  device_id: { type: "string", example: "DSP-000001" },
-                  alert_type: {
-                    type: "string",
-                    description: "Código do catálogo Tipos-de-Erro.md. Transição: os nomes antigos SEAL_BROKEN, GEOFENCE_EXIT, LOW_BATTERY, COMMUNICATION_LOST, DEVICE_ERROR e COMMAND_FAILURE continuam aceitos e são gravados no código em português",
-                    example: "LACRE_VIOLADO"
-                  },
-                  severity: {
-                    type: "string",
-                    enum: ["BAIXA", "MEDIA", "ALTA", "CRITICA"],
-                    description: "Opcional. Padrão: a severidade sugerida no catálogo para o tipo (ex.: LACRE_VIOLADO CRITICA, SEM_COMUNICACAO ALTA, BATERIA_BAIXA BAIXA). O status nasce sempre ABERTO",
-                    example: "CRITICA"
-                  },
-                  title: { type: "string", example: "Lacre rompido" },
-                  description: { type: "string", nullable: true }
-                }
-              }
-            }
-          }
-        },
-        responses: {
-          "201": {
-            description: "Alerta criado",
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    success: { type: "boolean", example: true },
-                    alert: { $ref: "#/components/schemas/Alert" }
-                  }
-                }
-              }
-            }
-          },
-          "400": { description: "Campos obrigatórios, alert_type ou severity inválidos" },
-          "401": { description: "API Key ausente ou inválida" },
-          "403": { description: "API Key não pertence ao dispositivo" },
-          "404": { description: "Dispositivo não encontrado" },
-          "409": { description: "alert_id já cadastrado" }
-        }
-      },
+    "/api/v1/devices": {
       get: {
-        tags: ["Alertas"],
-        summary: "Listar alertas (aberta e provisória)",
-        parameters: [
-          { name: "status", in: "query", schema: { type: "string", enum: ["ABERTO", "EM_ANALISE", "ENCERRADO"] } },
-          { name: "device_id", in: "query", schema: { type: "string" } }
-        ],
+        tags: ["Dispositivos"],
+        summary: "Listar os dispositivos (sem a chave)",
+        responses: { "200": resposta("Lista de dispositivos, com o último estado recebido") }
+      },
+      post: {
+        tags: ["Dispositivos"],
+        summary: "Cadastrar um dispositivo (provisório, para testes)",
+        requestBody: jsonBody(
+          { device_id: { type: "string" }, api_key: { type: "string" }, firmware_version: { type: "string" }, active: { type: "integer", enum: [0, 1] } },
+          ["device_id", "api_key"],
+          { device_id: "DSP-000001", api_key: "chave-de-teste", firmware_version: "1.0.0" }
+        ),
         responses: {
-          "200": {
-            description: "Alertas, do mais recente ao mais antigo",
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    success: { type: "boolean", example: true },
-                    total: { type: "integer", example: 1 },
-                    alerts: { type: "array", items: { $ref: "#/components/schemas/Alert" } }
-                  }
-                }
-              }
-            }
-          },
-          "400": { description: "status inválido" }
+          "201": resposta("Dispositivo criado"), "400": resposta("Dados inválidos"),
+          "409": resposta("device_id ou api_key já cadastrados")
         }
       }
     },
-    "/api/v1/iot/alerts/{alertId}/status": {
-      patch: {
-        tags: ["Alertas"],
-        summary: "Analisar ou encerrar alerta (aberta e provisória)",
-        description: "Caminhos: ABERTO → EM_ANALISE → ENCERRADO, ou ABERTO → ENCERRADO. ENCERRADO é final: um problema novo gera um alerta novo",
-        parameters: [
-          { name: "alertId", in: "path", required: true, schema: { type: "string" }, example: "ALT-000001" }
-        ],
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["status"],
-                properties: {
-                  status: { type: "string", enum: ["EM_ANALISE", "ENCERRADO"] },
-                  resolved_by: { type: "string", description: "Obrigatório para ENCERRADO: quem liberou", example: "Maria (gestora)" },
-                  resolution_note: { type: "string", description: "Obrigatório para ENCERRADO: motivo", example: "Desvio justificado pelo motorista: obra na via" }
-                }
-              }
-            }
-          }
-        },
-        responses: {
-          "200": {
-            description: "Status atualizado",
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    success: { type: "boolean", example: true },
-                    alert: { $ref: "#/components/schemas/Alert" }
-                  }
-                }
-              }
-            }
-          },
-          "400": { description: "status inválido, ou resolved_by/resolution_note ausentes ao encerrar" },
-          "404": { description: "Alerta não encontrado" },
-          "409": { description: "Transição não permitida (ex.: alerta já encerrado)" }
-        }
+    "/api/v1/devices/{deviceId}": {
+      get: {
+        tags: ["Dispositivos"],
+        summary: "Buscar um dispositivo",
+        parameters: [{ name: "deviceId", in: "path", required: true, schema: { type: "string" } }],
+        responses: { "200": resposta("Dispositivo"), "404": resposta("Dispositivo não encontrado") }
       }
     },
-    ...assetPaths,
+    "/api/v1/iot/messages": {
+      get: {
+        tags: ["Acompanhamento"],
+        summary: "Últimas mensagens recebidas",
+        parameters: [
+          { name: "type", in: "query", schema: { type: "string", enum: ["TELEMETRIA", "EVENTO", "ALERTA", "CONFIRMACAO_COMANDO"] } },
+          { name: "device_id", in: "query", schema: { type: "string" } },
+          { name: "limit", in: "query", schema: { type: "integer", default: 50, maximum: 200 } }
+        ],
+        responses: { "200": resposta("Mensagens, da mais recente para a mais antiga, com a situação do envio") }
+      }
+    },
     "/api/v1/sync/status": {
       get: {
-        tags: ["Sincronização"],
-        summary: "Situação das filas do Worker e últimas rodadas",
-        description: "Para cada fila (telemetry, events, alerts): pendentes, aguardando condição (ex.: vínculo, P3), com nova tentativa agendada, parados para o gestor, enviando e sincronizados",
-        responses: { "200": { description: "Resumo das filas e últimas 5 rodadas (sync_logs)" } }
+        tags: ["Acompanhamento"],
+        summary: "Situação da fila e da última rodada do Worker",
+        responses: { "200": resposta("Contagem por situação", { fila: { pendentes: 2, enviando: 0, nova_tentativa: 0, paradas: 0, sincronizadas: 120, arquivadas: 0 }, ultima_rodada: null }) }
       }
     },
     "/api/v1/sync/problems": {
       get: {
-        tags: ["Sincronização"],
-        summary: "Itens com problema numa fila",
-        parameters: [
-          { name: "queue", in: "query", required: true, schema: { type: "string", enum: ["telemetry", "events", "alerts"] } }
-        ],
-        responses: {
-          "200": { description: "Itens PARADO (precisa do gestor), NOVA_TENTATIVA ou AGUARDANDO, com o erro" },
-          "400": { description: "queue inválida" }
-        }
+        tags: ["Acompanhamento"],
+        summary: "Mensagens que não chegaram ao banco principal, com o motivo",
+        responses: { "200": resposta("Lista de mensagens com erro") }
       }
     },
     "/api/v1/sync/retry": {
       post: {
-        tags: ["Sincronização"],
-        summary: "Mandar um item de volta para a fila",
-        description: "Zera as tentativas; usado pelo gestor depois de corrigir a causa (ex.: cadastrar o dispositivo no FluxID)",
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["queue", "key"],
-                properties: {
-                  queue: { type: "string", enum: ["telemetry", "events", "alerts"] },
-                  key: { type: "string", description: "message_id (telemetry, events) ou alert_id (alerts)", example: "MSG-000001" }
-                }
-              }
-            }
-          }
-        },
-        responses: {
-          "200": { description: "Item voltou para a fila" },
-          "400": { description: "queue ou key inválidos" },
-          "404": { description: "Item não encontrado ou já sincronizado" }
-        }
+        tags: ["Acompanhamento"],
+        summary: "Devolver à fila uma mensagem com erro (depois de corrigir a causa)",
+        requestBody: jsonBody({ message_id: { type: "string" } }, ["message_id"], { message_id: "MSG-000123" }),
+        responses: { "200": resposta("Mensagem devolvida à fila"), "400": resposta("message_id ausente"), "404": resposta("Mensagem com erro não encontrada") }
+      }
+    },
+    "/health": {
+      get: {
+        tags: ["Acompanhamento"],
+        summary: "Saúde da API, da fila e do Worker",
+        responses: { "200": resposta("Tudo em ordem"), "503": resposta("Worker parado, atrasado ou com falha") }
       }
     }
   }

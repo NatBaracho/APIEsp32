@@ -1,173 +1,116 @@
 # Oxide DB
 
-## Especificação Profissional de Criação do Banco SQLite
+## Banco local da API do lacre (SQLite)
 
-**Buffer temporário de ingestão para dispositivos ESP32**
-
-**Versão:** 1.8  
+**Versão:** 2.0 — 10/10/2026 — **aprovado por Natã da Silva Baracho em 10/10/2026**
 **Projeto:** FluxID / Oxide IoT
 
-Inclui instruções de criação, modelo de dados e script SQL completo.
+A Oxide (`oxide.db`) é a **fila local** da API: guarda o que o lacre envia até chegar ao banco principal (Supabase). Desde a versão 2.0 ela tem só **três tabelas**.
 
 ---
 
-# 1. Objetivo do Documento
+# 1. O que mudou na versão 2.0
 
-Este documento descreve o schema atual do banco SQLite `oxide.db`, explica o papel das tabelas existentes e fornece um script de criação compatível com esse schema.
+| Antes (11 tabelas) | Agora (3 tabelas) |
+| --- | --- |
+| `telemetry_queue`, `events`, `alerts` | `mensagens`: uma fila única para tudo o que o lacre manda |
+| `seals`, `cylinders`, `seal_assignments`, `cylinder_assignments` | Saíram. Lacre, cilindro e vínculos ficam só no banco principal |
+| `status`, `sync_logs` | Saíram. O resultado da última rodada do Worker fica no arquivo `oxide-worker.json` |
+| `devices`, `commands` | Continuam |
 
-O banco atua como armazenamento local da API e fila persistente. O Worker (`npm run worker`) envia a fila ao FluxID e traz de volta o cadastro oficial; cada rodada fica registrada em `sync_logs`.
-
----
-
-# 2. Arquitetura
+# 2. Fluxo
 
 ```text
-ESP32 / Postman
-         ↓
-     Oxide API
-         ↓
-     SQLite
-         ⋯
-Worker de sincronização (futuro)
+Lacre ──► API (valida) ──► mensagens (fila) ──► Worker ──► Supabase
+                              ▲                   │
+            devices e commands ◄── cadastro e comandos do Supabase
 ```
 
-## Fluxo
+# 3. Tabelas
 
-- O ESP32 envia telemetrias e eventos para a API.
-- A API autentica o dispositivo, valida o JSON e grava a mensagem no SQLite.
-- Telemetrias, eventos e comandos são mantidos localmente no SQLite.
-- A tabela `commands` armazena comandos destinados aos dispositivos e seus resultados.
-- Através desta API e do seu Worker de sincronização futuro, as telemetrias, eventos e comandos armazenados no SQLite serão sincronizados com o banco principal PostgreSQL (FluxID).
+| Tabela | Para quê |
+| --- | --- |
+| `devices` | Quem pode enviar: código, chave (ou o hash vindo do banco principal), ativo ou não, e o **último estado recebido** (contato, posição, GPS, lacre, bateria e sinal) |
+| `mensagens` | Fila única: leitura, evento, alerta e confirmação de comando, com a mensagem validada em JSON, a hora de chegada e a situação do envio |
+| `commands` | Comandos da válvula vindos do banco principal, que o lacre busca e confirma |
 
----
+### Situação de uma mensagem (`mensagens.status`)
 
-# 3. Escopo e Decisões
+| Valor | Significado |
+| --- | --- |
+| `PENDING` | Pronta para enviar |
+| `PROCESSING` | Sendo enviada. Se o Worker parar no meio, volta para a fila sem gastar tentativa |
+| `SYNCED` | Gravada no banco principal |
+| `ERROR` com `next_attempt_at` | Falhou; nova tentativa marcada (1 min, 5 min, 15 min, 1 h e 6 h) |
+| `ERROR` sem `next_attempt_at` | Parada: recusada pelo banco principal ou sem tentativas. Precisa do gestor |
+| `ARQUIVADA` | Veio do modelo antigo **sem posição ou sem bateria**. Fica guardada, mas não é enviada, porque o banco principal exige as duas |
 
-| Decisão | Definição |
-|----------|----------|
-| Banco | SQLite (`oxide.db`) |
-| Uso | Buffer temporário de ingestão IoT |
-| Autenticação | API Key por dispositivo |
-| Idempotência | `message_id` único |
-| Estados | `PENDING`, `PROCESSING`, `SYNCED`, `ERROR` |
-| Catálogo de domínio | Tabela `status`, separada dos estados de sincronização |
-| Banco oficial | PostgreSQL FluxID |
-| Datas | Geradas/controladas pela API ou Worker |
+# 4. Criação e migração
 
-> **Sincronização:** o estado de cada linha fica na própria fila (`status`, `attempt_count`, `last_error`, `next_attempt_at`; nos alertas, as colunas `sync_*`). `sync_logs` registra cada rodada do Worker. A tabela `sync_items` não foi criada: o estado por item já está na fila (decisão aprovada por Natã da Silva Baracho em 07/10/2026).
+**As tabelas são criadas pela própria API ao iniciar.** Não é preciso rodar script.
 
-> **Por que existe a tabela `status`:** `events.status` representa o processamento da fila (`PENDING`, `PROCESSING`, `SYNCED`, `ERROR`). Os códigos `ACTIVE`/`INACTIVE` representam o dispositivo (`devices.active` igual a `1`/`0`), e `LOCKED`/`UNLOCKED`/`BROKEN` representam o lacre em `events.seal_status`. O catálogo separado guarda os nomes e descrições sem misturar esses conceitos.
+Se a API encontrar um banco no modelo antigo, ela faz, nesta ordem:
 
----
+1. uma **cópia de segurança** do arquivo inteiro, ao lado do original: `oxide.db.bak-antes-da-fila-unica-<data>`;
+2. passa para `mensagens` tudo o que estava nas filas antigas (`telemetry_queue`, `events` e `alerts`):
+   - a leitura que tem posição e bateria é convertida para o formato atual e entra na fila (`PENDING`), para seguir ao banco principal. Se ela já existir lá, o banco principal responde "repetida" e não duplica;
+   - o que não tem posição ou bateria fica guardado como `ARQUIVADA`;
+3. remove as tabelas que saíram do modelo e as três colunas antigas de `devices` que não eram usadas.
 
-# 4. Modelo de Dados
+Os dispositivos e os comandos são mantidos. A migração roda uma vez só.
 
-## Relacionamentos
+# 5. Script SQL de referência
 
-| Origem | Destino | Cardinalidade | FK |
-|--------|---------|---------------|----|
-| devices | telemetry_queue | 1:N | `telemetry_queue.device_id → devices.device_id` |
-| devices | events | 1:N | `events.device_id → devices.device_id` |
-| devices | commands | 1:N | `commands.device_id → devices.device_id` |
-| devices | alerts | 1:N | `alerts.device_id → devices.device_id` |
-| devices / seals | seal_assignments | 1:N | `seal_assignments.device_id → devices.device_id`; `seal_assignments.seal_code → seals.seal_code` |
-| seals / cylinders | cylinder_assignments | 1:N | `cylinder_assignments.seal_code → seals.seal_code`; `cylinder_assignments.cylinder_code → cylinders.cylinder_code` |
-
-`device_status_id`, `valve_status_id` e `seal_status_id` são colunas opcionais em `devices`; atualmente não possuem constraints de chave estrangeira para `status`.
-
----
-
-# 5. Descrição das Tabelas
-
-| Tabela | Responsabilidade |
-|----------|----------|
-| devices | Dispositivos autorizados, API Key, firmware, estado booleano e IDs opcionais de estado |
-| status | Catálogo de códigos e descrições de estado |
-| telemetry_queue | Fila persistente de GPS, bateria, GSM, estado do lacre (`seal_status`), payload, `last_seen_at`, tentativas de envio do ESP32 (`device_attempt_count`) e `message_id` da última posição repetida (`last_repeat_message_id`) |
-| events | Fila temporária de eventos; `seal_status` representa o estado do lacre |
-| commands | Comandos destinados aos dispositivos e estado de execução |
-| alerts | Alertas associados a dispositivos, com tipo, estado, severidade e resolução |
-| seals / cylinders | Lacres e cilindros (cópia provisória do cadastro do FluxID) |
-| seal_assignments / cylinder_assignments | Histórico de vínculos dispositivo ↔ lacre e lacre ↔ cilindro; ativo = `ended_at` nulo |
-| sync_logs | Uma linha por rodada do Worker: início, fim, resultado (`OK`, `PARCIAL`, `FALHOU`) e resumo em JSON |
-
----
-
-# 6. Pré-Requisitos
-
-- SQLite 3 instalado ou DB Browser for SQLite
-- Permissão de escrita na pasta do banco
-- Script salvo em UTF-8
-- Backup do banco antes de alterações estruturais
-
----
-
-# 7. Instruções de Criação
-
-## Opção A — DB Browser for SQLite
-
-1. Abrir DB Browser for SQLite
-2. Criar novo banco
-3. Salvar como `oxide.db`
-4. Abrir a aba **Executar SQL**
-5. Colar o script da seção 8
-6. Executar
-7. Salvar alterações
-8. Executar validações da seção 9
-
----
-
-## Opção B — Terminal
-
-```bash
-sqlite3 oxide.db
-.read create_oxide_db.sql
-.quit
-```
-
----
-
-# 8. Script SQL Completo
+Igual ao que a API cria (`src/database/connection.ts`).
 
 ```sql
 PRAGMA foreign_keys = ON;
-PRAGMA busy_timeout = 5000;
-
-BEGIN TRANSACTION;
 
 CREATE TABLE IF NOT EXISTS devices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     device_id TEXT NOT NULL UNIQUE,
     api_key TEXT NOT NULL,
+    -- SHA-256 da chave, vindo do banco principal; quando existe, a chave em texto deixa de valer
+    api_key_hash TEXT,
     firmware_version TEXT,
-    active INTEGER NOT NULL DEFAULT 1
-        CHECK (active IN (0,1)),
-    device_status_id INTEGER,
-    valve_status_id INTEGER,
-    seal_status_id INTEGER,
-    -- SHA-256 da chave, vindo do FluxID; quando existe, a chave em texto deixa de valer
-    api_key_hash TEXT
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    -- Último estado recebido do lacre
+    last_contact_at DATETIME,
+    last_latitude REAL,
+    last_longitude REAL,
+    last_gps_ok INTEGER,
+    last_seal_status TEXT,
+    last_battery_percent REAL,
+    last_signal INTEGER,
+    last_telemetry_message_id TEXT,
+    last_repeat_message_id TEXT
 );
 
--- Cada dispositivo tem uma API Key exclusiva
-CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_api_key
-    ON devices(api_key);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_api_key ON devices(api_key);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_api_key_hash
     ON devices(api_key_hash) WHERE api_key_hash IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS status (
+CREATE TABLE IF NOT EXISTS mensagens (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    code TEXT NOT NULL UNIQUE,
-    name TEXT NOT NULL,
-    description TEXT
+    message_id TEXT NOT NULL UNIQUE,
+    device_id TEXT NOT NULL,
+    tipo TEXT NOT NULL
+        CHECK (tipo IN ('TELEMETRIA', 'EVENTO', 'ALERTA', 'CONFIRMACAO_COMANDO')),
+    -- A mensagem já validada, no formato que vai para o banco principal
+    payload_json TEXT NOT NULL,
+    received_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status TEXT NOT NULL DEFAULT 'PENDING'
+        CHECK (status IN ('PENDING', 'PROCESSING', 'SYNCED', 'ERROR', 'ARQUIVADA')),
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    next_attempt_at DATETIME,
+    synced_at DATETIME,
+    FOREIGN KEY (device_id) REFERENCES devices(device_id)
+        ON UPDATE CASCADE ON DELETE RESTRICT
 );
 
-INSERT OR IGNORE INTO status (code, name, description) VALUES
-    ('ACTIVE', 'Ativo', 'Dispositivo ativo'),
-    ('INACTIVE', 'Desativado', 'Dispositivo inativo'),
-    ('LOCKED', 'Travado', 'Lacre travado'),
-    ('UNLOCKED', 'Destravado', 'Lacre destravado'),
-    ('BROKEN', 'Rompido', 'Lacre rompido');
+CREATE INDEX IF NOT EXISTS idx_mensagens_fila ON mensagens (status, next_attempt_at, id);
+CREATE INDEX IF NOT EXISTS idx_mensagens_device ON mensagens (device_id, id);
 
 CREATE TABLE IF NOT EXISTS commands (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -176,235 +119,41 @@ CREATE TABLE IF NOT EXISTS commands (
     command_type TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'PENDENTE'
         CHECK (status IN ('PENDENTE', 'EXECUTADO', 'ERRO')),
-    created_at DATETIME NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     executed_at DATETIME,
     error_message TEXT,
-    -- Comando pendente só com tipo do catálogo; histórico pode guardar tipos antigos
-    CHECK (
-        status <> 'PENDENTE'
-        OR command_type IN ('TRAVAR_VALVULA', 'DESTRAVAR_VALVULA')
-    ),
-    FOREIGN KEY(device_id)
-        REFERENCES devices(device_id)
-        ON UPDATE CASCADE
-        ON DELETE RESTRICT
-);
-
-CREATE TABLE IF NOT EXISTS alerts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    alert_id TEXT NOT NULL UNIQUE,
-    device_id TEXT NOT NULL,
-    alert_type TEXT NOT NULL
-        CHECK (alert_type IN (
-            'LACRE_VIOLADO', 'LACRE_ABERTO_EM_TRANSITO', 'LACRE_ABERTO_SEM_AUTORIZACAO',
-            'DISPOSITIVO_SEM_LACRE', 'LACRE_SEM_CILINDRO', 'LACRE_SEM_DISPOSITIVO',
-            'LACRE_REVISAO_VENCIDA', 'LACRE_REPROVADO_EM_USO',
-            'CILINDRO_SEM_CLIENTE', 'CILINDRO_SEM_LACRE', 'TESTE_HIDROSTATICO_VENCIDO',
-            'CILINDRO_REPROVADO_EM_USO',
-            'GPS_INATIVO', 'GPS_SEM_SINAL', 'POSICAO_INVALIDA', 'SAIDA_GEOCERCA',
-            'SAIDA_ROTA', 'MOVIMENTACAO_SUSPEITA', 'PARADA_PROLONGADA',
-            'BATERIA_BAIXA', 'SEM_COMUNICACAO', 'GSM_SINAL_FRACO', 'DISPOSITIVO_FALHA',
-            'DISPOSITIVO_NAO_CADASTRADO', 'CHAVE_INVALIDA',
-            'COMANDO_FALHOU', 'COMANDO_SEM_RESPOSTA', 'COMANDO_DESCONTINUADO'
-        )),
-    severity TEXT NOT NULL
-        CHECK (severity IN ('BAIXA', 'MEDIA', 'ALTA', 'CRITICA')),
-    status TEXT NOT NULL DEFAULT 'ABERTO'
-        CHECK (status IN ('ABERTO', 'EM_ANALISE', 'ENCERRADO')),
-    title TEXT NOT NULL,
-    description TEXT,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    resolved_at DATETIME,
-    resolved_by TEXT,
-    resolution_note TEXT,
-    -- Sincronização com o FluxID (separada do status de negócio)
-    sync_status TEXT NOT NULL DEFAULT 'PENDING',
-    sync_attempt_count INTEGER NOT NULL DEFAULT 0,
-    sync_last_error TEXT,
-    sync_next_attempt_at DATETIME,
-    CHECK ((status = 'ENCERRADO') = (resolved_at IS NOT NULL)),
+    -- Comando pendente só com tipo do catálogo; o histórico pode guardar tipos antigos
+    CHECK (status <> 'PENDENTE' OR command_type IN ('TRAVAR_VALVULA', 'DESTRAVAR_VALVULA')),
     FOREIGN KEY (device_id) REFERENCES devices(device_id)
+        ON UPDATE CASCADE ON DELETE RESTRICT
 );
-
-CREATE TABLE IF NOT EXISTS telemetry_queue (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    message_id TEXT NOT NULL UNIQUE,
-    device_id TEXT NOT NULL,
-    lacre_id TEXT,
-    cilindro_id TEXT,
-    latitude REAL,
-    longitude REAL,
-    speed_kmh REAL,
-    battery_percent REAL,
-    gsm_signal INTEGER,
-    payload_json TEXT,
-    last_seen_at DATETIME,
-    seal_status TEXT,
-    device_attempt_count INTEGER,
-    last_repeat_message_id TEXT,
-    error_type TEXT,
-    status TEXT NOT NULL DEFAULT 'PENDING',
-    attempt_count INTEGER NOT NULL DEFAULT 0,
-    last_error TEXT,
-    next_attempt_at DATETIME,
-
-    FOREIGN KEY(device_id)
-    REFERENCES devices(device_id)
-    ON UPDATE CASCADE
-    ON DELETE RESTRICT
-);
-
--- Busca do message_id da última posição repetida (idempotência)
-CREATE INDEX IF NOT EXISTS idx_telemetry_last_repeat_message_id
-    ON telemetry_queue(last_repeat_message_id);
-
-CREATE TABLE IF NOT EXISTS events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    message_id TEXT NOT NULL UNIQUE,
-    device_id TEXT NOT NULL,
-
-    message_type TEXT NOT NULL,
-
-    seal_status TEXT,
-
-    payload_json TEXT,
-
-    device_attempt_count INTEGER,
-
-    error_type TEXT,
-
-    status TEXT DEFAULT 'PENDING',
-
-    attempt_count INTEGER NOT NULL DEFAULT 0,
-    last_error TEXT,
-    next_attempt_at DATETIME,
-
-    FOREIGN KEY(device_id)
-    REFERENCES devices(device_id)
-    ON UPDATE CASCADE
-    ON DELETE RESTRICT
-);
-
--- events.status tracks synchronization; seal_status tracks the seal state.
-
--- Associação dispositivo → lacre → cilindro (cópia provisória do FluxID)
-CREATE TABLE IF NOT EXISTS seals (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    seal_code TEXT NOT NULL UNIQUE,
-    nfc_uid TEXT NOT NULL UNIQUE,
-    status TEXT NOT NULL DEFAULT 'EM_ESTOQUE'
-        CHECK (status IN ('EM_ESTOQUE', 'INSTALADO', 'SUSPEITA_VIOLACAO', 'ROMPIDO',
-                          'REMOVIDO', 'DANIFICADO', 'INUTILIZADO')),
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS cylinders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    cylinder_code TEXT NOT NULL UNIQUE,
-    -- Série única só dentro da empresa: a regra fica com o FluxID
-    serial_number TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'DISPONIVEL'
-        CHECK (status IN ('DISPONIVEL', 'EM_TRANSITO', 'COM_CLIENTE',
-                          'MANUTENCAO', 'EXTRAVIADO', 'INATIVO')),
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_cylinders_serial_number
-    ON cylinders (serial_number);
-
-CREATE TABLE IF NOT EXISTS seal_assignments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    device_id TEXT NOT NULL,
-    seal_code TEXT NOT NULL,
-    started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    ended_at DATETIME,
-    end_reason TEXT,
-    fluxid_id TEXT,
-    FOREIGN KEY (device_id) REFERENCES devices(device_id) ON UPDATE CASCADE ON DELETE RESTRICT,
-    FOREIGN KEY (seal_code) REFERENCES seals(seal_code) ON UPDATE CASCADE ON DELETE RESTRICT
-);
-
-CREATE TABLE IF NOT EXISTS cylinder_assignments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    seal_code TEXT NOT NULL,
-    cylinder_code TEXT NOT NULL,
-    started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    ended_at DATETIME,
-    end_reason TEXT,
-    fluxid_id TEXT,
-    FOREIGN KEY (seal_code) REFERENCES seals(seal_code) ON UPDATE CASCADE ON DELETE RESTRICT,
-    FOREIGN KEY (cylinder_code) REFERENCES cylinders(cylinder_code) ON UPDATE CASCADE ON DELETE RESTRICT
-);
-
--- Um vínculo ativo por vez (RN04, RN05)
-CREATE UNIQUE INDEX IF NOT EXISTS uq_seal_assignment_device_active
-    ON seal_assignments (device_id) WHERE ended_at IS NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS uq_seal_assignment_seal_active
-    ON seal_assignments (seal_code) WHERE ended_at IS NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS uq_cylinder_assignment_seal_active
-    ON cylinder_assignments (seal_code) WHERE ended_at IS NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS uq_cylinder_assignment_cylinder_active
-    ON cylinder_assignments (cylinder_code) WHERE ended_at IS NULL;
-
--- Vínculos trazidos do FluxID: id do vínculo lá
-CREATE UNIQUE INDEX IF NOT EXISTS uq_seal_assignment_fluxid
-    ON seal_assignments (fluxid_id) WHERE fluxid_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS uq_cylinder_assignment_fluxid
-    ON cylinder_assignments (fluxid_id) WHERE fluxid_id IS NOT NULL;
-
--- Uma linha por rodada do Worker
-CREATE TABLE IF NOT EXISTS sync_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    finished_at DATETIME,
-    status TEXT NOT NULL DEFAULT 'RUNNING'
-        CHECK (status IN ('RUNNING', 'OK', 'PARCIAL', 'FALHOU')),
-    log_message TEXT
-);
-
-COMMIT;
 ```
 
-Este script já cria `devices.active` com `CHECK (active IN (0,1))`. Bancos criados por versões antigas não têm esse `CHECK`; neles, a aplicação cria na inicialização os triggers `trg_devices_active_insert` e `trg_devices_active_update`, que rejeitam outros valores com a mesma mensagem `CHECK constraint failed`. A aplicação também cria os índices `idx_devices_api_key` e `idx_telemetry_last_repeat_message_id` e adiciona as colunas `seal_status`, `device_attempt_count` e `last_repeat_message_id` (telemetria) e `device_attempt_count` (eventos) quando estão ausentes.
+# 6. Manutenção
 
-Em `telemetry_queue` e `events`, `status` e `attempt_count` controlam a sincronização feita pelo Worker; `device_attempt_count` guarda as tentativas de envio informadas pelo ESP32.
+| Comando | O que faz |
+| --- | --- |
+| `npm run backup` | Cópia consistente em `backups/` (pode rodar com a API ligada), conferida com `integrity_check`. Mantém as 14 mais novas |
+| `npm run retencao` | Mostra o que sairia: mensagens **já enviadas** há mais de 30 dias e comandos concluídos há mais de 30 dias |
+| `npm run retencao -- --confirmar` | Apaga de fato. Faça o backup antes |
+| `npm run retencao -- --arquivadas --confirmar` | Apaga também as mensagens `ARQUIVADA` (antigas, sem posição ou bateria) |
 
-O campo da API `event_type` é gravado pela aplicação na coluna `events.message_type`. O endpoint valida `seal_status` para aceitar `LOCKED`, `UNLOCKED` ou `BROKEN`; essa lista é validada na aplicação, não por um `CHECK` na tabela.
+Mensagem que ainda não chegou ao banco principal nunca é apagada.
 
-Tipos de alerta: os códigos em português do catálogo [Tipos-de-Erro.md](Tipos-de-Erro.md), garantidos por `CHECK`. Na transição, a API aceita os nomes antigos em inglês (`SEAL_BROKEN`, `GEOFENCE_EXIT`, `LOW_BATTERY`, `DEVICE_ERROR`, `COMMAND_FAILURE`, `COMMUNICATION_LOST`) e grava o código em português. Alerta `ENCERRADO` sempre tem `resolved_at` (e só ele), com quem encerrou (`resolved_by`) e o motivo (`resolution_note`).
-
-> **Severidade e status do alerta:** usam texto com os mesmos valores do FluxID (`BAIXA`/`MEDIA`/`ALTA`/`CRITICA` e `ABERTO`/`EM_ANALISE`/`ENCERRADO`). Bancos criados antes disso tinham `status_id` e `severity_id` apontando para `status(id)`; a aplicação migra a tabela `alerts` automaticamente, preservando os alertas (severidade pelo tipo; alerta já resolvido vira `ENCERRADO`). Bancos com tipos em inglês também são migrados ao iniciar: os 6 nomes antigos viram os códigos em português e um tipo desconhecido vira `DISPOSITIVO_FALHA`, com o tipo original anotado na descrição.
-
-## 9. Tabelas não existentes no banco atual
-
-- `sync_items`: não criada. O estado de cada item já fica na própria fila (`status`, tentativas, erro e próxima tentativa); não criar foi aprovado por Natã da Silva Baracho em 07/10/2026.
-- Não existe uma tabela `telemetries`; o nome real da fila é `telemetry_queue`.
-- `POST /api/v1/iot/alerts` cria alertas; `GET /api/v1/iot/alerts` lista; `PATCH /api/v1/iot/alerts/{alert_id}/status` passa para `EM_ANALISE` ou `ENCERRADO`.
-
-## 10. Verificação do schema
-
-Após criar ou abrir a base, confira as tabelas e colunas com:
+# 7. Verificação
 
 ```sql
-SELECT name
-FROM sqlite_master
-WHERE type = 'table'
-ORDER BY name;
+SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name;
+-- esperado: commands, devices, mensagens (e sqlite_sequence)
 
-PRAGMA table_info(devices);
-PRAGMA table_info(status);
-PRAGMA table_info(commands);
-PRAGMA table_info(alerts);
-PRAGMA table_info(events);
-PRAGMA table_info(telemetry_queue);
-PRAGMA index_list(telemetry_queue);
-PRAGMA table_info(seals);
-PRAGMA table_info(cylinders);
-PRAGMA index_list(seal_assignments);
-PRAGMA index_list(cylinder_assignments);
-PRAGMA index_list(devices);
-
-SELECT name FROM sqlite_master WHERE type = 'trigger';
+SELECT tipo, status, count(*) FROM mensagens GROUP BY tipo, status;
+PRAGMA integrity_check;
+PRAGMA foreign_key_check;
 ```
+
+# 8. Histórico do documento
+
+| Versão | Data | Mudança |
+| --- | --- | --- |
+| 1.0 a 1.8 | até 07/10/2026 | Modelo com filas separadas, alertas, lacres, cilindros, vínculos e registro das rodadas do Worker |
+| 2.0 | 10/10/2026 | Modelo enxuto: `devices`, `mensagens` e `commands`; migração automática com cópia de segurança |

@@ -1,1380 +1,609 @@
-import { server } from "../src/server";
-import db from "../src/database/connection";
-import openApiSpec from "../src/docs/openapi";
-import openApiFluxidSpec from "../src/docs/openapiFluxid";
+// Suíte da API do lacre (npm test).
+// Roda numa pasta temporária, com uma oxide.db nova e um recebedor de teste no
+// lugar do Supabase: o oxide.db do projeto e o banco principal não são tocados.
 
-const BASE_URL = `http://localhost:${process.env.PORT || 3000}`;
+import { execFileSync } from "child_process";
+import { createHash } from "crypto";
+import fs from "fs";
+import os from "os";
+import path from "path";
+import Database from "better-sqlite3";
+import { iniciarRecebedor } from "../src/simulador/recebedor";
 
-interface TestResult {
-  name: string;
-  passed: boolean;
-  status?: number;
-  expectedStatus?: number | number[];
-  details?: string;
-  error?: string;
-}
+const PROJETO = path.resolve(__dirname, "..");
+const PORTA = Number(process.env.TEST_PORT ?? 3197);
+const BASE = `http://127.0.0.1:${PORTA}`;
+const pasta = fs.mkdtempSync(path.join(os.tmpdir(), "oxide-teste-"));
+process.chdir(pasta);
+process.env.PORT = String(PORTA);
 
-const results: TestResult[] = [];
+const resultados: Array<{ nome: string; passou: boolean }> = [];
 
-async function runTest(
-  name: string,
-  fn: () => Promise<{ passed: boolean; status?: number; expectedStatus?: number | number[]; details?: string }>
-) {
+async function teste(nome: string, corpo: () => Promise<{ passou: boolean; detalhe?: string | undefined }> | { passou: boolean; detalhe?: string | undefined }): Promise<void> {
+  let passou = false;
+  let detalhe = "";
   try {
-    const res = await fn();
-    results.push({ name, ...res });
-    const mark = res.passed ? "✅" : "❌";
-    console.log(`${mark} ${name}${res.details ? ` (${res.details})` : ""}`);
-  } catch (err: any) {
-    results.push({ name, passed: false, error: err.message });
-    console.log(`❌ ${name} -> Error: ${err.message}`);
+    const r = await corpo();
+    passou = r.passou;
+    detalhe = r.detalhe ?? "";
+  } catch (erro) {
+    detalhe = `erro: ${erro instanceof Error ? erro.message : String(erro)}`;
   }
+  resultados.push({ nome, passou });
+  console.log(`${passou ? "✅" : "❌"} ${nome}${detalhe ? ` (${detalhe})` : ""}`);
 }
 
-async function main() {
-  console.log("==================================================");
-  console.log("  INICIANDO SUÍTE COMPLETA DE TESTES DA API ESP32");
-  console.log("==================================================\n");
+const sha = (texto: string): string => createHash("sha256").update(texto).digest("hex");
 
-  const TEST_DEVICE_ID = "DSP-TEST-AUTORUN";
-  const TEST_API_KEY = "key-test-autorun-12345";
-  const INACTIVE_DEVICE_ID = "DSP-TEST-INACTIVE";
-  const INACTIVE_API_KEY = "key-test-inactive-12345";
-  const AUTOCREATE_DEVICE_ID = "DSP-TEST-AUTOCREATE";
-  const TEST_CMD_ID = "CMD-TEST-AUTORUN-001";
-  const TEST_ALT_ID = "ALT-TEST-AUTORUN-001";
-
-  // Pre-cleanup in case of dirty database
-  db.prepare("DELETE FROM cylinder_assignments WHERE seal_code LIKE 'LCR-TEST%' OR cylinder_code LIKE 'CIL-TEST%'").run();
-  db.prepare("DELETE FROM seal_assignments WHERE device_id LIKE 'DSP-TEST%' OR seal_code LIKE 'LCR-TEST%'").run();
-  db.prepare("DELETE FROM seals WHERE seal_code LIKE 'LCR-TEST%'").run();
-  db.prepare("DELETE FROM cylinders WHERE cylinder_code LIKE 'CIL-TEST%'").run();
-  db.prepare("DELETE FROM alerts WHERE device_id LIKE 'DSP-TEST%'").run();
-  db.prepare("DELETE FROM commands WHERE device_id LIKE 'DSP-TEST%'").run();
-  db.prepare("DELETE FROM telemetry_queue WHERE device_id LIKE 'DSP-TEST%'").run();
-  db.prepare("DELETE FROM events WHERE device_id LIKE 'DSP-TEST%'").run();
-  db.prepare("DELETE FROM devices WHERE device_id LIKE 'DSP-TEST%'").run();
-
-  // Create inactive device for testing auth 403
-  db.prepare(`
-    INSERT INTO devices (device_id, api_key, firmware_version, active)
-    VALUES (?, ?, '1.0.0', 0)
-  `).run(INACTIVE_DEVICE_ID, INACTIVE_API_KEY);
-
-  // Group 1: General & Documentation
-  console.log("\n--- [1] Geral & Documentação ---");
-
-  await runTest("GET / (Status da API)", async () => {
-    const res = await fetch(`${BASE_URL}/`);
-    const text = await res.text();
-    const passed = res.status === 200 && text.includes("API ESP32 Online");
-    return { passed, status: res.status, expectedStatus: 200, details: text };
+// Roda um script do projeto noutra pasta (migração e manutenção)
+function rodar(script: string, cwd: string, args: string[] = [], env: Record<string, string> = {}): string {
+  return execFileSync(process.execPath, ["--require", path.join(PROJETO, "node_modules", "ts-node", "register"), path.join(PROJETO, script), ...args], {
+    cwd, encoding: "utf8", env: { ...process.env, TS_NODE_PROJECT: path.join(PROJETO, "tsconfig.json"), ...env }
   });
+}
 
-  await runTest("GET /api-docs/ (Swagger UI HTML)", async () => {
-    const res = await fetch(`${BASE_URL}/api-docs/`);
-    const text = await res.text();
-    const passed = res.status === 200 && text.includes("swagger-ui");
-    return { passed, status: res.status, expectedStatus: 200, details: "Swagger UI carregado" };
+async function main(): Promise<void> {
+  const recebedor = await iniciarRecebedor();
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const { server } = require("../src/server") as typeof import("../src/server");
+  const db = (require("../src/database/connection") as typeof import("../src/database/connection")).default;
+  const { runCycle } = require("../src/worker/runner") as typeof import("../src/worker/runner");
+  const { loadWorkerConfig } = require("../src/worker/config") as typeof import("../src/worker/config");
+  const openApiSpec = (require("../src/docs/openapi") as typeof import("../src/docs/openapi")).default as any;
+  /* eslint-enable @typescript-eslint/no-require-imports */
+
+  const api = async (metodo: string, rota: string, corpo?: unknown, chave?: string, cabecalho = "X-API-Key") => {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (chave) headers[cabecalho] = chave;
+    const init: RequestInit = { method: metodo, headers };
+    if (corpo !== undefined) init.body = typeof corpo === "string" ? corpo : JSON.stringify(corpo);
+    const res = await fetch(`${BASE}${rota}`, init);
+    return { status: res.status, json: (await res.json().catch(() => null)) as any };
+  };
+  const umaLinha = <T>(sql: string, ...p: unknown[]): T => db.prepare(sql).get(...p) as T;
+  const total = (onde = "1=1", ...p: unknown[]): number => umaLinha<{ n: number }>(`SELECT count(*) AS n FROM mensagens WHERE ${onde}`, ...p).n;
+  const dados = (id: string): any => JSON.parse(umaLinha<{ payload_json: string }>("SELECT payload_json FROM mensagens WHERE message_id = ?", id).payload_json);
+  const alertas = (device: string, tipo: string): number =>
+    total("device_id = ? AND tipo = 'ALERTA' AND json_extract(payload_json, '$.alert_type') = ?", device, tipo);
+
+  const DEV = "DSP-TEST-1";
+  const KEY = "key-test-1";
+  const OUTRO = "DSP-TEST-2";
+  const OUTRA_KEY = "key-test-2";
+  const POS = { latitude: -7.21, longitude: -39.31, battery_percent: 80 };
+  const tel = (id: string, extra: Record<string, unknown> = {}, device = DEV, key = KEY) =>
+    api("POST", "/api/v1/iot/telemetries", { message_id: id, device_id: device, ...POS, ...extra }, key);
+
+  console.log(`\nSuíte da API do lacre — pasta ${pasta}\n`);
+
+  // ------------------------------------------------------------- [1] geral
+  console.log("--- [1] Geral, documentação e banco ---");
+  await teste("GET / -> 200", async () => {
+    const res = await fetch(`${BASE}/`);
+    return { passou: res.status === 200 && (await res.text()).includes("API ESP32 Online") };
   });
-
-  await runTest("GET /api-docs/swagger-ui-init.js (OpenAPI Spec)", async () => {
-    const res = await fetch(`${BASE_URL}/api-docs/swagger-ui-init.js`);
-    const text = await res.text();
-    const passed = res.status === 200 && text.includes("API ESP32");
-    return { passed, status: res.status, expectedStatus: 200, details: "Contém título 'API ESP32'" };
+  await teste("GET /api-docs/ -> 200 (Swagger)", async () => {
+    const res = await fetch(`${BASE}/api-docs/`);
+    return { passou: res.status === 200 };
   });
-
-  await runTest("GET /api-docs-fluxid/ (proposta da API do frontend) -> 200 e cada página com o seu conteúdo", async () => {
-    const page = await fetch(`${BASE_URL}/api-docs-fluxid/`);
-    const fluxidInit = await (await fetch(`${BASE_URL}/api-docs-fluxid/swagger-ui-init.js`)).text();
-    const oxideInit = await (await fetch(`${BASE_URL}/api-docs/swagger-ui-init.js`)).text();
-    const passed =
-      page.status === 200 &&
-      fluxidInit.includes("PROPOSTA") && fluxidInit.includes("query-cylinders") &&
-      oxideInit.includes("API ESP32") && !oxideInit.includes("PROPOSTA");
-    return { passed, status: page.status, expectedStatus: 200, details: "proposta e API atual em páginas separadas" };
-  });
-
-  await runTest("Proposta FluxID: toda função tem grupo declarado e ainda não existe rota /api/v1/app", async () => {
-    const spec = openApiFluxidSpec as any;
-    const declared = new Set((spec.tags ?? []).map((tag: any) => tag.name));
-    const semGrupo = Object.entries<any>(spec.paths)
-      .filter(([, ops]) => !Object.values<any>(ops).every(op => (op.tags ?? []).length > 0 && op.tags.every((t: string) => declared.has(t))))
-      .map(([path]) => path);
-    const res = await fetch(`${BASE_URL}/api/v1/app/query-cylinders`, { method: "POST" });
-    const passed = semGrupo.length === 0 && Object.keys(spec.paths).length === 21 && res.status === 404;
-    return { passed, status: res.status, expectedStatus: 404, details: `${Object.keys(spec.paths).length} funções; sem grupo: ${semGrupo.join(",") || "nenhuma"}` };
-  });
-
-  await runTest("Swagger: toda rota tem um grupo declarado (sem grupo default)", async () => {
-    const spec = openApiSpec as any;
-    const declared = new Set((spec.tags ?? []).map((tag: any) => tag.name));
+  await teste("Swagger: toda rota tem um grupo declarado", () => {
+    const declarados = new Set(openApiSpec.tags.map((t: any) => t.name));
     const semGrupo: string[] = [];
-    for (const [path, operations] of Object.entries<any>(spec.paths)) {
-      for (const [method, operation] of Object.entries<any>(operations)) {
-        const tags: string[] = operation.tags ?? [];
-        if (tags.length === 0 || !tags.every(tag => declared.has(tag))) {
-          semGrupo.push(`${method.toUpperCase()} ${path}`);
-        }
+    for (const [rota, ops] of Object.entries<any>(openApiSpec.paths)) {
+      for (const [metodo, op] of Object.entries<any>(ops)) {
+        if (!op.tags?.length || !op.tags.every((t: string) => declarados.has(t))) semGrupo.push(`${metodo} ${rota}`);
       }
     }
-    return { passed: semGrupo.length === 0, details: semGrupo.length === 0 ? `${declared.size} grupos` : `sem grupo: ${semGrupo.join(", ")}` };
+    return { passou: semGrupo.length === 0, detalhe: `${declarados.size} grupos` };
+  });
+  await teste("Banco novo tem só 3 tabelas: commands, devices e mensagens", () => {
+    const tabelas = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as any[]).map(t => t.name).join(",");
+    return { passou: tabelas === "commands,devices,mensagens", detalhe: tabelas };
+  });
+  await teste("Rota antiga removida (/api/v1/seals) -> 404", async () => {
+    const r = await api("GET", "/api/v1/seals");
+    return { passou: r.status === 404, detalhe: String(r.status) };
   });
 
-  // Group 2: Devices
-  console.log("\n--- [2] Dispositivos (/api/v1/devices) ---");
-
-  await runTest("GET /api/v1/devices (Listar dispositivos)", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/devices`);
-    const json: any = await res.json();
-    const passed =
-      res.status === 200 &&
-      Array.isArray(json) &&
-      json.some((d: any) => d.device_id === "DSP-000001") &&
-      json.every((d: any) => !("api_key" in d));
-    return { passed, status: res.status, expectedStatus: 200, details: `Retornou ${json.length} dispositivos, sem api_key` };
+  // ------------------------------------------------------- [2] dispositivos
+  console.log("\n--- [2] Dispositivos ---");
+  await teste("POST /devices sem campos obrigatórios -> 400", async () => {
+    const r = await api("POST", "/api/v1/devices", {});
+    return { passou: r.status === 400, detalhe: r.json?.message };
+  });
+  await teste("POST /devices -> 201 (dois dispositivos de teste e um inativo)", async () => {
+    const a = await api("POST", "/api/v1/devices", { device_id: DEV, api_key: KEY, firmware_version: "1.0.0" });
+    const b = await api("POST", "/api/v1/devices", { device_id: OUTRO, api_key: OUTRA_KEY });
+    const c = await api("POST", "/api/v1/devices", { device_id: "DSP-TEST-OFF", api_key: "key-test-off", active: 0 });
+    return { passou: a.status === 201 && b.status === 201 && c.status === 201 };
+  });
+  await teste("POST /devices com device_id repetido -> 409; com api_key repetida -> 409", async () => {
+    const a = await api("POST", "/api/v1/devices", { device_id: DEV, api_key: "outra" });
+    const b = await api("POST", "/api/v1/devices", { device_id: "DSP-TEST-9", api_key: KEY });
+    return { passou: a.status === 409 && b.status === 409, detalhe: `${a.json?.message} / ${b.json?.message}` };
+  });
+  await teste("POST /devices com active inválido e firmware_version numérico -> 400", async () => {
+    const a = await api("POST", "/api/v1/devices", { device_id: "DSP-TEST-8", api_key: "k8", active: 5 });
+    const b = await api("POST", "/api/v1/devices", { device_id: "DSP-TEST-8", api_key: "k8", firmware_version: 10 });
+    return { passou: a.status === 400 && b.status === 400 };
+  });
+  await teste("GET /devices e /devices/:id não mostram api_key nem api_key_hash; inexistente -> 404", async () => {
+    const l = await api("GET", "/api/v1/devices");
+    const g = await api("GET", `/api/v1/devices/${DEV}`);
+    const n = await api("GET", "/api/v1/devices/NAO-EXISTE");
+    const limpo = (d: any) => !("api_key" in d) && !("api_key_hash" in d);
+    return { passou: l.status === 200 && l.json.every(limpo) && limpo(g.json) && g.json.device_id === DEV && n.status === 404 };
   });
 
-  await runTest("GET /api/v1/devices/:deviceId (Buscar dispositivo existente)", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/devices/DSP-000001`);
-    const json: any = await res.json();
-    const passed = res.status === 200 && json.device_id === "DSP-000001" && !("api_key" in json);
-    return { passed, status: res.status, expectedStatus: 200, details: `Device ID: ${json.device_id}, sem api_key` };
+  // ------------------------------------------------------- [3] autenticação
+  console.log("\n--- [3] Autenticação ---");
+  await teste("Sem X-API-Key -> 401; chave inválida -> 401", async () => {
+    const a = await api("POST", "/api/v1/iot/telemetries", { message_id: "M-A1", device_id: DEV, ...POS });
+    const b = await tel("M-A2", {}, DEV, "chave-inexistente");
+    return { passou: a.status === 401 && b.status === 401 && total("message_id IN ('M-A1','M-A2')") === 0, detalhe: `${a.json?.message} / ${b.json?.message}` };
+  });
+  await teste("Dispositivo inativo -> 403", async () => {
+    const r = await tel("M-A3", {}, "DSP-TEST-OFF", "key-test-off");
+    return { passou: r.status === 403, detalhe: r.json?.message };
+  });
+  await teste("Chave de outro dispositivo -> 403, nada gravado", async () => {
+    const r = await tel("M-A4", {}, DEV, OUTRA_KEY);
+    return { passou: r.status === 403 && total("message_id = 'M-A4'") === 0, detalhe: r.json?.message };
+  });
+  await teste("Dispositivo não cadastrado -> 404, sem criação automática", async () => {
+    const r = await tel("M-A5", {}, "DSP-FANTASMA", KEY);
+    return { passou: r.status === 404 && !umaLinha("SELECT 1 FROM devices WHERE device_id = 'DSP-FANTASMA'"), detalhe: r.json?.message };
+  });
+  await teste("Cabeçalho em minúsculas (x-api-key) é aceito", async () => {
+    const r = await api("POST", "/api/v1/iot/telemetries", { message_id: "M-A6", device_id: OUTRO, ...POS }, OUTRA_KEY, "x-api-key");
+    return { passou: r.status === 202 };
   });
 
-  await runTest("GET /api/v1/devices/:deviceId (Dispositivo inexistente -> 404)", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/devices/DSP-NONEXISTENT-999`);
-    const json: any = await res.json();
-    const passed = res.status === 404 && json.success === false;
-    return { passed, status: res.status, expectedStatus: 404, details: json.message };
+  // --------------------------------------------------------- [4] telemetria
+  console.log("\n--- [4] Telemetria ---");
+  await teste("Leitura válida -> 202, na fila como PENDING, com posição, bateria e gps_ok = true", async () => {
+    const r = await tel("M-T1", { seal_status: "LOCKED", speed_kmh: 30, gsm_signal: -70, satelites: 9, hdop: 0.9, attempt_count: 3 });
+    const linha = umaLinha<any>("SELECT tipo, status, attempt_count FROM mensagens WHERE message_id = 'M-T1'");
+    const d = dados("M-T1");
+    return {
+      passou: r.status === 202 && linha.tipo === "TELEMETRIA" && linha.status === "PENDING" && linha.attempt_count === 0 &&
+        d.latitude === -7.21 && d.battery_percent === 80 && d.gps_ok === true && d.satellites === 9 && d.device_attempt_count === 3 && d.origin === "lacre",
+      detalhe: `satelites aceito como satellites; attempt_count do lacre em device_attempt_count`
+    };
+  });
+  await teste("Sem message_id ou sem device_id -> 400", async () => {
+    const a = await api("POST", "/api/v1/iot/telemetries", { device_id: DEV, ...POS }, KEY);
+    return { passou: a.status === 400, detalhe: a.json?.message };
+  });
+  await teste("Sem latitude e longitude -> 400; só latitude -> 400", async () => {
+    const a = await api("POST", "/api/v1/iot/telemetries", { message_id: "M-T2", device_id: DEV, battery_percent: 80 }, KEY);
+    const b = await api("POST", "/api/v1/iot/telemetries", { message_id: "M-T3", device_id: DEV, latitude: -7.2, battery_percent: 80 }, KEY);
+    return { passou: a.status === 400 && b.status === 400 && total("message_id IN ('M-T2','M-T3')") === 0, detalhe: a.json?.message };
+  });
+  await teste("Sem battery_percent -> 400", async () => {
+    const r = await api("POST", "/api/v1/iot/telemetries", { message_id: "M-T4", device_id: DEV, latitude: -7.2, longitude: -39.3 }, KEY);
+    return { passou: r.status === 400 && total("message_id = 'M-T4'") === 0, detalhe: r.json?.message };
+  });
+  await teste("Latitude como texto -> 400; fora da faixa -> 400; bateria 150 -> 400", async () => {
+    const a = await tel("M-T5", { latitude: "-7.2" });
+    const b = await tel("M-T6", { latitude: 95 });
+    const c = await tel("M-T7", { battery_percent: 150 });
+    return { passou: a.status === 400 && b.status === 400 && c.status === 400, detalhe: `${a.json?.message} | ${b.json?.message} | ${c.json?.message}` };
+  });
+  await teste("gps_ok que não é true/false, seal_status inválido e attempt_count negativo -> 400", async () => {
+    const a = await tel("M-T8", { gps_ok: "nao" });
+    const b = await tel("M-T9", { seal_status: "ABERTO" });
+    const c = await tel("M-T10", { attempt_count: -1 });
+    return { passou: a.status === 400 && b.status === 400 && c.status === 400 };
+  });
+  await teste("JSON malformado -> 400; corpo vazio -> 400", async () => {
+    const a = await api("POST", "/api/v1/iot/telemetries", "{ isto não é json", KEY);
+    const b = await api("POST", "/api/v1/iot/telemetries", {}, KEY);
+    return { passou: a.status === 400 && b.status === 400, detalhe: `${a.status}/${b.status}` };
+  });
+  await teste("message_id repetido -> 409, sem linha nova", async () => {
+    const r = await tel("M-T1", { latitude: -7.5 });
+    return { passou: r.status === 409 && total("message_id = 'M-T1'") === 1, detalhe: r.json?.message };
+  });
+  await teste("Mesma posição e mesmo lacre -> 200, sem linha nova; só a data e a hora são atualizadas na leitura anterior", async () => {
+    const antes = total("device_id = ? AND tipo = 'TELEMETRIA'", DEV);
+    const r = await tel("M-T11", { seal_status: "LOCKED", battery_percent: 77, gsm_signal: -80 });
+    const d = dados("M-T1");
+    return {
+      passou: r.status === 200 && total("device_id = ? AND tipo = 'TELEMETRIA'", DEV) === antes && d.battery_percent === 80 && d.gsm_signal === -70 && Boolean(d.last_seen_at),
+      detalhe: r.json?.message
+    };
+  });
+  await teste("Reenvio do message_id da posição repetida -> 409", async () => {
+    const r = await tel("M-T11", { seal_status: "LOCKED" });
+    return { passou: r.status === 409 };
+  });
+  await teste("Posição nova -> 202 e nova linha", async () => {
+    const r = await tel("M-T12", { latitude: -7.22, seal_status: "LOCKED" });
+    return { passou: r.status === 202 && total("message_id = 'M-T12'") === 1 };
+  });
+  await teste("GPS sem sinal: mesma posição com gps_ok = false -> 202 e nova linha com gps_ok false", async () => {
+    const r = await tel("M-T13", { latitude: -7.22, seal_status: "LOCKED", gps_ok: false });
+    return { passou: r.status === 202 && dados("M-T13").gps_ok === false, detalhe: "última posição conhecida" };
+  });
+  await teste("status e attempt_count enviados pelo lacre não mudam a fila", async () => {
+    const r = await tel("M-T14", { latitude: -7.23, status: "SYNCED", attempt_count: 9 });
+    const linha = umaLinha<any>("SELECT status, attempt_count FROM mensagens WHERE message_id = 'M-T14'");
+    return { passou: r.status === 202 && linha.status === "PENDING" && linha.attempt_count === 0 };
+  });
+  await teste("GET /iot/messages lista as últimas mensagens, com filtro por tipo e dispositivo; tipo inválido -> 400", async () => {
+    const l = await api("GET", `/api/v1/iot/messages?type=telemetria&device_id=${DEV}&limit=3`);
+    const ruim = await api("GET", "/api/v1/iot/messages?type=xyz");
+    return { passou: l.status === 200 && l.json.length === 3 && l.json[0].message_id === "M-T14" && l.json.every((m: any) => m.type === "TELEMETRIA" && m.device_id === DEV) && ruim.status === 400 };
   });
 
-  await runTest("POST /api/v1/devices (Validação sem campos obrigatórios -> 400)", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/devices`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({})
-    });
-    const json: any = await res.json();
-    const passed = res.status === 400 && json.success === false;
-    return { passed, status: res.status, expectedStatus: 400, details: json.message };
+  // ------------------------------------------------------------ [5] eventos
+  console.log("\n--- [5] Eventos ---");
+  const evento = (id: string, extra: Record<string, unknown> = {}, key = KEY) =>
+    api("POST", "/api/v1/iot/events", { message_id: id, device_id: DEV, event_type: "startup", latitude: -7.23, longitude: -39.31, battery_percent: 80, ...extra }, key);
+  await teste("Evento sem event_type -> 400; sem posição e bateria -> 400", async () => {
+    const a = await api("POST", "/api/v1/iot/events", { message_id: "E-1", device_id: DEV, ...POS }, KEY);
+    const b = await api("POST", "/api/v1/iot/events", { message_id: "E-2", device_id: DEV, event_type: "startup" }, KEY);
+    return { passou: a.status === 400 && b.status === 400 && total("message_id IN ('E-1','E-2')") === 0, detalhe: `${a.json?.message} | ${b.json?.message}` };
+  });
+  await teste("Evento válido -> 202, gravado como EVENTO com o event_type", async () => {
+    const r = await evento("E-3");
+    return { passou: r.status === 202 && dados("E-3").event_type === "startup" && umaLinha<any>("SELECT tipo FROM mensagens WHERE message_id = 'E-3'").tipo === "EVENTO" };
+  });
+  await teste("Evento repetido -> 409; com chave de outro dispositivo -> 403; sem chave -> 401", async () => {
+    const a = await evento("E-3");
+    const b = await evento("E-4", {}, OUTRA_KEY);
+    const c = await api("POST", "/api/v1/iot/events", { message_id: "E-5", device_id: DEV, event_type: "x", ...POS });
+    return { passou: a.status === 409 && b.status === 403 && c.status === 401 };
+  });
+  await teste("Evento com a mesma posição da telemetria não é tratado como posição repetida", async () => {
+    const r = await evento("E-6");
+    return { passou: r.status === 202 && total("message_id = 'E-6'") === 1 };
   });
 
-  await runTest("POST /api/v1/devices (Cadastrar novo dispositivo -> 201)", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/devices`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        device_id: TEST_DEVICE_ID,
-        api_key: TEST_API_KEY,
-        firmware_version: "2.1.0"
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 201 && json.success === true;
-    return { passed, status: res.status, expectedStatus: 201, details: json.message };
+  // ------------------------------------------------------------ [6] alertas
+  console.log("\n--- [6] Alertas enviados pelo lacre ---");
+  const alerta = (id: string, extra: Record<string, unknown> = {}) =>
+    api("POST", "/api/v1/iot/alerts", { alert_id: id, device_id: DEV, alert_type: "GPS_INATIVO", title: "GPS não responde", latitude: -7.23, longitude: -39.31, battery_percent: 80, ...extra }, KEY);
+  await teste("Tipo fora do catálogo -> 400; severidade inválida -> 400; sem título -> 400", async () => {
+    const a = await alerta("A-1", { alert_type: "LIGAR_SIRENE" });
+    const b = await alerta("A-2", { severity: "URGENTE" });
+    const c = await alerta("A-3", { title: "" });
+    const d = await alerta("A-4", { alert_type: "toString" });
+    return { passou: [a, b, c, d].every(r => r.status === 400) };
+  });
+  await teste("Alerta sem posição e bateria -> 400", async () => {
+    const r = await api("POST", "/api/v1/iot/alerts", { alert_id: "A-5", device_id: DEV, alert_type: "GPS_INATIVO", title: "x" }, KEY);
+    return { passou: r.status === 400, detalhe: r.json?.message };
+  });
+  await teste("Alerta válido -> 201, com a severidade do catálogo", async () => {
+    const r = await alerta("A-6");
+    const d = dados("A-6");
+    return { passou: r.status === 201 && r.json.alert.severity === "ALTA" && d.alert_type === "GPS_INATIVO" && d.origin === "lacre" && d.latitude === -7.23, detalhe: `severity ${r.json?.alert?.severity}` };
+  });
+  await teste("Severidade informada é respeitada; nome antigo em inglês é convertido", async () => {
+    const a = await alerta("A-7", { severity: "BAIXA" });
+    const b = await alerta("A-8", { alert_type: "DEVICE_ERROR" });
+    return { passou: a.json?.alert?.severity === "BAIXA" && b.status === 201 && dados("A-8").alert_type === "DISPOSITIVO_FALHA", detalhe: dados("A-8").alert_type };
+  });
+  await teste("alert_id repetido -> 409", async () => {
+    const r = await alerta("A-6");
+    return { passou: r.status === 409, detalhe: r.json?.message };
   });
 
-  await runTest("POST /api/v1/devices (Dispositivo duplicado -> 409)", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/devices`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        device_id: TEST_DEVICE_ID,
-        api_key: TEST_API_KEY
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 409 && json.success === false;
-    return { passed, status: res.status, expectedStatus: 409, details: json.message };
+  // ------------------------------------------------ [7] alertas automáticos
+  console.log("\n--- [7] Alertas automáticos (saem da própria mensagem) ---");
+  const R = "DSP-TEST-R";
+  const RK = "key-test-r";
+  await api("POST", "/api/v1/devices", { device_id: R, api_key: RK });
+  let passo = 0;
+  const leitura = (extra: Record<string, unknown>) =>
+    api("POST", "/api/v1/iot/telemetries", { message_id: `M-R${++passo}`, device_id: R, latitude: -7.3 - passo / 1000, longitude: -39.4, battery_percent: 90, seal_status: "LOCKED", ...extra }, RK);
+
+  await teste("Primeira leitura normal não abre alerta", async () => {
+    await leitura({});
+    return { passou: total("device_id = ? AND tipo = 'ALERTA'", R) === 0 };
+  });
+  await teste("Bateria abaixo de 15% abre BATERIA_BAIXA (origem servidor, com posição e a mensagem de origem)", async () => {
+    await leitura({ battery_percent: 10 });
+    const linha = umaLinha<any>("SELECT message_id, payload_json FROM mensagens WHERE device_id = ? AND tipo = 'ALERTA'", R);
+    const d = JSON.parse(linha.payload_json);
+    return {
+      passou: alertas(R, "BATERIA_BAIXA") === 1 && /^AUT-/.test(linha.message_id) && d.origin === "servidor" && d.severity === "BAIXA" &&
+        d.source_message_id === "M-R2" && typeof d.latitude === "number" && d.battery_percent === 10,
+      detalhe: linha.message_id
+    };
+  });
+  await teste("Bateria continua baixa: não repete; recupera e cai de novo: novo alerta", async () => {
+    await leitura({ battery_percent: 9 });
+    const semRepetir = alertas(R, "BATERIA_BAIXA") === 1;
+    await leitura({ battery_percent: 60 });
+    await leitura({ battery_percent: 12 });
+    return { passou: semRepetir && alertas(R, "BATERIA_BAIXA") === 2, detalhe: `${alertas(R, "BATERIA_BAIXA")} alertas` };
+  });
+  await teste("Sinal abaixo de -105 dBm abre GSM_SINAL_FRACO uma vez", async () => {
+    await leitura({ battery_percent: 60, gsm_signal: -110 });
+    await leitura({ battery_percent: 60, gsm_signal: -112 });
+    return { passou: alertas(R, "GSM_SINAL_FRACO") === 1 };
+  });
+  await teste("Lacre UNLOCKED abre LACRE_ABERTO_SEM_AUTORIZACAO; BROKEN abre LACRE_VIOLADO (CRITICA)", async () => {
+    await leitura({ battery_percent: 60, seal_status: "UNLOCKED" });
+    await leitura({ battery_percent: 60, seal_status: "BROKEN" });
+    const sev = JSON.parse(umaLinha<any>("SELECT payload_json FROM mensagens WHERE device_id = ? AND json_extract(payload_json, '$.alert_type') = 'LACRE_VIOLADO'", R).payload_json).severity;
+    return { passou: alertas(R, "LACRE_ABERTO_SEM_AUTORIZACAO") === 1 && alertas(R, "LACRE_VIOLADO") === 1 && sev === "CRITICA" };
+  });
+  await teste("Lacre continua rompido: não repete; fecha (LOCKED) não alerta", async () => {
+    await leitura({ battery_percent: 60, seal_status: "BROKEN" });
+    await leitura({ battery_percent: 60, seal_status: "LOCKED" });
+    return { passou: alertas(R, "LACRE_VIOLADO") === 1 && alertas(R, "LACRE_ABERTO_SEM_AUTORIZACAO") === 1 };
+  });
+  await teste("Evento com lacre rompido também abre o alerta", async () => {
+    await api("POST", "/api/v1/iot/events", { message_id: "E-R1", device_id: R, event_type: "seal_changed", seal_status: "BROKEN", latitude: -7.4, longitude: -39.4, battery_percent: 60 }, RK);
+    return { passou: alertas(R, "LACRE_VIOLADO") === 2 };
+  });
+  await teste("Dispositivo guarda o último estado recebido (contato, posição, bateria e lacre)", async () => {
+    const d = (await api("GET", `/api/v1/devices/${R}`)).json;
+    return { passou: Boolean(d.last_contact_at) && d.last_latitude === -7.4 && d.last_battery_percent === 60 && d.last_seal_status === "BROKEN" };
   });
 
-  await runTest("POST /api/v1/devices (API Key já usada por outro dispositivo -> 409)", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/devices`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        device_id: "DSP-TEST-DUPKEY",
-        api_key: TEST_API_KEY
-      })
-    });
-    const json: any = await res.json();
-    const exists = db.prepare("SELECT 1 FROM devices WHERE device_id = 'DSP-TEST-DUPKEY'").get();
-    const passed = res.status === 409 && json.message === "API Key já está em uso" && !exists;
-    return { passed, status: res.status, expectedStatus: 409, details: json.message };
-  });
-
-  await runTest("POST /api/v1/devices (active diferente de 0/1 -> 400)", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/devices`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        device_id: "DSP-TEST-ACTIVE7",
-        api_key: "key-test-active7",
-        active: 7
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 400 && json.success === false;
-    return { passed, status: res.status, expectedStatus: 400, details: json.message };
-  });
-
-  // Group 3: Authentication & Middleware
-  console.log("\n--- [3] Autenticação & Middleware (X-API-Key) ---");
-
-  await runTest("GET /api/v1/iot/telemetries sem X-API-Key -> 401", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`);
-    const json: any = await res.json();
-    const passed = res.status === 401 && json.message === "API Key obrigatória";
-    return { passed, status: res.status, expectedStatus: 401, details: json.message };
-  });
-
-  await runTest("GET /api/v1/iot/telemetries com X-API-Key inválida -> 401", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
-      headers: { "X-API-Key": "invalid-key-xyz" }
-    });
-    const json: any = await res.json();
-    const passed = res.status === 401 && json.message === "API Key inválida";
-    return { passed, status: res.status, expectedStatus: 401, details: json.message };
-  });
-
-  await runTest("GET /api/v1/iot/telemetries com dispositivo inativo -> 403", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
-      headers: { "X-API-Key": INACTIVE_API_KEY }
-    });
-    const json: any = await res.json();
-    const passed = res.status === 403 && json.message === "Dispositivo desativado";
-    return { passed, status: res.status, expectedStatus: 403, details: json.message };
-  });
-
-  await runTest("GET /api/v1/iot/telemetries com X-API-Key válida -> 200", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
-      headers: { "X-API-Key": TEST_API_KEY }
-    });
-    const json: any = await res.json();
-    const passed = res.status === 200 && Array.isArray(json);
-    return { passed, status: res.status, expectedStatus: 200, details: `Retornou ${json.length} telemetrias` };
-  });
-
-  // Group 4: Telemetry
-  console.log("\n--- [4] Telemetria (/api/v1/iot/telemetries) ---");
-
-  await runTest("POST /api/v1/iot/telemetries sem campos obrigatórios -> 400", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({})
-    });
-    const json: any = await res.json();
-    const passed = res.status === 400 && json.success === false;
-    return { passed, status: res.status, expectedStatus: 400, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/telemetries com payload válido -> 202", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        message_id: "MSG-TEST-TEL-001",
-        device_id: TEST_DEVICE_ID,
-        latitude: -8.05,
-        longitude: -34.88,
-        speed_kmh: 45.2,
-        battery_percent: 92,
-        gsm_signal: 28,
-        last_seen_at: "2026-10-04T10:00:00Z"
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 202 && json.success === true;
-    return { passed, status: res.status, expectedStatus: 202, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/telemetries com message_id duplicado -> 409", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        message_id: "MSG-TEST-TEL-001",
-        device_id: TEST_DEVICE_ID,
-        latitude: -8.05,
-        longitude: -34.88
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 409 && json.message === "Mensagem duplicada";
-    return { passed, status: res.status, expectedStatus: 409, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/telemetries mesma posição GPS -> 200 e atualiza apenas last_seen_at", async () => {
-    const countBefore = (db.prepare("SELECT COUNT(*) as c FROM telemetry_queue WHERE device_id = ?").get(TEST_DEVICE_ID) as any).c;
-
-    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        message_id: "MSG-TEST-TEL-002",
-        device_id: TEST_DEVICE_ID,
-        latitude: -8.05,
-        longitude: -34.88
-      })
-    });
-    const json: any = await res.json();
-    const countAfter = (db.prepare("SELECT COUNT(*) as c FROM telemetry_queue WHERE device_id = ?").get(TEST_DEVICE_ID) as any).c;
-    const passed =
-      res.status === 200 &&
-      json.message === "Posição já registrada; data e hora atualizadas" &&
-      countBefore === countAfter;
-    return { passed, status: res.status, expectedStatus: 200, details: `Linhas mantidas em ${countAfter}` };
-  });
-
-  await runTest("POST /api/v1/iot/telemetries nova posição GPS -> 202 e insere nova linha", async () => {
-    const countBefore = (db.prepare("SELECT COUNT(*) as c FROM telemetry_queue WHERE device_id = ?").get(TEST_DEVICE_ID) as any).c;
-
-    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        message_id: "MSG-TEST-TEL-003",
-        device_id: TEST_DEVICE_ID,
-        latitude: -8.10,
-        longitude: -34.90
-      })
-    });
-    const json: any = await res.json();
-    const countAfter = (db.prepare("SELECT COUNT(*) as c FROM telemetry_queue WHERE device_id = ?").get(TEST_DEVICE_ID) as any).c;
-    const passed = res.status === 202 && countAfter === countBefore + 1;
-    return { passed, status: res.status, expectedStatus: 202, details: `Nova linha criada (total: ${countAfter})` };
-  });
-
-  await runTest("POST /api/v1/iot/telemetries reenvio de posição repetida -> 409", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        message_id: "MSG-TEST-TEL-002",
-        device_id: TEST_DEVICE_ID,
-        latitude: -8.05,
-        longitude: -34.88
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 409 && json.message === "Mensagem duplicada";
-    return { passed, status: res.status, expectedStatus: 409, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/telemetries grava attempt_count do ESP32 em device_attempt_count -> 202", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        message_id: "MSG-TEST-TEL-004",
-        device_id: TEST_DEVICE_ID,
-        latitude: -8.20,
-        longitude: -34.95,
-        status: "SYNCED",
-        attempt_count: 99
-      })
-    });
-    const row = db.prepare("SELECT status, attempt_count, device_attempt_count FROM telemetry_queue WHERE message_id = ?").get("MSG-TEST-TEL-004") as any;
-    const passed =
-      res.status === 202 &&
-      row?.status === "PENDING" &&
-      row?.attempt_count === 0 &&
-      row?.device_attempt_count === 99;
-    return { passed, status: res.status, expectedStatus: 202, details: `status=${row?.status}, attempt_count=${row?.attempt_count}, device_attempt_count=${row?.device_attempt_count}` };
-  });
-
-  await runTest("POST /api/v1/iot/telemetries com latitude não numérica -> 400", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        message_id: "MSG-TEST-TEL-005",
-        device_id: TEST_DEVICE_ID,
-        latitude: true,
-        longitude: -34.95
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 400 && json.success === false;
-    return { passed, status: res.status, expectedStatus: 400, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/telemetries para dispositivo inexistente -> 404", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        message_id: "MSG-TEST-TEL-006",
-        device_id: "DSP-TEST-NAO-EXISTE"
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 404 && json.message === "Dispositivo não encontrado";
-    return { passed, status: res.status, expectedStatus: 404, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/telemetries com chave de outro dispositivo -> 403", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": "auto-DSP-000001"
-      },
-      body: JSON.stringify({
-        message_id: "MSG-TEST-OTHER-KEY",
-        device_id: TEST_DEVICE_ID,
-        latitude: -8.35,
-        longitude: -34.98
-      })
-    });
-    const json: any = await res.json();
-    const row = db.prepare("SELECT 1 FROM telemetry_queue WHERE message_id = ?").get("MSG-TEST-OTHER-KEY");
-    const passed = res.status === 403 && json.message === "API Key não pertence ao dispositivo" && !row;
-    return { passed, status: res.status, expectedStatus: 403, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/telemetries com latitude fora da faixa -> 400", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        message_id: "MSG-TEST-TEL-011",
-        device_id: TEST_DEVICE_ID,
-        latitude: 91,
-        longitude: -34.9
-      })
-    });
-    const json: any = await res.json();
-    const row = db.prepare("SELECT 1 FROM telemetry_queue WHERE message_id = ?").get("MSG-TEST-TEL-011");
-    const passed = res.status === 400 && json.message === "latitude deve estar entre -90 e 90 e longitude entre -180 e 180" && !row;
-    return { passed, status: res.status, expectedStatus: 400, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/telemetries só com latitude -> 400", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        message_id: "MSG-TEST-TEL-012",
-        device_id: TEST_DEVICE_ID,
-        latitude: -8.4
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 400 && json.message === "latitude e longitude devem ser enviadas juntas";
-    return { passed, status: res.status, expectedStatus: 400, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/telemetries com seal_status inválido -> 400", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        message_id: "MSG-TEST-TEL-007",
-        device_id: TEST_DEVICE_ID,
-        latitude: -8.25,
-        longitude: -34.96,
-        seal_status: "OPEN"
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 400 && json.message === "seal_status deve ser LOCKED, UNLOCKED ou BROKEN";
-    return { passed, status: res.status, expectedStatus: 400, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/telemetries mesma posição com lacre alterado -> 202 e nova linha", async () => {
-    const send = (messageId: string, sealStatus: string) =>
-      fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-Key": TEST_API_KEY
-        },
-        body: JSON.stringify({
-          message_id: messageId,
-          device_id: TEST_DEVICE_ID,
-          latitude: -8.30,
-          longitude: -34.97,
-          seal_status: sealStatus
-        })
-      });
-
-    await send("MSG-TEST-TEL-008", "LOCKED");
-    const countBefore = (db.prepare("SELECT COUNT(*) as c FROM telemetry_queue WHERE device_id = ?").get(TEST_DEVICE_ID) as any).c;
-    const res = await send("MSG-TEST-TEL-009", "BROKEN");
-    const countAfter = (db.prepare("SELECT COUNT(*) as c FROM telemetry_queue WHERE device_id = ?").get(TEST_DEVICE_ID) as any).c;
-    const row = db.prepare("SELECT seal_status FROM telemetry_queue WHERE message_id = ?").get("MSG-TEST-TEL-009") as any;
-    const passed = res.status === 202 && countAfter === countBefore + 1 && row?.seal_status === "BROKEN";
-    return { passed, status: res.status, expectedStatus: 202, details: `seal_status=${row?.seal_status}, linhas ${countBefore} -> ${countAfter}` };
-  });
-
-  await runTest("POST /api/v1/iot/telemetries com attempt_count negativo -> 400", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        message_id: "MSG-TEST-TEL-010",
-        device_id: TEST_DEVICE_ID,
-        attempt_count: -1
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 400 && json.success === false;
-    return { passed, status: res.status, expectedStatus: 400, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/telemetries com JSON malformado -> 400", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/telemetries`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: "{ invalid json: 123"
-    });
-    const json: any = await res.json();
-    const passed = res.status === 400 && json.message === "Requisição inválida";
-    return { passed, status: res.status, expectedStatus: 400, details: json.message };
-  });
-
-  // Group 5: Events
-  console.log("\n--- [5] Eventos (/api/v1/iot/events) ---");
-
-  await runTest("POST /api/v1/iot/events sem X-API-Key -> 401", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/events`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message_id: "EVT-TEST-001", device_id: TEST_DEVICE_ID, event_type: "ALERT" })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 401 && json.message === "API Key obrigatória";
-    return { passed, status: res.status, expectedStatus: 401, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/events sem campos obrigatórios -> 400", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/events`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({ message_id: "EVT-TEST-001" })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 400 && json.success === false;
-    return { passed, status: res.status, expectedStatus: 400, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/events com seal_status inválido -> 400", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/events`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        message_id: "EVT-TEST-INV-SEAL",
-        device_id: TEST_DEVICE_ID,
-        event_type: "seal_changed",
-        seal_status: "OPEN"
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 400 && json.message.includes("seal_status deve ser LOCKED, UNLOCKED ou BROKEN");
-    return { passed, status: res.status, expectedStatus: 400, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/events grava attempt_count do ESP32 em device_attempt_count -> 202", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/events`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        message_id: "EVT-TEST-ATTEMPT",
-        device_id: TEST_DEVICE_ID,
-        event_type: "startup",
-        attempt_count: 3
-      })
-    });
-    const row = db.prepare("SELECT status, attempt_count, device_attempt_count FROM events WHERE message_id = ?").get("EVT-TEST-ATTEMPT") as any;
-    const passed =
-      res.status === 202 &&
-      row?.status === "PENDING" &&
-      row?.attempt_count === 0 &&
-      row?.device_attempt_count === 3;
-    return { passed, status: res.status, expectedStatus: 202, details: `attempt_count=${row?.attempt_count}, device_attempt_count=${row?.device_attempt_count}` };
-  });
-
-  await runTest("POST /api/v1/iot/events com payload válido -> 202", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/events`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        message_id: "EVT-TEST-VALID-001",
-        device_id: TEST_DEVICE_ID,
-        event_type: "seal_locked",
-        seal_status: "LOCKED"
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 202 && json.success === true;
-    return { passed, status: res.status, expectedStatus: 202, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/events para dispositivo não cadastrado -> 404, sem criação automática", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/events`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        message_id: "EVT-TEST-AUTOCREATE-001",
-        device_id: AUTOCREATE_DEVICE_ID,
-        event_type: "first_boot"
-      })
-    });
-    const json: any = await res.json();
-    const dev = db.prepare("SELECT * FROM devices WHERE device_id = ?").get(AUTOCREATE_DEVICE_ID);
-    const passed = res.status === 404 && json.message === "Dispositivo não encontrado" && !dev;
-    return { passed, status: res.status, expectedStatus: 404, details: `${json.message}; dispositivo criado: ${Boolean(dev)}` };
-  });
-
-  await runTest("POST /api/v1/iot/events com chave de outro dispositivo -> 403", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/events`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": "auto-DSP-000001"
-      },
-      body: JSON.stringify({
-        message_id: "EVT-TEST-OTHER-KEY",
-        device_id: TEST_DEVICE_ID,
-        event_type: "startup"
-      })
-    });
-    const json: any = await res.json();
-    const row = db.prepare("SELECT 1 FROM events WHERE message_id = ?").get("EVT-TEST-OTHER-KEY");
-    const passed = res.status === 403 && json.message === "API Key não pertence ao dispositivo" && !row;
-    return { passed, status: res.status, expectedStatus: 403, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/events com message_id duplicado -> 409", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/events`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        message_id: "EVT-TEST-VALID-001",
-        device_id: TEST_DEVICE_ID,
-        event_type: "seal_locked"
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 409 && json.message === "Mensagem duplicada";
-    return { passed, status: res.status, expectedStatus: 409, details: json.message };
-  });
-
-  // Group 6: Commands
-  console.log("\n--- [6] Comandos (/api/v1/iot/commands) ---");
-
-  // Seed a pending command
-  db.prepare(`
-    INSERT INTO commands (command_id, device_id, command_type, status, created_at)
-    VALUES (?, ?, 'TRAVAR_VALVULA', 'PENDENTE', datetime('now'))
-  `).run(TEST_CMD_ID, TEST_DEVICE_ID);
-
-  await runTest("Banco rejeita comando PENDENTE com tipo fora do catálogo", async () => {
-    let erro = "";
+  // ----------------------------------------------------- [8] Worker e fila
+  console.log("\n--- [8] Worker: envio ao banco principal ---");
+  await teste("Sem SUPABASE_IOT_URL e SUPABASE_SERVICE_KEY o Worker não sobe", () => {
+    delete process.env.SUPABASE_IOT_URL;
+    delete process.env.SUPABASE_SERVICE_KEY;
     try {
-      db.prepare(`
-        INSERT INTO commands (command_id, device_id, command_type, status, created_at)
-        VALUES ('CMD-TEST-TIPO-INVALIDO', ?, 'LIGAR_SIRENE', 'PENDENTE', datetime('now'))
-      `).run(TEST_DEVICE_ID);
-    } catch (error: any) {
-      erro = error.message;
+      loadWorkerConfig();
+      return { passou: false };
+    } catch (erro) {
+      return { passou: /SUPABASE_IOT_URL/.test((erro as Error).message), detalhe: (erro as Error).message };
     }
-    const passed = erro.includes("CHECK constraint failed");
-    return { passed, details: erro || "inserção aceita indevidamente" };
+  });
+  process.env.SUPABASE_IOT_URL = recebedor.url;
+  process.env.SUPABASE_SERVICE_KEY = recebedor.chave;
+  const config = loadWorkerConfig();
+  const worker = (cadastro = false) => runCycle(config, { withCadastro: cadastro });
+
+  await teste("Banco principal fora do ar: rodada FALHOU, fila intacta, nenhuma tentativa gasta", async () => {
+    const pendentes = total("status = 'PENDING'");
+    recebedor.foraDoAr = true;
+    const r = await worker();
+    recebedor.foraDoAr = false;
+    return { passou: r.status === "FALHOU" && total("status = 'PENDING'") === pendentes && total("attempt_count > 0") === 0 && total("status = 'PROCESSING'") === 0, detalhe: r.erro };
+  });
+  await teste("Chave recusada pelo banco principal (401): rodada FALHOU, nenhuma tentativa gasta", async () => {
+    const r = await runCycle({ ...config, destinoKey: "chave-errada" }, { withCadastro: false });
+    return { passou: r.status === "FALHOU" && total("attempt_count > 0") === 0, detalhe: r.erro };
+  });
+  await teste("Envio: mensagens aceitas ficam SYNCED; a recusada para com o motivo; a sem resposta ganha nova tentativa", async () => {
+    recebedor.recusar = m => (m.message_id === "E-3" ? "dispositivo sem lacre no cadastro" : null);
+    recebedor.semResposta.add("A-6");
+    const antes = total("status = 'PENDING'");
+    const r = await worker();
+    recebedor.recusar = () => null;
+    const recusada = umaLinha<any>("SELECT status, next_attempt_at, last_error, attempt_count FROM mensagens WHERE message_id = 'E-3'");
+    const muda = umaLinha<any>("SELECT status, next_attempt_at, attempt_count FROM mensagens WHERE message_id = 'A-6'");
+    return {
+      passou: r.status === "PARCIAL" && r.enviadas === antes - 2 && r.paradas === 1 && r.com_erro === 1 &&
+        recusada.status === "ERROR" && recusada.next_attempt_at === null && recusada.last_error === "dispositivo sem lacre no cadastro" &&
+        muda.status === "ERROR" && muda.next_attempt_at !== null && muda.attempt_count === 1 &&
+        recebedor.mensagens.size === antes - 2 && total("status = 'SYNCED'") === antes - 2,
+      detalhe: `${r.enviadas} enviadas, 1 parada, 1 com nova tentativa`
+    };
+  });
+  await teste("O que chegou ao banco principal é a mensagem validada (tipo, origem, posição, bateria)", () => {
+    const m = recebedor.mensagens.get("M-T12") as any;
+    return { passou: m?.type === "TELEMETRIA" && m.origin === "lacre" && m.device_id === DEV && m.latitude === -7.22 && m.battery_percent === 80 && Boolean(m.received_at) };
+  });
+  await teste("GET /sync/problems mostra as duas com erro e a situação de cada uma", async () => {
+    const r = await api("GET", "/api/v1/sync/problems");
+    const porId = Object.fromEntries(r.json.itens.map((i: any) => [i.message_id, i.situacao]));
+    return { passou: r.json.itens.length === 2 && /parada/.test(porId["E-3"]) && /nova tentativa/.test(porId["A-6"]), detalhe: JSON.stringify(porId) };
+  });
+  await teste("Depois da 6ª falha a mensagem para (sem próxima tentativa)", async () => {
+    db.prepare("UPDATE mensagens SET attempt_count = 5, next_attempt_at = datetime('now', '-1 minute') WHERE message_id = 'A-6'").run();
+    await worker();
+    const l = umaLinha<any>("SELECT status, next_attempt_at, attempt_count FROM mensagens WHERE message_id = 'A-6'");
+    recebedor.semResposta.clear();
+    return { passou: l.status === "ERROR" && l.next_attempt_at === null && l.attempt_count === 6, detalhe: `${l.attempt_count} tentativas` };
+  });
+  await teste("POST /sync/retry: sem message_id -> 400; inexistente -> 404; com erro -> 200 e a mensagem chega", async () => {
+    const a = await api("POST", "/api/v1/sync/retry", {});
+    const b = await api("POST", "/api/v1/sync/retry", { message_id: "NAO-EXISTE" });
+    const c = await api("POST", "/api/v1/sync/retry", { message_id: "A-6" });
+    const d = await api("POST", "/api/v1/sync/retry", { message_id: "E-3" });
+    await worker();
+    return { passou: a.status === 400 && b.status === 404 && c.status === 200 && d.status === 200 && total("status = 'ERROR'") === 0 && recebedor.mensagens.has("A-6") && recebedor.mensagens.has("E-3") };
+  });
+  await teste("Reenviar tudo de novo não duplica no banco principal", async () => {
+    const noDestino = recebedor.mensagens.size;
+    db.prepare("UPDATE mensagens SET status = 'PENDING' WHERE status = 'SYNCED'").run();
+    const r = await worker();
+    return { passou: r.status === "OK" && recebedor.mensagens.size === noDestino && total("status <> 'SYNCED'") === 0, detalhe: `${r.enviadas} reenviadas, ${noDestino} no destino` };
+  });
+  await teste("Posição repetida depois do envio devolve a leitura à fila e o banco principal recebe a nova data", async () => {
+    const r = await tel("M-T15", { latitude: -7.23 });
+    const voltou = umaLinha<any>("SELECT status FROM mensagens WHERE message_id = 'M-T14'").status;
+    await worker();
+    return { passou: r.status === 200 && voltou === "PENDING" && Boolean((recebedor.mensagens.get("M-T14") as any).last_seen_at) };
+  });
+  await teste("Lote: mais mensagens que o tamanho do lote são enviadas em várias chamadas", async () => {
+    for (let i = 0; i < 5; i++) await tel(`M-L${i}`, { latitude: -7.5 - i / 100 });
+    recebedor.chamadas.length = 0;
+    const r = await runCycle({ ...config, batchSize: 2 }, { withCadastro: false });
+    return { passou: r.enviadas === 5 && recebedor.chamadas.filter(c => c === "push_messages").length === 3, detalhe: "5 mensagens em 3 lotes de até 2" };
+  });
+  await teste("GET /sync/status traz a fila e a última rodada", async () => {
+    const r = await api("GET", "/api/v1/sync/status");
+    return { passou: r.status === 200 && r.json.fila.pendentes === 0 && r.json.fila.sincronizadas > 20 && r.json.ultima_rodada?.resultado?.status === "OK" };
   });
 
-  await runTest("Banco aceita histórico com tipo antigo e rejeita status desconhecido", async () => {
-    db.prepare(`
-      INSERT INTO commands (command_id, device_id, command_type, status, created_at, executed_at)
-      VALUES ('CMD-TEST-HISTORICO', ?, 'LOCK_VALVE', 'EXECUTADO', datetime('now'), datetime('now'))
-    `).run(TEST_DEVICE_ID);
-    let erro = "";
-    try {
-      db.prepare(`
-        INSERT INTO commands (command_id, device_id, command_type, status, created_at)
-        VALUES ('CMD-TEST-STATUS', ?, 'TRAVAR_VALVULA', 'FALHOU', datetime('now'))
-      `).run(TEST_DEVICE_ID);
-    } catch (error: any) {
-      erro = error.message;
-    }
-    const historico = db.prepare("SELECT 1 FROM commands WHERE command_id = 'CMD-TEST-HISTORICO'").get();
-    const passed = Boolean(historico) && erro.includes("CHECK constraint failed");
-    return { passed, details: `histórico aceito: ${Boolean(historico)}; status FALHOU: ${erro || "aceito indevidamente"}` };
+  // --------------------------------------- [9] cadastro e comandos do principal
+  console.log("\n--- [9] Cadastro e comandos vindos do banco principal ---");
+  const H = "DSP-TEST-H";
+  const HK = "key-test-hash";
+  await teste("Cadastro: dispositivo novo chega só com o hash da chave e autentica com ela", async () => {
+    recebedor.dispositivos.push({ device_id: H, api_key_hash: sha(HK), active: true, firmware_version: "2.0.0" });
+    const r = await worker(true);
+    const d = umaLinha<any>("SELECT api_key, api_key_hash, firmware_version FROM devices WHERE device_id = ?", H);
+    const ok = await api("POST", "/api/v1/iot/telemetries", { message_id: "M-H1", device_id: H, ...POS }, HK);
+    const texto = await api("POST", "/api/v1/iot/telemetries", { message_id: "M-H2", device_id: H, ...POS }, d.api_key);
+    return { passou: r.dispositivos?.criados === 1 && d.api_key_hash === sha(HK) && ok.status === 202 && texto.status === 401, detalhe: "a chave em texto guardada não autentica" };
+  });
+  await teste("Cadastro: dispositivo que já existia recebe o hash e a chave em texto antiga deixa de valer", async () => {
+    recebedor.dispositivos.push({ device_id: OUTRO, api_key_hash: sha("chave-nova-do-principal"), active: true });
+    await worker(true);
+    const antiga = await api("POST", "/api/v1/iot/telemetries", { message_id: "M-H3", device_id: OUTRO, ...POS, latitude: -7.9 }, OUTRA_KEY);
+    const nova = await api("POST", "/api/v1/iot/telemetries", { message_id: "M-H4", device_id: OUTRO, ...POS, latitude: -7.9 }, "chave-nova-do-principal");
+    return { passou: antiga.status === 401 && nova.status === 202, detalhe: `antiga ${antiga.status}, nova ${nova.status}` };
+  });
+  await teste("Cadastro: dispositivo desativado no banco principal -> 403; nada é apagado", async () => {
+    recebedor.dispositivos.find(d => d.device_id === H)!.active = false;
+    await worker(true);
+    const r = await api("POST", "/api/v1/iot/telemetries", { message_id: "M-H5", device_id: H, ...POS }, HK);
+    recebedor.dispositivos.find(d => d.device_id === H)!.active = true;
+    await worker(true);
+    return { passou: r.status === 403 && Boolean(umaLinha("SELECT 1 FROM devices WHERE device_id = ?", DEV)) };
+  });
+  await teste("Comandos: sem chave -> 401; chave de outro -> 403", async () => {
+    const a = await api("GET", `/api/v1/iot/commands/${DEV}`);
+    const b = await api("GET", `/api/v1/iot/commands/${DEV}`, undefined, HK);
+    return { passou: a.status === 401 && b.status === 403 };
+  });
+  await teste("Comando criado no banco principal chega ao lacre; tipo desconhecido e dispositivo desconhecido viram aviso", async () => {
+    recebedor.comandos.push(
+      { command_id: "CMD-T1", device_id: DEV, command_type: "TRAVAR_VALVULA" },
+      { command_id: "CMD-T2", device_id: DEV, command_type: "LIGAR_SIRENE" },
+      { command_id: "CMD-T3", device_id: "DSP-FANTASMA", command_type: "TRAVAR_VALVULA" });
+    const r = await worker();
+    await worker();
+    const l = await api("GET", `/api/v1/iot/commands/${DEV}`, undefined, KEY);
+    return { passou: r.comandos_novos === 1 && r.avisos.length === 2 && r.status === "PARCIAL" && l.json.length === 1 && l.json[0].command_id === "CMD-T1", detalhe: "não duplica na rodada seguinte" };
+  });
+  await teste("Confirmação: status inválido -> 400; comando inexistente -> 404", async () => {
+    const a = await api("POST", "/api/v1/iot/commands/confirm", { command_id: "CMD-T1", device_id: DEV, status: "FEITO" }, KEY);
+    const b = await api("POST", "/api/v1/iot/commands/confirm", { command_id: "CMD-NAO", device_id: DEV, status: "EXECUTADO" }, KEY);
+    return { passou: a.status === 400 && b.status === 404 };
+  });
+  await teste("Confirmação com ERRO -> 200, sai dos pendentes e o banco principal recebe o resultado; de novo -> 409", async () => {
+    const c = await api("POST", "/api/v1/iot/commands/confirm", { command_id: "CMD-T1", device_id: DEV, status: "ERRO", error_message: "motor travado" }, KEY);
+    const de_novo = await api("POST", "/api/v1/iot/commands/confirm", { command_id: "CMD-T1", device_id: DEV, status: "EXECUTADO" }, KEY);
+    const pend = await api("GET", `/api/v1/iot/commands/${DEV}`, undefined, KEY);
+    await worker();
+    const m = recebedor.mensagens.get("CONF-CMD-T1") as any;
+    return { passou: c.status === 200 && de_novo.status === 409 && pend.json.length === 0 && m?.command_status === "ERRO" && m.error_message === "motor travado" && recebedor.comandos[0]?.confirmado === "ERRO" };
+  });
+  await teste("Banco recusa comando PENDENTE com tipo fora do catálogo e status desconhecido", () => {
+    const tentar = (sql: string): boolean => { try { db.prepare(sql).run(); return false; } catch { return true; } };
+    return {
+      passou: tentar(`INSERT INTO commands (command_id, device_id, command_type) VALUES ('CMD-X1', '${DEV}', 'ABRIR_TUDO')`) &&
+        tentar(`INSERT INTO commands (command_id, device_id, command_type, status) VALUES ('CMD-X2', '${DEV}', 'TRAVAR_VALVULA', 'FEITO')`)
+    };
   });
 
-  await runTest("GET /api/v1/iot/commands/:deviceId sem X-API-Key -> 401", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/commands/${TEST_DEVICE_ID}`);
-    const json: any = await res.json();
-    const passed = res.status === 401;
-    return { passed, status: res.status, expectedStatus: 401, details: json.message };
+  // ------------------------------------------------------------- [10] saúde
+  console.log("\n--- [10] Saúde ---");
+  await teste("GET /health -> 200 com a fila e o Worker, sem mostrar endereço nem chave", async () => {
+    const r = await api("GET", "/health");
+    const texto = JSON.stringify(r.json);
+    return { passou: r.status === 200 && r.json.status === "OK" && typeof r.json.fila.pendentes === "number" && r.json.banco_principal === "CONFIGURADO" && !texto.includes(recebedor.chave) && !texto.includes("127.0.0.1") };
+  });
+  await teste("GET /health -> 503 quando a última rodada do Worker falhou", async () => {
+    recebedor.foraDoAr = true;
+    await worker();
+    const r = await api("GET", "/health");
+    recebedor.foraDoAr = false;
+    await worker();
+    return { passou: r.status === 503 && r.json.status === "DEGRADADO" && r.json.worker.resultado === "FALHOU" };
   });
 
-  await runTest("GET /api/v1/iot/commands/:deviceId com chave de outro dispositivo -> 403", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/commands/${TEST_DEVICE_ID}`, {
-      headers: { "X-API-Key": "auto-DSP-000001" } // Key of DSP-000001
-    });
-    const json: any = await res.json();
-    const passed = res.status === 403 && json.message === "API Key não pertence ao dispositivo";
-    return { passed, status: res.status, expectedStatus: 403, details: json.message };
+  // ------------------------------------------ [11] migração e manutenção
+  console.log("\n--- [11] Migração do modelo antigo e manutenção ---");
+  await teste("Banco no modelo antigo: cópia de segurança; leitura completa vai para a fila, incompleta fica ARQUIVADA; tabelas antigas removidas", () => {
+    const antiga = fs.mkdtempSync(path.join(os.tmpdir(), "oxide-antigo-"));
+    const velho = new Database(path.join(antiga, "oxide.db"));
+    velho.exec(`
+      CREATE TABLE devices (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL UNIQUE, api_key TEXT NOT NULL,
+        firmware_version TEXT, active INTEGER NOT NULL DEFAULT 1, device_status_id INTEGER, valve_status_id INTEGER, seal_status_id INTEGER);
+      CREATE TABLE status (id INTEGER PRIMARY KEY, code TEXT);
+      CREATE TABLE telemetry_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id TEXT UNIQUE, device_id TEXT, latitude REAL, longitude REAL,
+        battery_percent REAL, seal_status TEXT, gsm_signal INTEGER, status TEXT DEFAULT 'PENDING');
+      CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id TEXT UNIQUE, device_id TEXT, message_type TEXT, status TEXT);
+      CREATE TABLE alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, alert_id TEXT UNIQUE, device_id TEXT, alert_type TEXT, title TEXT);
+      CREATE TABLE commands (id INTEGER PRIMARY KEY AUTOINCREMENT, command_id TEXT NOT NULL UNIQUE, device_id TEXT NOT NULL, command_type TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'PENDENTE', created_at DATETIME NOT NULL, executed_at DATETIME, error_message TEXT);
+      CREATE TABLE seals (id INTEGER PRIMARY KEY, seal_code TEXT);
+      CREATE TABLE cylinders (id INTEGER PRIMARY KEY, cylinder_code TEXT);
+      CREATE TABLE seal_assignments (id INTEGER PRIMARY KEY, device_id TEXT, seal_code TEXT);
+      CREATE TABLE cylinder_assignments (id INTEGER PRIMARY KEY, seal_code TEXT, cylinder_code TEXT);
+      CREATE TABLE sync_logs (id INTEGER PRIMARY KEY, status TEXT);
+      INSERT INTO devices (device_id, api_key) VALUES ('DSP-000001', 'auto-DSP-000001');
+      INSERT INTO telemetry_queue (message_id, device_id, latitude, longitude, battery_percent, seal_status, status) VALUES
+        ('MSG-OLD-1', 'DSP-000001', -7.1, -39.1, 57, 'LOCKED', 'SYNCED'), ('MSG-OLD-2', 'DSP-000001', -7.2, -39.2, NULL, NULL, 'PENDING'),
+        ('MSG-OLD-3', 'DSP-000001', NULL, NULL, 80, NULL, 'PENDING');
+      INSERT INTO events (message_id, device_id, message_type) VALUES ('EVT-OLD-1', 'DSP-000001', 'startup');
+      INSERT INTO alerts (alert_id, device_id, alert_type, title) VALUES ('ALT-OLD-1', 'DSP-000001', 'LACRE_VIOLADO', 'antigo');
+      INSERT INTO commands (command_id, device_id, command_type, created_at) VALUES ('CMD-OLD-1', 'DSP-000001', 'TRAVAR_VALVULA', '2026-10-01 10:00:00');
+    `);
+    velho.close();
+
+    const saida = rodar("src/database/connection.ts", antiga);
+    const novo = new Database(path.join(antiga, "oxide.db"), { readonly: true });
+    const tabelas = (novo.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as any[]).map(t => t.name).join(",");
+    const arquivadas = (novo.prepare("SELECT count(*) AS n FROM mensagens WHERE status = 'ARQUIVADA'").get() as any).n;
+    const completa = novo.prepare("SELECT status, payload_json FROM mensagens WHERE message_id = 'MSG-OLD-1'").get() as any;
+    const antigaMsg = JSON.parse(completa.payload_json);
+    const semBateria = (novo.prepare("SELECT status FROM mensagens WHERE message_id = 'MSG-OLD-2'").get() as any).status;
+    const colunas = (novo.prepare("PRAGMA table_info(devices)").all() as any[]).map(c => c.name);
+    const dispositivo = novo.prepare("SELECT api_key FROM devices WHERE device_id = 'DSP-000001'").get() as any;
+    const comando = (novo.prepare("SELECT count(*) AS n FROM commands").get() as any).n;
+    novo.close();
+    const copias = fs.readdirSync(antiga).filter(f => f.includes(".bak-antes-da-fila-unica-"));
+    const copia = new Database(path.join(antiga, copias[0]!), { readonly: true });
+    const naCopia = (copia.prepare("SELECT count(*) AS n FROM telemetry_queue").get() as any).n;
+    copia.close();
+    const segundaVez = rodar("src/database/connection.ts", antiga);
+
+    return {
+      passou: tabelas === "commands,devices,mensagens" && arquivadas === 4 && completa.status === "PENDING" && semBateria === "ARQUIVADA" &&
+        antigaMsg.type === "TELEMETRIA" && antigaMsg.latitude === -7.1 && antigaMsg.battery_percent === 57 && antigaMsg.gps_ok === true &&
+        antigaMsg.seal_status === "LOCKED" && antigaMsg.legacy === true && !("gsm_signal" in antigaMsg) &&
+        dispositivo.api_key === "auto-DSP-000001" && comando === 1 &&
+        !colunas.includes("device_status_id") && colunas.includes("last_contact_at") && copias.length === 1 && naCopia === 3 &&
+        saida.includes("Cópia de segurança") && !segundaVez.includes("Cópia de segurança"),
+      detalhe: `1 leitura completa na fila; ${arquivadas} arquivadas; cópia com ${naCopia} telemetrias; segunda execução não repete`
+    };
+  });
+  await teste("npm run backup: cópia íntegra em backups/; mantém só as mais novas", () => {
+    const a = rodar("src/manutencao/backup.ts", pasta, [], { BACKUP_MANTER: "1" });
+    const arquivos = fs.readdirSync(path.join(pasta, "backups"));
+    return { passou: a.includes("Backup criado") && /SHA-256: [0-9a-f]{64}/.test(a) && arquivos.length === 1, detalhe: arquivos[0] };
+  });
+  await teste("npm run retencao: sem --confirmar só mostra; com --confirmar apaga só o que foi enviado há mais de 30 dias", () => {
+    db.prepare("UPDATE mensagens SET synced_at = datetime('now', '-40 days') WHERE message_id IN ('M-T1', 'M-T12')").run();
+    const antes = total();
+    const simulacao = rodar("src/manutencao/retencao.ts", pasta);
+    const depoisDaSimulacao = total();
+    const real = rodar("src/manutencao/retencao.ts", pasta, ["--confirmar"]);
+    return { passou: /mensagens enviadas há mais de 30 dias: 2 a remover/.test(simulacao) && depoisDaSimulacao === antes && /2 removida/.test(real) && total() === antes - 2 && total("message_id = 'M-T14'") === 1 };
   });
 
-  await runTest("GET /api/v1/iot/commands/:deviceId com chave correta -> 200 (Comando pendente)", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/commands/${TEST_DEVICE_ID}`, {
-      headers: { "X-API-Key": TEST_API_KEY }
-    });
-    const json: any = await res.json();
-    const passed = res.status === 200 && Array.isArray(json) && json.some((c: any) => c.command_id === TEST_CMD_ID);
-    return { passed, status: res.status, expectedStatus: 200, details: `Encontrou comando ${TEST_CMD_ID}` };
-  });
-
-  await runTest("POST /api/v1/iot/commands/confirm com status inválido -> 400", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/commands/confirm`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        command_id: TEST_CMD_ID,
-        device_id: TEST_DEVICE_ID,
-        status: "INVALID_STATUS"
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 400 && json.success === false;
-    return { passed, status: res.status, expectedStatus: 400, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/commands/confirm comando inexistente -> 404", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/commands/confirm`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        command_id: "CMD-NONEXISTENT-999",
-        device_id: TEST_DEVICE_ID,
-        status: "EXECUTADO"
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 404 && json.success === false;
-    return { passed, status: res.status, expectedStatus: 404, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/commands/confirm confirmar como EXECUTADO -> 200", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/commands/confirm`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        command_id: TEST_CMD_ID,
-        device_id: TEST_DEVICE_ID,
-        status: "EXECUTADO"
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 200 && json.success === true;
-    return { passed, status: res.status, expectedStatus: 200, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/commands/confirm comando já confirmado -> 409", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/commands/confirm`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        command_id: TEST_CMD_ID,
-        device_id: TEST_DEVICE_ID,
-        status: "EXECUTADO"
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 409 && json.message === "Comando já confirmado";
-    return { passed, status: res.status, expectedStatus: 409, details: json.message };
-  });
-
-  await runTest("GET /api/v1/iot/commands/:deviceId após confirmação -> lista pendente vazia", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/commands/${TEST_DEVICE_ID}`, {
-      headers: { "X-API-Key": TEST_API_KEY }
-    });
-    const json: any = await res.json();
-    const passed = res.status === 200 && Array.isArray(json) && !json.some((c: any) => c.command_id === TEST_CMD_ID);
-    return { passed, status: res.status, expectedStatus: 200, details: `Comando não aparece mais em pendentes` };
-  });
-
-  // Group 7: Alerts
-  console.log("\n--- [7] Alertas (/api/v1/iot/alerts) ---");
-
-  await runTest("POST /api/v1/iot/alerts sem X-API-Key -> 401", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/alerts`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        alert_id: TEST_ALT_ID,
-        device_id: TEST_DEVICE_ID,
-        alert_type: "SEAL_BROKEN",
-        title: "Lacre rompido"
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 401;
-    return { passed, status: res.status, expectedStatus: 401, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/alerts com chave de outro dispositivo -> 403", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/alerts`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": "auto-DSP-000001"
-      },
-      body: JSON.stringify({
-        alert_id: TEST_ALT_ID,
-        device_id: TEST_DEVICE_ID,
-        alert_type: "SEAL_BROKEN",
-        title: "Lacre rompido"
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 403 && json.message === "API Key não pertence ao dispositivo";
-    return { passed, status: res.status, expectedStatus: 403, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/alerts com alert_type inválido -> 400", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/alerts`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        alert_id: TEST_ALT_ID,
-        device_id: TEST_DEVICE_ID,
-        alert_type: "UNKNOWN_TYPE",
-        title: "Alerta inválido"
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 400 && json.success === false;
-    return { passed, status: res.status, expectedStatus: 400, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/alerts com severity inválida -> 400", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/alerts`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        alert_id: TEST_ALT_ID,
-        device_id: TEST_DEVICE_ID,
-        alert_type: "SEAL_BROKEN",
-        severity: "URGENTE",
-        title: "Alerta com severidade inválida"
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 400 && json.message === "severity deve ser BAIXA, MEDIA, ALTA ou CRITICA";
-    return { passed, status: res.status, expectedStatus: 400, details: json.message };
-  });
-
-  await runTest("POST /api/v1/iot/alerts com nome antigo SEAL_BROKEN -> 201 gravado como LACRE_VIOLADO", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/alerts`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        alert_id: TEST_ALT_ID,
-        device_id: TEST_DEVICE_ID,
-        alert_type: "SEAL_BROKEN",
-        title: "Lacre rompido detectado",
-        description: "Sensor detectou rompimento físico"
-      })
-    });
-    const json: any = await res.json();
-    const passed =
-      res.status === 201 &&
-      json.success === true &&
-      json.alert?.alert_id === TEST_ALT_ID &&
-      json.alert?.alert_type === "LACRE_VIOLADO" &&
-      json.alert?.severity === "CRITICA" &&
-      json.alert?.status === "ABERTO";
-    return { passed, status: res.status, expectedStatus: 201, details: `alert_type=${json.alert?.alert_type}, severity=${json.alert?.severity} (padrão do tipo), status=${json.alert?.status}` };
-  });
-
-  await runTest("POST /api/v1/iot/alerts com severity informada e campos antigos ignorados -> 201", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/alerts`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        alert_id: "ALT-TEST-AUTORUN-002",
-        device_id: TEST_DEVICE_ID,
-        alert_type: "LOW_BATTERY",
-        severity: "ALTA",
-        status: "ENCERRADO",
-        status_id: 9999,
-        severity_id: 9999,
-        title: "Bateria baixa"
-      })
-    });
-    const json: any = await res.json();
-    const passed =
-      res.status === 201 &&
-      json.alert?.alert_type === "BATERIA_BAIXA" &&
-      json.alert?.severity === "ALTA" &&
-      json.alert?.status === "ABERTO" &&
-      !("status_id" in json.alert) &&
-      !("severity_id" in json.alert);
-    return { passed, status: res.status, expectedStatus: 201, details: `severity=${json.alert?.severity}, status=${json.alert?.status}` };
-  });
-
-  await runTest("POST /api/v1/iot/alerts com alert_id duplicado -> 409", async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/iot/alerts`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": TEST_API_KEY
-      },
-      body: JSON.stringify({
-        alert_id: TEST_ALT_ID,
-        device_id: TEST_DEVICE_ID,
-        alert_type: "SEAL_BROKEN",
-        title: "Lacre rompido repetido"
-      })
-    });
-    const json: any = await res.json();
-    const passed = res.status === 409 && json.message === "Alerta duplicado";
-    return { passed, status: res.status, expectedStatus: 409, details: json.message };
-  });
-
-  const alertCall = async (method: string, path: string, body?: unknown, key?: string) => {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (key) headers["X-API-Key"] = key;
-    const init: RequestInit = { method, headers };
-    if (body !== undefined) init.body = JSON.stringify(body);
-    const res = await fetch(`${BASE_URL}/api/v1/iot/alerts${path}`, init);
-    return { status: res.status, json: (await res.json()) as any };
-  };
-
-  await runTest("POST /api/v1/iot/alerts com código do catálogo SEM_COMUNICACAO -> 201 (severidade padrão ALTA)", async () => {
-    const r = await alertCall("POST", "", {
-      alert_id: "ALT-TEST-AUTORUN-003",
-      device_id: TEST_DEVICE_ID,
-      alert_type: "SEM_COMUNICACAO",
-      title: "Dispositivo sem comunicação"
-    }, TEST_API_KEY);
-    const passed = r.status === 201 && r.json.alert?.alert_type === "SEM_COMUNICACAO" && r.json.alert?.severity === "ALTA";
-    return { passed, status: r.status, expectedStatus: 201, details: `alert_type=${r.json.alert?.alert_type}, severity=${r.json.alert?.severity}` };
-  });
-
-  await runTest("POST /api/v1/iot/alerts com alert_type toString -> 400", async () => {
-    const r = await alertCall("POST", "", {
-      alert_id: "ALT-TEST-AUTORUN-004",
-      device_id: TEST_DEVICE_ID,
-      alert_type: "toString",
-      title: "Tipo inválido"
-    }, TEST_API_KEY);
-    return { passed: r.status === 400, status: r.status, expectedStatus: 400, details: r.json.message };
-  });
-
-  await runTest("Banco rejeita alerta com tipo fora do catálogo (CHECK)", async () => {
-    let rejected = false;
-    try {
-      db.prepare(`
-        INSERT INTO alerts (alert_id, device_id, alert_type, severity, status, title)
-        VALUES ('ALT-TEST-AUTORUN-DB', ?, 'SEAL_BROKEN', 'CRITICA', 'ABERTO', 'Tipo antigo direto no banco')
-      `).run(TEST_DEVICE_ID);
-    } catch (err: any) {
-      rejected = String(err.code).startsWith("SQLITE_CONSTRAINT");
-    }
-    return { passed: rejected, details: rejected ? "CHECK de alert_type barrou SEAL_BROKEN" : "inserção aceita" };
-  });
-
-  await runTest("GET /api/v1/iot/alerts?device_id= -> 200 com os 3 alertas, do mais recente ao mais antigo", async () => {
-    const r = await alertCall("GET", `?device_id=${TEST_DEVICE_ID}`);
-    const ids = (r.json.alerts ?? []).map((a: any) => a.alert_id);
-    const passed = r.status === 200 && r.json.total === 3 && ids[0] === "ALT-TEST-AUTORUN-003" && ids[2] === TEST_ALT_ID;
-    return { passed, status: r.status, expectedStatus: 200, details: `total=${r.json.total} [${ids.join(", ")}]` };
-  });
-
-  await runTest("GET /api/v1/iot/alerts?status=XYZ -> 400", async () => {
-    const r = await alertCall("GET", "?status=XYZ");
-    return { passed: r.status === 400, status: r.status, expectedStatus: 400, details: r.json.message };
-  });
-
-  await runTest("PATCH /alerts/:id/status em alerta inexistente -> 404", async () => {
-    const r = await alertCall("PATCH", "/ALT-TEST-NAO-EXISTE/status", { status: "EM_ANALISE" });
-    return { passed: r.status === 404, status: r.status, expectedStatus: 404, details: r.json.message };
-  });
-
-  await runTest("PATCH /alerts/:id/status com status ABERTO -> 400", async () => {
-    const r = await alertCall("PATCH", `/${TEST_ALT_ID}/status`, { status: "ABERTO" });
-    return { passed: r.status === 400, status: r.status, expectedStatus: 400, details: r.json.message };
-  });
-
-  await runTest("PATCH /alerts/:id/status ENCERRADO sem resolved_by/resolution_note -> 400", async () => {
-    const r = await alertCall("PATCH", `/${TEST_ALT_ID}/status`, { status: "ENCERRADO", resolved_by: "Gestor" });
-    return { passed: r.status === 400, status: r.status, expectedStatus: 400, details: r.json.message };
-  });
-
-  await runTest("PATCH /alerts/:id/status ABERTO -> EM_ANALISE -> 200", async () => {
-    const r = await alertCall("PATCH", `/${TEST_ALT_ID}/status`, { status: "EM_ANALISE" });
-    const passed = r.status === 200 && r.json.alert?.status === "EM_ANALISE" && r.json.alert?.resolved_at === null;
-    return { passed, status: r.status, expectedStatus: 200, details: `status=${r.json.alert?.status}` };
-  });
-
-  await runTest("PATCH /alerts/:id/status EM_ANALISE de novo -> 409", async () => {
-    const r = await alertCall("PATCH", `/${TEST_ALT_ID}/status`, { status: "EM_ANALISE" });
-    return { passed: r.status === 409, status: r.status, expectedStatus: 409, details: r.json.message };
-  });
-
-  await runTest("PATCH /alerts/:id/status EM_ANALISE -> ENCERRADO -> 200 com data, quem e motivo", async () => {
-    const r = await alertCall("PATCH", `/${TEST_ALT_ID}/status`, {
-      status: "ENCERRADO",
-      resolved_by: "Gestor de teste",
-      resolution_note: "Lacre substituído e cilindro conferido"
-    });
-    const a = r.json.alert;
-    const passed = r.status === 200 && a?.status === "ENCERRADO" && !!a?.resolved_at &&
-      a?.resolved_by === "Gestor de teste" && a?.resolution_note === "Lacre substituído e cilindro conferido";
-    return { passed, status: r.status, expectedStatus: 200, details: `status=${a?.status}, resolved_at=${a?.resolved_at}` };
-  });
-
-  await runTest("PATCH /alerts/:id/status em alerta ENCERRADO -> 409 (não reabre)", async () => {
-    const r = await alertCall("PATCH", `/${TEST_ALT_ID}/status`, { status: "EM_ANALISE" });
-    const passed = r.status === 409 && r.json.message === "Alerta já encerrado; um problema novo gera um alerta novo";
-    return { passed, status: r.status, expectedStatus: 409, details: r.json.message };
-  });
-
-  await runTest("PATCH /alerts/:id/status ABERTO -> ENCERRADO direto -> 200", async () => {
-    const r = await alertCall("PATCH", "/ALT-TEST-AUTORUN-002/status", {
-      status: "ENCERRADO",
-      resolved_by: "Gestor de teste",
-      resolution_note: "Bateria trocada"
-    });
-    return { passed: r.status === 200 && r.json.alert?.status === "ENCERRADO", status: r.status, expectedStatus: 200, details: `status=${r.json.alert?.status}` };
-  });
-
-  await runTest("Banco rejeita alerta ENCERRADO sem data de encerramento (CHECK)", async () => {
-    let rejected = false;
-    try {
-      db.prepare("UPDATE alerts SET status = 'ENCERRADO', resolved_at = NULL WHERE alert_id = 'ALT-TEST-AUTORUN-003'").run();
-    } catch (err: any) {
-      rejected = String(err.code).startsWith("SQLITE_CONSTRAINT");
-    }
-    return { passed: rejected, details: rejected ? "CHECK barrou ENCERRADO sem resolved_at" : "atualização aceita" };
-  });
-
-  await runTest("GET /api/v1/iot/alerts?status=ENCERRADO&device_id= -> 200 com os 2 encerrados", async () => {
-    const r = await alertCall("GET", `?status=ENCERRADO&device_id=${TEST_DEVICE_ID}`);
-    const passed = r.status === 200 && r.json.total === 2 && r.json.alerts.every((a: any) => a.status === "ENCERRADO");
-    return { passed, status: r.status, expectedStatus: 200, details: `total=${r.json.total}` };
-  });
-
-  // Group 9: Association device → seal → cylinder
-  console.log("\n--- [9] Associação dispositivo → lacre → cilindro ---");
-
-  const api = async (method: string, path: string, body?: unknown, key?: string) => {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (key) headers["X-API-Key"] = key;
-    const init: RequestInit = { method, headers };
-    if (body !== undefined) init.body = JSON.stringify(body);
-    const res = await fetch(`${BASE_URL}/api/v1${path}`, init);
-    return { status: res.status, json: (await res.json()) as any };
-  };
-  const sealStatus = (code: string) =>
-    (db.prepare("SELECT status FROM seals WHERE seal_code = ?").get(code) as any)?.status;
-
-  await runTest("POST /seals cadastra lacres -> 201 (EM_ESTOQUE por padrão)", async () => {
-    const a = await api("POST", "/seals", { seal_code: "LCR-TEST-1", nfc_uid: "NFC-TEST-1" });
-    const b = await api("POST", "/seals", { seal_code: "LCR-TEST-2", nfc_uid: "NFC-TEST-2" });
-    const c = await api("POST", "/seals", { seal_code: "LCR-TEST-3", nfc_uid: "NFC-TEST-3", status: "DANIFICADO" });
-    const passed = a.status === 201 && b.status === 201 && c.status === 201 && a.json.seal?.status === "EM_ESTOQUE";
-    return { passed, status: a.status, expectedStatus: 201, details: `${a.json.seal?.seal_code} ${a.json.seal?.status}` };
-  });
-
-  await runTest("POST /seals duplicado, UID NFC repetido -> 409; status INSTALADO no cadastro -> 400", async () => {
-    const dup = await api("POST", "/seals", { seal_code: "LCR-TEST-1", nfc_uid: "NFC-TEST-9" });
-    const nfc = await api("POST", "/seals", { seal_code: "LCR-TEST-9", nfc_uid: "NFC-TEST-1" });
-    const inst = await api("POST", "/seals", { seal_code: "LCR-TEST-8", nfc_uid: "NFC-TEST-8", status: "INSTALADO" });
-    const passed = dup.status === 409 && nfc.status === 409 && inst.status === 400;
-    return { passed, details: `${dup.status} / ${nfc.status} / ${inst.status}` };
-  });
-
-  await runTest("POST /cylinders cadastra -> 201; série repetida (outra empresa) -> 201; código repetido -> 409", async () => {
-    const a = await api("POST", "/cylinders", { cylinder_code: "CIL-TEST-1", serial_number: "SER-TEST-1" });
-    const b = await api("POST", "/cylinders", { cylinder_code: "CIL-TEST-2", serial_number: "SER-TEST-2" });
-    const mesmaSerie = await api("POST", "/cylinders", { cylinder_code: "CIL-TEST-9", serial_number: "SER-TEST-1" });
-    const mesmoCodigo = await api("POST", "/cylinders", { cylinder_code: "CIL-TEST-1", serial_number: "SER-TEST-X" });
-    const passed = a.status === 201 && b.status === 201 && a.json.cylinder?.status === "DISPONIVEL" &&
-      mesmaSerie.status === 201 && mesmoCodigo.status === 409;
-    return { passed, details: `${a.status} / ${b.status} / série repetida ${mesmaSerie.status} / código repetido ${mesmoCodigo.status}` };
-  });
-
-  await runTest("POST /assignments/device-seal vincula -> 201; dispositivo com lacre ativo -> 409", async () => {
-    const link = await api("POST", "/assignments/device-seal", { device_id: TEST_DEVICE_ID, seal_code: "LCR-TEST-1" });
-    const conflict = await api("POST", "/assignments/device-seal", { device_id: TEST_DEVICE_ID, seal_code: "LCR-TEST-2" });
-    const passed = link.status === 201 && link.json.assignment?.ended_at === null && conflict.status === 409;
-    return { passed, details: `${link.status} / ${conflict.status} ${conflict.json.message}` };
-  });
-
-  await runTest("POST /assignments/seal-cylinder vincula -> 201 e lacre vira INSTALADO", async () => {
-    const link = await api("POST", "/assignments/seal-cylinder", { seal_code: "LCR-TEST-1", cylinder_code: "CIL-TEST-1" });
-    const passed = link.status === 201 && sealStatus("LCR-TEST-1") === "INSTALADO";
-    return { passed, status: link.status, expectedStatus: 201, details: `lacre ${sealStatus("LCR-TEST-1")}` };
-  });
-
-  await runTest("Cilindro com lacre ativo -> 409; lacre DANIFICADO não instala -> 409", async () => {
-    const busy = await api("POST", "/assignments/seal-cylinder", { seal_code: "LCR-TEST-2", cylinder_code: "CIL-TEST-1" });
-    const damaged = await api("POST", "/assignments/seal-cylinder", { seal_code: "LCR-TEST-3", cylinder_code: "CIL-TEST-2" });
-    const passed = busy.status === 409 && damaged.status === 409 && damaged.json.message.includes("DANIFICADO");
-    return { passed, details: `${busy.status} / ${damaged.status} ${damaged.json.message}` };
-  });
-
-  await runTest("Telemetria recebe lacre e cilindro do vínculo (payload ignorado), sem error_type", async () => {
-    const res = await api("POST", "/iot/telemetries", {
-      message_id: "MSG-TEST-ASC-1", device_id: TEST_DEVICE_ID,
-      latitude: -8.9, longitude: -35.0, lacre_id: "LCR-FALSO", cilindro_id: "CIL-FALSO"
-    }, TEST_API_KEY);
-    const row = db.prepare("SELECT lacre_id, cilindro_id, error_type FROM telemetry_queue WHERE message_id = 'MSG-TEST-ASC-1'").get() as any;
-    const passed = res.status === 202 && row?.lacre_id === "LCR-TEST-1" && row?.cilindro_id === "CIL-TEST-1" && row?.error_type === null;
-    return { passed, status: res.status, expectedStatus: 202, details: `${row?.lacre_id} / ${row?.cilindro_id} / ${row?.error_type}` };
-  });
-
-  await runTest("Telemetria enviada antes do vínculo ficou com error_type DISPOSITIVO_SEM_LACRE", async () => {
-    const row = db.prepare("SELECT lacre_id, error_type FROM telemetry_queue WHERE message_id = 'MSG-TEST-TEL-001'").get() as any;
-    const passed = row?.lacre_id === null && row?.error_type === "DISPOSITIVO_SEM_LACRE";
-    return { passed, details: `${row?.error_type}` };
-  });
-
-  await runTest("Evento de lacre aberto com cilindro EM_TRANSITO -> error_type LACRE_ABERTO_EM_TRANSITO", async () => {
-    const transit = await api("POST", "/cylinders/CIL-TEST-1/status", { status: "EM_TRANSITO" });
-    const ev = await api("POST", "/iot/events", {
-      message_id: "EVT-TEST-ASC-1", device_id: TEST_DEVICE_ID, event_type: "seal_changed", seal_status: "UNLOCKED"
-    }, TEST_API_KEY);
-    const row = db.prepare("SELECT error_type FROM events WHERE message_id = 'EVT-TEST-ASC-1'").get() as any;
-    const passed = transit.status === 200 && ev.status === 202 && row?.error_type === "LACRE_ABERTO_EM_TRANSITO";
-    return { passed, details: `${row?.error_type}` };
-  });
-
-  await runTest("Troca do lacre do cilindro (replace) -> antigo encerrado e REMOVIDO, novo INSTALADO", async () => {
-    const swap = await api("POST", "/assignments/seal-cylinder", { seal_code: "LCR-TEST-2", cylinder_code: "CIL-TEST-1", replace: true });
-    const old = db.prepare("SELECT ended_at, end_reason FROM cylinder_assignments WHERE seal_code = 'LCR-TEST-1'").get() as any;
-    const passed =
-      swap.status === 201 && old?.ended_at !== null && old?.end_reason === "Substituído por novo vínculo" &&
-      sealStatus("LCR-TEST-1") === "REMOVIDO" && sealStatus("LCR-TEST-2") === "INSTALADO";
-    return { passed, details: `antigo ${sealStatus("LCR-TEST-1")}, novo ${sealStatus("LCR-TEST-2")}` };
-  });
-
-  await runTest("Telemetria de lacre sem cilindro -> error_type LACRE_SEM_CILINDRO", async () => {
-    await api("POST", "/iot/telemetries", { message_id: "MSG-TEST-ASC-2", device_id: TEST_DEVICE_ID, latitude: -8.91, longitude: -35.01 }, TEST_API_KEY);
-    const row = db.prepare("SELECT lacre_id, cilindro_id, error_type FROM telemetry_queue WHERE message_id = 'MSG-TEST-ASC-2'").get() as any;
-    const passed = row?.lacre_id === "LCR-TEST-1" && row?.cilindro_id === null && row?.error_type === "LACRE_SEM_CILINDRO";
-    return { passed, details: `${row?.lacre_id} / ${row?.cilindro_id} / ${row?.error_type}` };
-  });
-
-  await runTest("Encerrar vínculo -> 200 e lacre REMOVIDO; encerrar de novo -> 409", async () => {
-    const active = db.prepare("SELECT id FROM cylinder_assignments WHERE seal_code = 'LCR-TEST-2' AND ended_at IS NULL").get() as any;
-    const end = await api("POST", `/assignments/seal-cylinder/${active.id}/end`, { reason: "Retirada para manutenção" });
-    const again = await api("POST", `/assignments/seal-cylinder/${active.id}/end`, {});
-    const passed = end.status === 200 && end.json.assignment?.end_reason === "Retirada para manutenção" && sealStatus("LCR-TEST-2") === "REMOVIDO" && again.status === 409;
-    return { passed, details: `${end.status} / ${again.status}; lacre ${sealStatus("LCR-TEST-2")}` };
-  });
-
-  await runTest("Histórico do cilindro preserva todos os vínculos, do mais recente ao mais antigo", async () => {
-    const res = await api("GET", "/assignments/seal-cylinder?cylinder_code=CIL-TEST-1");
-    const codes = Array.isArray(res.json) ? res.json.map((a: any) => a.seal_code) : [];
-    const passed = res.status === 200 && codes.length === 2 && codes[0] === "LCR-TEST-2" && codes[1] === "LCR-TEST-1" && res.json.every((a: any) => a.ended_at !== null);
-    return { passed, status: res.status, expectedStatus: 200, details: codes.join(" → ") };
-  });
-
-  await runTest("Status INSTALADO manual -> 409 (só pelo vínculo)", async () => {
-    const res = await api("POST", "/seals/LCR-TEST-1/status", { status: "INSTALADO" });
-    const passed = res.status === 409;
-    return { passed, status: res.status, expectedStatus: 409, details: res.json.message };
-  });
-
-  // Group 10: Integration with FluxID (Worker queues, hashed keys)
-  console.log("\n--- [10] Integração com o FluxID ---");
-
-  const HASH_DEVICE_ID = "DSP-TEST-HASH";
-  const HASH_DEVICE_KEY = "key-test-hash-12345";
-
-  await runTest("GET /sync/status -> 200 com as filas telemetry, events e alerts", async () => {
-    const res = await api("GET", "/sync/status");
-    const filas = (res.json.filas ?? []).map((f: any) => f.queue).join(",");
-    const passed = res.status === 200 && filas === "telemetry,events,alerts" && Array.isArray(res.json.ultimas_rodadas);
-    return { passed, status: res.status, expectedStatus: 200, details: filas };
-  });
-
-  await runTest("GET /sync/problems com fila inválida -> 400; fila válida -> 200", async () => {
-    const bad = await api("GET", "/sync/problems?queue=xyz");
-    const ok = await api("GET", "/sync/problems?queue=alerts");
-    const passed = bad.status === 400 && ok.status === 200 && Array.isArray(ok.json.itens);
-    return { passed, status: ok.status, expectedStatus: 200, details: `inválida=${bad.status}` };
-  });
-
-  await runTest("POST /sync/retry sem dados -> 400; item inexistente -> 404", async () => {
-    const bad = await api("POST", "/sync/retry", { queue: "telemetry" });
-    const missing = await api("POST", "/sync/retry", { queue: "telemetry", key: "MSG-NAO-EXISTE" });
-    const passed = bad.status === 400 && missing.status === 404;
-    return { passed, status: missing.status, expectedStatus: 404, details: `sem key=${bad.status}` };
-  });
-
-  await runTest("POST /sync/retry devolve à fila item parado (sem gastar tentativa)", async () => {
-    db.prepare(`
-      UPDATE alerts
-      SET sync_status = 'ERROR', sync_attempt_count = 6, sync_last_error = 'teste', sync_next_attempt_at = NULL
-      WHERE alert_id = 'ALT-TEST-AUTORUN-003'
-    `).run();
-    const res = await api("POST", "/sync/retry", { queue: "alerts", key: "ALT-TEST-AUTORUN-003" });
-    const row = db.prepare("SELECT sync_status, sync_attempt_count FROM alerts WHERE alert_id = 'ALT-TEST-AUTORUN-003'").get() as any;
-    const passed = res.status === 200 && row?.sync_status === "PENDING" && row?.sync_attempt_count === 0;
-    return { passed, status: res.status, expectedStatus: 200, details: `${row?.sync_status}, tentativas=${row?.sync_attempt_count}` };
-  });
-
-  await runTest("Mudar o status do alerta o devolve à fila do Worker (sync PENDING)", async () => {
-    db.prepare("UPDATE alerts SET sync_status = 'SYNCED' WHERE alert_id = 'ALT-TEST-AUTORUN-003'").run();
-    const res = await api("PATCH", "/iot/alerts/ALT-TEST-AUTORUN-003/status", { status: "EM_ANALISE" });
-    const row = db.prepare("SELECT sync_status FROM alerts WHERE alert_id = 'ALT-TEST-AUTORUN-003'").get() as any;
-    const passed = res.status === 200 && row?.sync_status === "PENDING";
-    return { passed, status: res.status, expectedStatus: 200, details: `sync_status=${row?.sync_status}` };
-  });
-
-  await runTest("Dispositivo com hash do FluxID: chave certa -> 202; chave em texto guardada -> 401", async () => {
-    const { createHash } = await import("crypto");
-    const storedText = "fluxid-sem-chave:teste-autorun";
-    db.prepare(`
-      INSERT INTO devices (device_id, api_key, api_key_hash, firmware_version, active)
-      VALUES (?, ?, ?, '1.0.0', 1)
-    `).run(HASH_DEVICE_ID, storedText, createHash("sha256").update(HASH_DEVICE_KEY).digest("hex"));
-    const body = { message_id: "MSG-TEST-HASH-1", device_id: HASH_DEVICE_ID, latitude: -7.1, longitude: -39.1 };
-    const good = await api("POST", "/iot/telemetries", body, HASH_DEVICE_KEY);
-    const old = await api("POST", "/iot/telemetries", { ...body, message_id: "MSG-TEST-HASH-2" }, storedText);
-    const passed = good.status === 202 && old.status === 401;
-    return { passed, status: good.status, expectedStatus: 202, details: `chave em texto=${old.status}` };
-  });
-
-  await runTest("GET /devices não mostra api_key nem api_key_hash", async () => {
-    const res = await api("GET", `/devices/${HASH_DEVICE_ID}`);
-    const passed = res.status === 200 && !("api_key" in (res.json ?? {})) && !("api_key_hash" in (res.json ?? {}));
-    return { passed, status: res.status, expectedStatus: 200, details: Object.keys(res.json ?? {}).join(",") };
-  });
-
-  // Post-cleanup of test records
-  console.log("\n--- [8] Limpeza e Teardown ---");
-  await runTest("Limpeza de registros temporários criados nos testes", async () => {
-    db.prepare("DELETE FROM cylinder_assignments WHERE seal_code LIKE 'LCR-TEST%' OR cylinder_code LIKE 'CIL-TEST%'").run();
-    db.prepare("DELETE FROM seal_assignments WHERE device_id LIKE 'DSP-TEST%' OR seal_code LIKE 'LCR-TEST%'").run();
-    db.prepare("DELETE FROM seals WHERE seal_code LIKE 'LCR-TEST%'").run();
-    db.prepare("DELETE FROM cylinders WHERE cylinder_code LIKE 'CIL-TEST%'").run();
-    db.prepare("DELETE FROM alerts WHERE device_id LIKE 'DSP-TEST%'").run();
-    db.prepare("DELETE FROM commands WHERE device_id LIKE 'DSP-TEST%'").run();
-    db.prepare("DELETE FROM telemetry_queue WHERE device_id LIKE 'DSP-TEST%'").run();
-    db.prepare("DELETE FROM events WHERE device_id LIKE 'DSP-TEST%'").run();
-    db.prepare("DELETE FROM devices WHERE device_id LIKE 'DSP-TEST%'").run();
-
-    const remaining = (db.prepare("SELECT COUNT(*) as c FROM devices WHERE device_id LIKE 'DSP-TEST%'").get() as any).c;
-    const passed = remaining === 0;
-    return { passed, details: "Banco limpo com sucesso" };
-  });
-
-  // Summary
-  const total = results.length;
-  const passedCount = results.filter(r => r.passed).length;
-  const failedCount = total - passedCount;
-
+  // ---------------------------------------------------------------- resumo
+  const falhas = resultados.filter(r => !r.passou);
   console.log("\n==================================================");
-  console.log(`  RESULTADO FINAL DOS TESTES:`);
-  console.log(`   Total de Testes: ${total}`);
-  console.log(`     Passaram:     ${passedCount}`);
-  console.log(`     Falharam:     ${failedCount}`);
+  console.log("  RESULTADO FINAL DOS TESTES:");
+  console.log(`   Total de Testes: ${resultados.length}`);
+  console.log(`     Passaram:     ${resultados.length - falhas.length}`);
+  console.log(`     Falharam:     ${falhas.length}`);
   console.log("==================================================");
+  for (const f of falhas) console.log(`  ❌ ${f.nome}`);
 
-  // Close server
-  server.close(() => {
-    console.log("  Servidor finalizado com sucesso.");
-    process.exit(failedCount > 0 ? 1 : 0);
-  });
+  await new Promise<void>(resolve => server.close(() => resolve()));
+  await recebedor.fechar();
+  db.close();
+  process.exitCode = falhas.length ? 1 : 0;
 }
 
-main().catch(err => {
-  console.error("Erro fatal nos testes:", err);
-  server.close(() => process.exit(1));
+main().catch(erro => {
+  console.error("Suíte interrompida:", erro);
+  process.exit(1);
 });

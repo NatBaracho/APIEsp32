@@ -1,8 +1,9 @@
 // Configuração do Worker, lida só do ambiente (arquivo .env, fora do git).
-// A URL do FluxID contém a senha do banco: nunca registrá-la em documento.
+// A chave do Supabase nunca vai para documento, log ou resposta da API.
 
 export interface WorkerConfig {
-  fluxidDatabaseUrl: string;
+  destinoUrl: string;
+  destinoKey: string;
   intervalSeconds: number;
   cadastroIntervalSeconds: number;
   batchSize: number;
@@ -25,16 +26,18 @@ function positiveInteger(name: string, fallback: number): number {
 }
 
 export function loadWorkerConfig(): WorkerConfig {
-  const fluxidDatabaseUrl = process.env.FLUXID_DATABASE_URL?.trim();
+  const destinoUrl = process.env.SUPABASE_IOT_URL?.trim();
+  const destinoKey = process.env.SUPABASE_SERVICE_KEY?.trim();
 
-  if (!fluxidDatabaseUrl) {
+  if (!destinoUrl || !destinoKey) {
     throw new Error(
-      "FLUXID_DATABASE_URL não definida. Copie .env.example para .env e preencha a conexão do FluxID"
+      "SUPABASE_IOT_URL e SUPABASE_SERVICE_KEY não definidas. Copie .env.example para .env e preencha"
     );
   }
 
   return {
-    fluxidDatabaseUrl,
+    destinoUrl,
+    destinoKey,
     intervalSeconds: positiveInteger("WORKER_INTERVAL_SECONDS", 10),
     cadastroIntervalSeconds: positiveInteger("WORKER_CADASTRO_INTERVAL_SECONDS", 300),
     batchSize: positiveInteger("WORKER_BATCH_SIZE", 100)

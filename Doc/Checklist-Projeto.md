@@ -4,6 +4,63 @@ Este documento registra o que já foi implementado e validado e o que falta para
 
 Legenda: ✅ feito e validado; ⏳ feito, falta o passo indicado no item; [ ] a fazer.
 
+## Situação atual (10/10/2026): modelo enxuto, com o Supabase como banco principal
+
+Em 10/10/2026 ficou decidido que o banco principal é o Supabase do projeto do frontend, que a API só entrega os dados do lacre e que a Oxide fica com uma fila mínima. Esta seção é a que vale hoje. As seções seguintes são o **histórico do modelo anterior** (até 09/10/2026).
+
+Os itens com ✅ foram feitos e testados pela IA e **aprovados por Natã da Silva Baracho em 10/10/2026** (PR #20). Os itens com ⏳ estão feitos e dependem de outra pessoa. Ficaram duas confirmações pendentes de Natã: o código do alerta de lacre aberto e o envio do contrato ao professor Alisson.
+
+### API do lacre
+
+- ✅ Rotas do lacre mantidas: leitura, evento, alerta, busca e confirmação de comando.
+- ✅ Posição e bateria obrigatórias em toda leitura, evento e alerta.
+- ✅ `gps_ok: false` para a última posição conhecida, quando o lacre está sem sinal de GPS.
+- ✅ Campos do firmware aceitos: `satelites`, `hdop` e `device_state`.
+- ✅ Alertas automáticos só da própria mensagem (bateria baixa, sinal fraco, lacre aberto e lacre rompido), abertos na mudança.
+- ✅ `GET /iot/messages`, `GET /health` e Swagger atualizado.
+- ✅ Removido: rotas de lacres, cilindros e vínculos; análise e encerramento de alertas; proposta da API do frontend.
+
+### Oxide (banco local)
+
+- ✅ Três tabelas: `devices`, `mensagens` (fila única) e `commands`.
+- ✅ Migração automática do modelo antigo, com cópia de segurança: leituras antigas completas vão para a fila; as sem posição ou bateria ficam arquivadas.
+- ✅ Backup (`npm run backup`) e retenção (`npm run retencao`).
+
+### Worker e banco principal
+
+- ✅ Envio da fila por HTTP à função de recebimento, em lotes, com resultado por mensagem.
+- ✅ Tentativas: envio inicial e mais 5; banco principal fora do ar não gasta tentativa.
+- ✅ Cadastro de dispositivos (hash da chave) e comandos trazidos do banco principal.
+- ⏳ Contrato de entrega escrito (`Contrato-Entrega-Supabase.md`); falta enviar ao professor Alisson e receber a revisão dele.
+- [ ] Função de recebimento e tabelas do lacre no Supabase (professor Alisson).
+- [ ] Endereço da função e chave `service_role` no `.env` do servidor.
+- [ ] Primeiro teste de ponta a ponta com o Supabase de verdade.
+
+### Lacre (firmware)
+
+- ⏳ Contrato para o firmware escrito e aprovado (`Guia-Firmware-Lacre-IoT.md` 2.0); falta o Simão aplicar no firmware.
+- [ ] Envio HTTP ligado no firmware, com `device_id`, chave e `message_id` (Simão).
+- [ ] Leitura da bateria no lacre (pronta, entra depois dos testes).
+- [ ] Teste com o equipamento real.
+
+### Testes e documentos
+
+- ✅ Suíte nova com 71 casos e simulador novo com 23 verificações, em pasta temporária e com recebedor de teste.
+- ✅ Documentação final para o evento INTEGRA 2026 (`DocumentacaoFinal/`): 19 registros no PR #19 e o registro 20, desta entrega, no PR #20.
+- ✅ Documentos atualizados para o modelo enxuto; documentos do FluxID marcados como referência histórica.
+
+### Ainda a fazer, fora desta entrega
+
+- [ ] Controle por perfil nas rotas abertas da equipe (`/devices`, `/iot/messages`, `/sync`).
+- [ ] HTTPS e limite de requisições.
+- [ ] Atualizar o `nodemon` quando houver versão sem a vulnerabilidade do `braces` (só em desenvolvimento).
+
+---
+
+# Histórico do modelo anterior (até 09/10/2026)
+
+Os itens abaixo descrevem o modelo com filas separadas, cópia do cadastro de lacres e cilindros e envio ao FluxID em PostgreSQL. Muitos deles deixaram de existir no código em 10/10/2026.
+
 ## Arquitetura local
 
 - ✅ Arquitetura IoT local definida.

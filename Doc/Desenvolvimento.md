@@ -2,360 +2,224 @@
 
 Este documento tem três partes:
 
-- **Parte 1 — Como a API funciona:** guia para a equipe, principalmente para quem programa o ESP32 em C++. Explica o papel da Oxide, como o dispositivo se conecta, o que enviar, o que a API responde e onde cada dado fica no banco.
+- **Parte 1 — Como a API funciona:** guia para a equipe. Explica o papel de cada parte, como o lacre se conecta, o que a API faz com cada mensagem e onde cada dado fica.
 - **Parte 2 — Histórico de desenvolvimento e testes:** registro do que foi construído, dos erros corrigidos e dos testes executados (material da tese). A numeração original das seções foi mantida para que as referências dos relatórios continuem válidas.
 - **Parte 3 — Histórico de PRs por funcionalidade:** o que cada pull request mudou, separado em API, Oxide, FluxID e Worker.
 
 Documentos relacionados:
 
-- [Guia-Firmware-Lacre-IoT.md](Guia-Firmware-Lacre-IoT.md): guia principal para quem programa o lacre (o que enviar, quando, respostas, fila sem rede, C++ e lista de conferência).
-- [ESP32-envio-de-dados.md](ESP32-envio-de-dados.md): payloads de exemplo e código C++ para o firmware.
-- [Regras-de-Negocio-e-Banco-Oxide.md](Regras-de-Negocio-e-Banco-Oxide.md): regras detalhadas e schema do SQLite.
-- [Oxidedb.md](Oxidedb.md): script de criação do banco.
-- [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md): como cada dado da Oxide vira um registro do FluxID.
-- [Contrato-API-Frontend.md](Contrato-API-Frontend.md): chamadas que a API vai oferecer ao frontend sobre o FluxID (proposta, aguardando aprovação). Com a API rodando, a proposta pode ser vista em `http://<IP_DA_API>:3000/api-docs-fluxid`.
-- [Tipos-de-Erro.md](Tipos-de-Erro.md): catálogo de tipos de erro e ocorrências operacionais (lacre, cilindro, GPS, rota, comunicação, comandos).
+- [Guia-Firmware-Lacre-IoT.md](Guia-Firmware-Lacre-IoT.md): o contrato entre o lacre e a API (o que enviar, quando, respostas, fila sem rede e C++).
+- [Contrato-Entrega-Supabase.md](Contrato-Entrega-Supabase.md): o que a API envia ao banco principal e o que espera de volta.
+- [Oxidedb.md](Oxidedb.md): o banco local, com as três tabelas.
+- [Regras-de-Negocio-e-Banco-Oxide.md](Regras-de-Negocio-e-Banco-Oxide.md): as regras de cada rota.
+- [Tipos-de-Erro.md](Tipos-de-Erro.md): catálogo dos códigos de alerta.
 - [Doc_tese/PlanoDeTeste.md](Doc_tese/PlanoDeTeste.md) e [Doc_tese/RoteiroDeTeste.md](Doc_tese/RoteiroDeTeste.md): como a API é testada.
 - Swagger, com a API rodando: `http://<IP_DA_API>:3000/api-docs`.
+
+Referência histórica (o banco principal seria o FluxID em PostgreSQL; hoje é o Supabase): [Banco_FluxID.md](Banco_FluxID.md), [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md), [Contrato-API-Frontend.md](Contrato-API-Frontend.md) e [ESP32-envio-de-dados.md](ESP32-envio-de-dados.md).
 
 ---
 
 # Parte 1 — Como a API funciona
 
-## 1.1 O papel da Oxide
-
-A Oxide não é apenas uma API. Ela é a **camada de integração, segurança e controle operacional** entre o ESP32 e o FluxID: a ponte entre o mundo físico (dispositivos, lacres e válvulas) e o mundo de negócio (FluxID).
+## 1.1 O papel de cada parte
 
 ```text
-ESP32 (no lacre do cilindro: GPS + modem GSM)
-   ↓  HTTP + JSON
-Oxide API (Node.js + TypeScript)
+Lacre (ESP32: GPS + rede + sensor do lacre)
+   ↓  HTTP + JSON, com a chave do dispositivo
+API (Node.js + TypeScript): confere a chave, valida e interpreta
    ↓
-Oxide DB (SQLite, oxide.db) — fila local
-   ↓  ↑ (cadastro oficial: dispositivos, lacres, cilindros, vínculos, hash da chave)
+Oxide (SQLite, oxide.db): fila local, com 3 tabelas
+   ↓  ↑ (dispositivos e comandos)
 Worker (npm run worker)
-   ↓
-FluxID (PostgreSQL) — banco principal, lido pelo frontend
+   ↓  API REST, por uma função de recebimento
+Supabase: banco principal, usado pelo frontend
 ```
 
-O que a Oxide faz hoje:
-
-| Função | Como |
-| --- | --- |
-| Recebe dados do ESP32 | Telemetrias (latitude, longitude, velocidade, bateria, sinal GSM, estado do lacre) e eventos (lacre rompido, reinício, falha de hardware...) |
-| Autentica dispositivos | Header `X-API-Key`, conferido contra a tabela `devices`; a chave precisa ser do próprio `device_id` enviado |
-| Evita duplicidade | `message_id` é a chave de idempotência: mesma mensagem = mesma operação |
-| Mantém fila local | Grava no `oxide.db` (tabelas `telemetry_queue`, `events`, `commands`, `alerts`) até o Worker enviar ao FluxID |
-| Sincroniza com o FluxID | O Worker envia a fila e traz o cadastro oficial; a equipe acompanha em `/api/v1/sync/*` |
-| Executa regras operacionais | Valida o payload, detecta duplicidade, controla posições repetidas e atualiza `last_seen_at` |
-| Gerencia comandos | O ESP32 consulta comandos pendentes (ex.: travar ou destravar a válvula) e confirma `EXECUTADO` ou `ERRO` |
-| Gerencia alertas | Tipos do catálogo [Tipos-de-Erro.md](Tipos-de-Erro.md) (ex.: `LACRE_VIOLADO`, `BATERIA_BAIXA`, `SEM_COMUNICACAO`); listagem, análise e encerramento pelo gestor |
-
-### Quem faz o quê: API, Oxide, Worker e FluxID
+### Quem faz o quê: API, Oxide, Worker e banco principal
 
 | Parte | O que é |
 | --- | --- |
-| **API** | O programa Node.js + TypeScript (`src/`) que conversa com o ESP32 |
-| **Oxide** | O banco local `oxide.db` (SQLite), usado pela API |
-| **Worker** | Programa que leva os dados da Oxide para o FluxID e traz o cadastro oficial de volta (`src/worker/`, `npm run worker`) |
-| **FluxID** | O banco principal (PostgreSQL), base do sistema de negócio e do dashboard |
+| **API** | O programa Node.js + TypeScript (`src/`) que conversa com o lacre |
+| **Oxide** | O banco local `oxide.db` (SQLite), usado pela API como fila |
+| **Worker** | Programa que leva a fila ao banco principal e traz de lá os dispositivos e os comandos (`src/worker/`, `npm run worker`) |
+| **Banco principal** | O Supabase do projeto do frontend (`fluxid_integra2026`), mantido pelo professor Alisson |
 
 **API — faz hoje**
-- Recebe por HTTP as telemetrias, os eventos, os alertas e as confirmações de comando do ESP32, e responde com os códigos da seção 1.5.
-- Autentica cada dispositivo pela `X-API-Key`, que precisa ser do próprio `device_id`.
-- Valida o que chega: tipos, faixa de latitude e longitude, `seal_status` e listas fechadas (severidade, comandos).
-- Evita duplicidade pelo `message_id` e não grava de novo uma posição repetida, só atualiza a data e a hora.
-- Preenche o lacre e o cilindro da telemetria pelo vínculo ativo e marca o `error_type` (`DISPOSITIVO_SEM_LACRE`, `LACRE_SEM_CILINDRO`, `LACRE_ABERTO_EM_TRANSITO`).
-- Gera os alertas com os códigos em português do catálogo e a severidade sugerida nele. O código do alerta é o que vai para o FluxID (decisão P7). Na transição, os nomes antigos em inglês enviados pelo firmware são convertidos.
-- Lista os alertas e deixa o gestor passar um alerta para `EM_ANALISE` e `ENCERRADO`, registrando quem encerrou e o motivo.
-- Oferece as rotas provisórias de cadastro (`/devices`, `/seals`, `/cylinders`, `/assignments`) e o Swagger.
-- Confere a chave pelo **hash** vindo do FluxID (`SHA-256` da `X-API-Key`); sem hash, vale a chave em texto do cadastro provisório.
-- Mostra a situação da sincronização: `GET /sync/status`, `GET /sync/problems`, `POST /sync/retry`.
+- Recebe por HTTP as leituras, os eventos, os alertas e as confirmações de comando do lacre.
+- Autentica cada dispositivo pela `X-API-Key`, que precisa ser do próprio `device_id`. Dispositivo vindo do banco principal é conferido pelo hash da chave.
+- Exige **posição e bateria** em toda leitura, evento e alerta. Sem sinal de GPS, aceita a última posição conhecida com `gps_ok: false`.
+- Evita duplicidade pelo `message_id` e não grava de novo uma posição repetida: só atualiza a data e a hora.
+- Abre sozinha os alertas que saem da própria mensagem: bateria baixa, sinal fraco e lacre aberto ou rompido. Cada um abre uma vez, na mudança.
+- Entrega ao lacre os comandos da válvula e recebe a confirmação.
+- Mostra as últimas mensagens (`GET /iot/messages`), a situação da fila (`/sync/*`) e a saúde (`GET /health`).
 
-**API — fará**
-- Alertas e comandos automáticos a partir do `error_type`: geofence, saída de rota (alerta ao motorista e ao gestor), lacre aberto → `TRAVAR_VALVULA`.
-- Atender o frontend com o FluxID como banco principal (próxima etapa, depois da validação da integração).
+**API — não faz** (é do sistema principal)
+- Não atende o frontend.
+- Não guarda lacre, cilindro, cliente nem vínculos.
+- Não aplica regras de rota, de geocerca nem de tempo sem comunicar.
+- Não trata alertas (analisar, justificar, encerrar).
 
 **Oxide — faz hoje**
-- É a **fila local**: `telemetry_queue` e `events` ficam com `status = PENDING` até o Worker sincronizar. Se o FluxID estiver fora do ar, nada se perde.
-- Guarda os comandos (`commands`) e os alertas (`alerts`).
-- Guarda a **cópia provisória** do cadastro: `devices`, `seals`, `cylinders` e os vínculos com histórico (`seal_assignments`, `cylinder_assignments`).
-- Protege as regras no próprio banco: chave única, `active` só 0 ou 1, catálogo de comandos, tipo, severidade e status do alerta (alerta `ENCERRADO` sempre com data), um vínculo ativo por lacre, cilindro e dispositivo (RN04, RN05).
-- As tabelas são criadas e migradas automaticamente quando a API inicia.
-- Recebe do Worker o cadastro oficial, os vínculos e o hash da chave do FluxID. O FluxID manda; o cadastro provisório local é mantido e nada é apagado.
-- Registra cada rodada do Worker em `sync_logs`.
+- É a **fila local**: a tabela `mensagens` guarda tudo o que o lacre manda até o Worker entregar. Se o banco principal estiver fora do ar, nada se perde.
+- Guarda os dispositivos autorizados (`devices`), com o último estado recebido de cada um, e os comandos (`commands`).
+- É criada e migrada sozinha quando a API inicia. Um banco do modelo antigo ganha uma cópia de segurança antes de mudar ([Oxidedb.md](Oxidedb.md), seção 4).
 
-**Worker — faz hoje** (regras em [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md); testado sem falhas e aprovado por Natã da Silva Baracho em 07/10/2026)
-- Envia telemetria, eventos e alertas ao FluxID, cada linha numa transação, sem duplicar (`message_id`/`alert_id`).
-- Tentativas: envio inicial e mais 5, esperando 1 min, 5 min, 15 min, 1 h e 6 h; depois deixa a linha parada para o gestor (P6). FluxID fora do ar não gasta tentativa.
-- Telemetria sem GPS vai para a quarentena (P2). Evento do lacre de dispositivo sem lacre espera o vínculo (P3). Eventos sem estado de lacre vão para `eventos_dispositivo` (P4).
-- Alerta: lacre e cilindro do vínculo **da hora do alarme**; sem eles, o alerta para na Oxide para o gestor. Análise e encerramento feitos na Oxide atualizam o alerta no FluxID.
-- Só marca o lacre como `SUSPEITA_VIOLACAO`; quem confirma é o gestor (P8).
-- Traz do FluxID para a Oxide o cadastro, os vínculos e o hash da chave (a cada 5 min).
+**Worker — faz hoje**
+- Envia a fila ao banco principal em lotes, pela API REST, e marca cada mensagem conforme a resposta.
+- Tentativas: envio inicial e mais 5, esperando 1 min, 5 min, 15 min, 1 h e 6 h; depois deixa a mensagem parada para o gestor. Banco principal fora do ar não gasta tentativa.
+- Traz do banco principal a lista de dispositivos, com o hash da chave (a cada 5 min), e os comandos pendentes (a cada rodada).
 
-**FluxID — faz hoje**
-- **Cadastro oficial:** organizações, usuários, perfis e permissões, destinatários e locais de entrega, cilindros, lacres, dispositivos e vínculos.
-- **Isolamento entre empresas** (RN22): cada organização só vê os próprios dados.
-- **Logística e conformidade:** movimentações, entregas, custódia, testes hidrostáticos, inspeções e auditoria.
-- **Histórico definitivo** de telemetrias, eventos do lacre e alertas. A posição é obrigatória porque alimenta o mapa do dashboard, com os lacres e os cilindros pelo Brasil e os alertas como pontos e cores. A data é gravada na chegada, para auditoria e relatórios (P1).
+**Banco principal (Supabase) — faz**
+- Guarda o cadastro oficial e tudo o que é de negócio: empresas, pessoas, cilindros, clientes, geocercas, frota e, na parte do lacre, dispositivos, posições, alertas e comandos.
+- Recebe as mensagens por uma função de recebimento, conforme [Contrato-Entrega-Supabase.md](Contrato-Entrega-Supabase.md). **Essa função e as tabelas do lacre ainda não estão no repositório do frontend.**
 
-**FluxID — fará**
-- Aplicar no `FluxID_db` os scripts `sql/fluxid/001` a `005`, validados no Docker:
-  - `003`: cilindro e lacre obrigatórios em todo alerta (salvo códigos de cadastro), para a auditoria;
-  - `004`: datas automáticas, quarentena, eventos do dispositivo, tipos de alerta do catálogo, colunas da Oxide e o gatilho que confere o par lacre + cilindro do alerta;
-  - `005`: estruturas que o frontend usa (tipos e identificadores de cilindro, laudo e retificação do teste hidrostático, histórico imutável do cilindro integrado com a Oxide).
-- Ser o banco da API do frontend (próxima etapa).
-
-**Resumo:** a Oxide é uma plataforma intermediária de ingestão IoT. Ela autentica dispositivos, recebe telemetrias e eventos, controla comandos e alertas, armazena os dados temporariamente em SQLite e sincroniza com o PostgreSQL do FluxID pelo Worker. Deixou de ser apenas uma API de telemetria e está se tornando o núcleo de controle operacional dos dispositivos.
-
-## 1.2 Como o ESP32 se conecta
+## 1.2 Como o lacre se conecta
 
 | Item | Valor |
 | --- | --- |
-| Endereço base | `http://<IP_DA_API>:3000/api/v1` |
-| Formato | JSON, com o header `Content-Type: application/json` |
-| Autenticação | Header `X-API-Key: <chave do dispositivo>` em todas as rotas `/iot/...` |
-| Tamanho máximo do corpo | 100 KB (acima disso: `413`) |
-| Teste rápido | `GET http://<IP_DA_API>:3000/` responde `API ESP32 Online` |
+| Protocolo | HTTP com JSON |
+| Endereço | `http://<IP_DA_API>:3000/api/v1` |
+| Autenticação | Cabeçalho `X-API-Key` com a chave do dispositivo |
+| Identificação | `device_id` no corpo de toda mensagem |
 
-A chave deve ser a do **próprio** dispositivo informado em `device_id`. Com a chave de outro dispositivo, a API responde `403`.
+O contrato completo, com exemplos em C++ no estilo do firmware, está em [Guia-Firmware-Lacre-IoT.md](Guia-Firmware-Lacre-IoT.md).
 
-## 1.3 Antes de enviar: cadastro do dispositivo
+## 1.3 Cadastro do dispositivo
 
-O cadastro **oficial** de dispositivo, lacre e cilindro fica no **FluxID**. Enquanto o Worker não traz esse cadastro para a Oxide, o dispositivo é cadastrado **uma vez** direto na Oxide (procedimento provisório):
+- **Oficial:** feito no sistema principal. O Worker copia a lista para a Oxide a cada 5 minutos, com o hash da chave.
+- **Provisório, para testes de bancada:**
 
-```http
-POST http://<IP_DA_API>:3000/api/v1/devices
-Content-Type: application/json
+  ```http
+  POST http://<IP_DA_API>:3000/api/v1/devices
+  Content-Type: application/json
 
-{ "device_id": "DSP-000010", "api_key": "chave-do-lacre-10", "firmware_version": "1.0.0" }
-```
+  { "device_id": "DSP-TESTE-01", "api_key": "chave-de-teste-01", "firmware_version": "1.0.0" }
+  ```
 
-- `201`: cadastrado. A mesma `api_key` vai no firmware.
-- `409`: `device_id` ou `api_key` já existem.
-- Um dispositivo **não cadastrado** recebe `404` em telemetria e eventos. A API **não** cria dispositivos automaticamente.
-- `GET /devices` e `GET /devices/:deviceId` são abertos para a equipe consultar, mas **não mostram a `api_key`**. Guarde a chave no momento do cadastro.
-- **Cadastro oficial no FluxID:** com o Worker rodando, os dispositivos cadastrados no FluxID chegam sozinhos à Oxide (a cada 5 min). Quem cadastra no FluxID gera a chave, grava só o hash (`api_key_hash`, SHA-256 em hexadecimal) e passa a chave para o firmware. Dispositivo com hash autentica **só** pela chave que gera esse hash.
+Não existe criação automática: mensagem de dispositivo não cadastrado responde `404`.
 
-### Cadastro do lacre, do cilindro e dos vínculos (provisório)
+## 1.4 Rotas usadas pelo lacre
 
-Para a API saber a que lacre e cilindro cada dispositivo pertence, cadastre também. Com o Worker rodando, os lacres, cilindros e vínculos do FluxID chegam sozinhos e **prevalecem** sobre os cadastrados aqui; estas rotas (abertas, sem chave) continuam úteis para testes sem o FluxID:
-
-```http
-POST /api/v1/seals          { "seal_code": "LCR-000010", "nfc_uid": "04A2B3C4D5" }
-POST /api/v1/cylinders      { "cylinder_code": "CIL-000010", "serial_number": "SN-123456" }   (a série pode repetir; o código, não)
-POST /api/v1/assignments/device-seal    { "device_id": "DSP-000010", "seal_code": "LCR-000010" }
-POST /api/v1/assignments/seal-cylinder  { "seal_code": "LCR-000010", "cylinder_code": "CIL-000010" }
-```
-
-- Um lacre tem **um** cilindro ativo e um cilindro **um** lacre ativo (RN04); um lacre tem **um** dispositivo ativo (RN05). Conflito → `409`.
-- **Troca:** envie `"replace": true`; o vínculo antigo é encerrado ("Substituído por novo vínculo") e o novo é criado na mesma operação.
-- **Encerrar:** `POST /api/v1/assignments/seal-cylinder/{id}/end` (ou `device-seal/{id}/end`) com `{ "reason": "..." }`. Nada é apagado: o vínculo fica no histórico com data de fim e motivo.
-- **Estado do lacre:** ao ser instalado num cilindro vira `INSTALADO` (só se estiver `EM_ESTOQUE` ou `REMOVIDO`); ao sair do cilindro vira `REMOVIDO` (um lacre violado ou rompido mantém o estado). `INSTALADO` não pode ser definido manualmente.
-- **Histórico:** `GET /api/v1/assignments/seal-cylinder?cylinder_code=CIL-000010` (também `?device_id=`, `?seal_code=`, `?active=true`), do mais recente ao mais antigo.
-- Estado do cilindro (ex.: `EM_TRANSITO`): `POST /api/v1/cylinders/{codigo}/status`.
-
-## 1.4 Rotas usadas pelo ESP32
-
-| Método e rota | Para quê | Respostas |
+| Rota | Para quê | Campos obrigatórios |
 | --- | --- | --- |
-| `POST /iot/telemetries` | Enviar posição, bateria, sinal e estado do lacre | `202` nova; `200` posição repetida; `400`; `401`; `403`; `404`; `409` |
-| `POST /iot/events` | Enviar ocorrências (reinício, falha, mudança do lacre) | `202`; `400`; `401`; `403`; `404`; `409` |
-| `GET /iot/commands/:deviceId` | Buscar comandos pendentes | `200` (lista); `401`; `403`; `404` |
-| `POST /iot/commands/confirm` | Confirmar execução de um comando | `200`; `400`; `401`; `403`; `404`; `409` |
-| `POST /iot/alerts` | Registrar um alerta | `201`; `400`; `401`; `403`; `404`; `409` |
+| `POST /iot/telemetries` | Leitura periódica | `message_id`, `device_id`, `latitude`, `longitude`, `battery_percent` |
+| `POST /iot/events` | Algo aconteceu | os mesmos e `event_type` |
+| `POST /iot/alerts` | Problema identificado pelo lacre | `alert_id`, `device_id`, `alert_type`, `title`, `latitude`, `longitude`, `battery_percent` |
+| `GET /iot/commands/{deviceId}` | Buscar comandos pendentes | — |
+| `POST /iot/commands/confirm` | Confirmar o comando | `command_id`, `device_id`, `status` |
 
-Rotas de alertas para a equipe e o gestor (abertas e provisórias, até o controle por perfil do FluxID): `GET /iot/alerts?status=&device_id=` (lista, do mais recente ao mais antigo) e `PATCH /iot/alerts/{alert_id}/status` (analisar ou encerrar).
-
-Rotas de apoio para a equipe: `GET /iot/telemetries` (lista as telemetrias de todos os dispositivos, da mais recente para a mais antiga; exige uma chave válida) e `GET/POST /devices`, `/seals`, `/cylinders` e `/assignments` (seção 1.3).
-
-### Telemetria — exemplo
+### Leitura — exemplo
 
 ```json
 {
-  "message_id": "MSG-000001",
+  "message_id": "MSG-DSP000001-000123",
   "device_id": "DSP-000001",
-  "latitude": -7.2091939,
-  "longitude": -39.3063666,
-  "speed_kmh": 21.98,
-  "battery_percent": 57.33,
-  "gsm_signal": -64,
+  "latitude": -7.209194,
+  "longitude": -39.306367,
+  "gps_ok": true,
+  "battery_percent": 87,
   "seal_status": "LOCKED",
-  "attempt_count": 1
+  "satelites": 9,
+  "hdop": 0.9
 }
 ```
 
-- Obrigatórios: `message_id` e `device_id` (texto).
-- Números (`latitude`, `longitude`, `speed_kmh`, `battery_percent`, `gsm_signal`) vão como número JSON, **não** como texto.
-- `latitude` e `longitude` vão **juntas**, com latitude entre -90 e 90 e longitude entre -180 e 180. Sem posição do GPS, não envie nenhuma das duas.
-- `seal_status`: `LOCKED` (fechado), `UNLOCKED` (aberto) ou `BROKEN` (rompido).
-- `attempt_count`: quantas vezes o ESP32 já tentou enviar esta mensagem (inteiro ≥ 0).
-- **Posição repetida:** se latitude, longitude e `seal_status` forem iguais aos da última telemetria do dispositivo, a API responde `200 "Posição já registrada; data e hora atualizadas"`, atualiza só a data e hora e não cria outra linha. Se o lacre mudar de estado no mesmo lugar (ex.: `LOCKED` → `BROKEN`), é gravada uma linha nova (`202`).
-
-### Evento — exemplo
-
-```json
-{ "message_id": "EVT-000001", "device_id": "DSP-000001", "event_type": "seal_changed", "seal_status": "BROKEN", "attempt_count": 1 }
-```
-
-- Obrigatórios: `message_id`, `device_id` e `event_type`. O `event_type` é texto livre (ex.: `startup`, `seal_changed`, `hardware_failure`).
-
-### Alerta — exemplo
-
-```json
-{ "alert_id": "ALT-000001", "device_id": "DSP-000001", "alert_type": "LACRE_VIOLADO", "severity": "CRITICA", "title": "Lacre rompido" }
-```
-
-- Obrigatórios: `alert_id`, `device_id`, `alert_type` e `title`.
-- `alert_type`: um dos 28 códigos de [Tipos-de-Erro.md](Tipos-de-Erro.md) (ex.: `LACRE_VIOLADO`, `GPS_INATIVO`, `BATERIA_BAIXA`, `DISPOSITIVO_FALHA`). Outro valor → `400`.
-- **Transição:** os nomes antigos continuam aceitos e são gravados em português: `SEAL_BROKEN` → `LACRE_VIOLADO`, `GEOFENCE_EXIT` → `SAIDA_GEOCERCA`, `LOW_BATTERY` → `BATERIA_BAIXA`, `DEVICE_ERROR` → `DISPOSITIVO_FALHA`, `COMMAND_FAILURE` → `COMANDO_FALHOU`, `COMMUNICATION_LOST` → `SEM_COMUNICACAO`. Atualize o firmware para os códigos em português quando puder.
-- `severity` é opcional (`BAIXA`, `MEDIA`, `ALTA`, `CRITICA`). Sem ela, vale a severidade sugerida no catálogo (ex.: `LACRE_VIOLADO` → `CRITICA`; `SEM_COMUNICACAO` e `COMANDO_FALHOU` → `ALTA`; `DISPOSITIVO_FALHA` → `MEDIA`; `BATERIA_BAIXA` → `BAIXA`).
-- O alerta nasce sempre `ABERTO`. Campos antigos `status_id` e `severity_id` são ignorados.
-
-### Análise e encerramento de alertas (gestor)
-
-```http
-PATCH /api/v1/iot/alerts/ALT-000001/status   { "status": "EM_ANALISE" }
-PATCH /api/v1/iot/alerts/ALT-000001/status   { "status": "ENCERRADO", "resolved_by": "Maria (gestora)", "resolution_note": "Lacre conferido no local" }
-```
-
-- Caminhos: `ABERTO` → `EM_ANALISE` → `ENCERRADO`, ou `ABERTO` → `ENCERRADO`. Encerrar exige `resolved_by` e `resolution_note` (`400` sem eles); a data é preenchida sozinha.
-- `ENCERRADO` é final: tentar mudar de novo → `409` ("um problema novo gera um alerta novo"). Transição repetida → `409`; alerta inexistente → `404`.
-
 ## 1.5 O que o firmware faz com cada resposta
 
-| Código | Significado | O que o ESP32 deve fazer |
+| Resposta | Significado | O que o firmware faz |
 | --- | --- | --- |
-| `202` | Dado novo gravado | Sucesso. A próxima leitura usa um `message_id` novo |
-| `200` | Posição já registrada (telemetria) ou consulta/confirmação ok | Sucesso. Não reenviar |
-| `201` | Alerta criado | Sucesso |
-| `409` | Mensagem já recebida (mesmo `message_id`) ou comando já confirmado | Tratar como **sucesso**. Não reenviar |
-| `400` | Payload inválido (campo ausente, tipo errado, valor fora da lista) | **Não reenviar** o mesmo payload; registrar no log. É erro de firmware |
-| `401` | `X-API-Key` ausente ou inválida | Conferir a chave configurada. Não insistir |
-| `403` | Dispositivo desativado ou chave de outro dispositivo | Conferir `device_id` e chave. Não insistir |
-| `404` | Dispositivo não cadastrado (ou comando inexistente) | Cadastrar o dispositivo (seção 1.3). Não insistir |
-| `413` | Corpo maior que 100 KB | Reduzir o payload |
-| `500`, sem resposta ou tempo esgotado | Falha do servidor ou da rede | **Reenviar** com o **mesmo** `message_id` e `attempt_count + 1`, aguardando um intervalo crescente entre as tentativas |
+| `200`, `201`, `202` | Recebido | Apagar da fila local e seguir |
+| `409` | Já recebido antes | Tratar como sucesso; não reenviar |
+| `400` | Corpo inválido (ex.: sem posição ou sem bateria) | Não reenviar; é erro do firmware |
+| `401`, `403`, `404` | Chave errada, de outro dispositivo, dispositivo desativado ou não cadastrado | Não insistir; avisar a equipe |
+| `500` ou sem resposta | Problema no servidor ou na rede | Reenviar a mesma mensagem, com o mesmo `message_id` |
 
 ## 1.6 Regras do `message_id` e do reenvio
 
-- Cada leitura nova recebe um `message_id` **único** para aquele dispositivo. Sugestão: prefixo + sequência guardada na memória não volátil (NVS), para não repetir depois de um reinício.
-- O reenvio de **uma mesma leitura** usa o **mesmo** `message_id`. Assim, se a primeira tentativa chegou e só a resposta se perdeu, a API responde `409` e nada é duplicado.
-- O `attempt_count` só informa quantas tentativas o ESP32 fez; ele não muda a regra de duplicidade.
+- `message_id` é único por mensagem; no alerta, o `alert_id` faz esse papel.
+- Reenvio usa o mesmo `message_id`. A API responde `409` e não grava de novo.
+- Leitura com a mesma posição e o mesmo estado do lacre da anterior responde `200`: a API atualiza a leitura anterior e não cria outra.
 
 ## 1.7 Ciclo de comandos
 
 ```text
-1. ESP32 → GET /iot/commands/DSP-000001        (com a própria X-API-Key)
-2. API   → [ { "command_id": "CMD-1", "command_type": "TRAVAR_VALVULA", "status": "PENDENTE", ... } ]
-3. ESP32 executa o comando na válvula
-4. ESP32 → POST /iot/commands/confirm
-           { "command_id": "CMD-1", "device_id": "DSP-000001", "status": "EXECUTADO" }
-           ou { ..., "status": "ERRO", "error_message": "motor travado" }
-5. API   → 200 "Comando confirmado"   (409 se já estava confirmado)
+Sistema principal cria o comando
+   ↓  Worker traz (a cada rodada)
+Oxide: commands (PENDENTE)
+   ↓  lacre busca: GET /iot/commands/{deviceId}
+Lacre executa
+   ↓  lacre confirma: POST /iot/commands/confirm (EXECUTADO ou ERRO)
+Oxide: comando concluído + mensagem CONFIRMACAO_COMANDO na fila
+   ↓  Worker envia
+Sistema principal fica sabendo do resultado
 ```
 
-- A lista traz só comandos `PENDENTE`, do mais antigo para o mais novo.
-- Tipos de comando aceitos: `TRAVAR_VALVULA` e `DESTRAVAR_VALVULA`. O firmware precisa reconhecer exatamente esses nomes.
-- Os comandos são criados pelo sistema, não por rota aberta: hoje direto no banco e, no futuro, pelos comandos automáticos (ex.: lacre rompido → `TRAVAR_VALVULA`). Isso evita que qualquer pessoa destrave uma válvula pela API.
-- Comandos ficam só na Oxide; a tabela no FluxID será decidida na fase do Worker.
+## 1.8 Onde cada dado fica
 
-## 1.8 Onde cada campo fica no banco
-
-### Telemetria → tabela `telemetry_queue`
-
-| Campo enviado | Coluna | Observação |
-| --- | --- | --- |
-| `message_id` | `message_id` | Único |
-| `device_id` | `device_id` | Precisa existir em `devices` |
-| `latitude`, `longitude`, `speed_kmh`, `battery_percent`, `gsm_signal` | Mesmo nome | Opcionais |
-| `seal_status` | `seal_status` | `LOCKED`, `UNLOCKED`, `BROKEN` |
-| `attempt_count` | `device_attempt_count` | Tentativas de envio do ESP32 |
-| `last_seen_at` | `last_seen_at` | Opcional, ISO 8601. Na posição repetida, o servidor grava a hora atual (UTC, `AAAA-MM-DD HH:MM:SS`) |
-| `lacre_id`, `cilindro_id` | Mesmo nome | **Não vêm do ESP32:** a API preenche pelo vínculo ativo do dispositivo no momento do recebimento (o que vier no payload é ignorado) |
-| — | `error_type` | Código do catálogo `Tipos-de-Erro.md` detectado no recebimento, sem gerar alerta: `LACRE_ABERTO_EM_TRANSITO`, `DISPOSITIVO_SEM_LACRE` ou `LACRE_SEM_CILINDRO` |
-| `payload_json` (ou o corpo inteiro) | `payload_json` | Guarda o JSON original recebido |
-| `status` | — | **Ignorado** (fica só em `payload_json`). Não enviar |
-| — | `status`, `attempt_count`, `last_error`, `next_attempt_at` | Controle do Worker: começa `PENDING` e `0` (seção "Estados da fila") |
-| — | `last_repeat_message_id` | `message_id` da última posição repetida |
-
-### Evento → tabela `events`
-
-| Campo enviado | Coluna |
+| Dado | Onde |
 | --- | --- |
-| `message_id`, `device_id`, `seal_status`, `payload_json` | Mesmo nome |
-| `event_type` | `message_type` |
-| `attempt_count` | `device_attempt_count` |
-| — | `error_type`: código do catálogo detectado no recebimento (ex.: `LACRE_ABERTO_EM_TRANSITO`) |
-| — | `status` (`PENDING`), `attempt_count` (`0`), `last_error`, `next_attempt_at`: controle do Worker |
-
-### Comandos e alertas
-
-- `commands`: `command_id`, `device_id`, `command_type` (`TRAVAR_VALVULA`, `DESTRAVAR_VALVULA`), `status` (`PENDENTE` → `EXECUTADO`/`ERRO`), `created_at`, `executed_at`, `error_message`. O banco rejeita comando pendente com outro tipo.
-- `alerts`: `alert_id`, `device_id`, `alert_type`, `severity` (`BAIXA`, `MEDIA`, `ALTA`, `CRITICA`), `status` (`ABERTO`, `EM_ANALISE`, `ENCERRADO`), `title`, `description`, `created_at`, `resolved_at`, `resolved_by`, `resolution_note`. Tipo, severidade e status usam os mesmos valores do FluxID e são protegidos por `CHECK`. A sincronização do alerta fica em `sync_status`, `sync_attempt_count`, `sync_last_error` e `sync_next_attempt_at`; analisar ou encerrar o alerta o devolve à fila do Worker.
-- `devices.api_key_hash`: hash da chave vindo do FluxID. `sync_logs`: uma linha por rodada do Worker.
-
-### Associação
-
-- `seals`: `seal_code`, `nfc_uid`, `status` (estados de `lacres` do FluxID).
-- `cylinders`: `cylinder_code` (único), `serial_number` (pode repetir entre empresas; a regra "série única por empresa" é do FluxID), `status` (estados de `cilindros` do FluxID). A API chega ao cilindro **pelo lacre** e pelo código, nunca pela série.
-- `seal_assignments` (dispositivo ↔ lacre) e `cylinder_assignments` (lacre ↔ cilindro): `started_at`, `ended_at`, `end_reason`, `fluxid_id` (id do vínculo no FluxID, quando veio de lá). Vínculo ativo = `ended_at` vazio.
+| Mensagem do lacre, já validada | `mensagens.payload_json` (o mesmo JSON que vai para o banco principal) |
+| Tipo da mensagem | `mensagens.tipo`: `TELEMETRIA`, `EVENTO`, `ALERTA` ou `CONFIRMACAO_COMANDO` |
+| Hora de chegada | `mensagens.received_at` |
+| Situação do envio | `mensagens.status`, `attempt_count`, `last_error`, `next_attempt_at` e `synced_at` |
+| Último estado do lacre | `devices.last_*` (contato, posição, GPS, lacre, bateria e sinal) |
+| Comando e resultado | `commands` |
+| Última rodada do Worker | arquivo `oxide-worker.json`, ao lado do banco |
 
 ### Estados da fila
 
-`status` em `telemetry_queue` e `events` (e `sync_status` em `alerts`) é o estado da **sincronização** com o FluxID, não o estado do dispositivo ou do lacre. Quando há posições repetidas, só a linha original (a mais antiga) segue para o FluxID.
-
 | Estado | Significado |
 | --- | --- |
-| `PENDING` sem `next_attempt_at` | Pronta para enviar |
-| `PENDING` com `next_attempt_at` | Esperando uma condição (ex.: vínculo do lacre, P3), sem gastar tentativa |
+| `PENDING` | Pronta para enviar |
 | `PROCESSING` | Sendo enviada |
-| `SYNCED` | Gravada no FluxID |
-| `ERROR` com `next_attempt_at` | Falhou; nova tentativa agendada (1 min, 5 min, 15 min, 1 h, 6 h) |
-| `ERROR` sem `next_attempt_at` | Parada: precisa do gestor (`GET /api/v1/sync/problems`, `POST /api/v1/sync/retry`) |
+| `SYNCED` | Gravada no banco principal |
+| `ERROR` com próxima tentativa | Falhou; nova tentativa marcada |
+| `ERROR` sem próxima tentativa | Parada: precisa do gestor |
+| `ARQUIVADA` | Veio do modelo antigo sem posição ou bateria; não é enviada |
 
 ### Rodar o Worker
 
-1. Copie `.env.example` para `.env` e preencha `FLUXID_DATABASE_URL` (a senha fica só no `.env`, que não vai para o git).
+1. Copie `.env.example` para `.env` e preencha `SUPABASE_IOT_URL` e `SUPABASE_SERVICE_KEY`. A chave fica só no `.env`, que não vai para o Git.
 2. Em outro terminal, ao lado da API: `npm run worker` (Ctrl+C encerra ao fim da rodada) ou `npm run worker -- --once` (uma rodada).
-3. Acompanhe em `GET /api/v1/sync/status`. As regras completas estão em [Integracao-Oxide-FluxID.md](Integracao-Oxide-FluxID.md).
+3. Acompanhe em `GET /api/v1/sync/status` e `GET /health`.
 
 ### Simular um lacre (`npm run simular`)
 
-O simulador faz o percurso completo de um lacre e de um operador e confere cada passo nos dois bancos:
+Faz o percurso completo de um lacre e confere cada passo:
+- cadastro vindo do banco principal;
+- leituras com posição e bateria, e as recusas sem elas;
+- posição repetida e mensagem duplicada;
+- GPS sem sinal;
+- alertas automáticos;
+- banco principal fora do ar e reenvio sem duplicar;
+- comando da válvula e confirmação.
 
-- **Operador:** cadastro unitário de empresa, operador, cliente com endereço (geocerca de 10 m), cilindro, lacre, dispositivo e rota (entrega); erros de cadastro; cadastro em massa por `simulador/cadastro-em-massa.csv`.
-- **Lacre:** lacre ativo, trajeto, posição repetida, `message_id` repetido, GPS sem sinal, abertura em trânsito, fora da rota, dentro e fora da geocerca, violação e todos os alertas do catálogo.
-- **Fila:** FluxID fora do ar, espera do vínculo, dispositivo fora do FluxID, reenvio sem duplicar.
-- **Gestor:** encerramento do alerta.
-- **Visualização:** mapa, alertas, eventos, quarentena e histórico do cilindro.
+Roda numa pasta temporária, com uma `oxide.db` nova, a própria API na porta 3199 e um **recebedor de teste** no lugar do Supabase. O `oxide.db` do projeto não é tocado, e a sua API pode continuar rodando.
 
-Como rodar:
+### Saúde, backup e retenção
 
-1. Docker Desktop aberto, com o container `fluxid-analise` rodando.
-2. `.env` apontando para `127.0.0.1:54329`. **O simulador se recusa a rodar em outro banco.**
-3. `npm run simular`.
-
-A simulação usa um `oxide.db` novo, numa pasta temporária, e a própria API na porta 3199. O `oxide.db` do projeto não é tocado, e a sua API pode continuar rodando. No fim, mostra o resultado e o caminho do relatório da rodada.
-
-**Ainda não existem:**
-- a detecção automática de geocerca e de rota (o lacre simulado envia os alertas `SAIDA_GEOCERCA` e `SAIDA_ROTA`);
-- o operador pelo frontend (as ações são feitas direto no FluxID, como a API do frontend fará).
+| Comando ou rota | Para quê |
+| --- | --- |
+| `GET /health` | Situação da API, da fila e do Worker. Responde 200 ou 503 |
+| `npm run backup` | Cópia consistente da `oxide.db` em `backups/`; mantém as 14 mais novas |
+| `npm run retencao` | Mostra o que sairia: só o que **já foi enviado** há mais de 30 dias. Para apagar: `npm run retencao -- --confirmar` |
 
 ## 1.9 O que ainda não existe
 
-- API do frontend sobre o FluxID (próxima etapa, depois da validação da integração).
-- Controle por perfil nas rotas abertas da equipe (`/devices`, `/seals`, `/cylinders`, `/assignments`, `/iot/alerts` de análise e `/sync`).
-- Criação automática de comandos e verificação dos tipos de erro do catálogo (`Tipos-de-Erro.md`), como saída de rota e GPS sem sinal.
-- Justificativa do motorista na saída de rota (fica para a entrega de geofence e rota).
-- Geofence, comandos automáticos e alertas automáticos a partir do `error_type`.
+- Teste contra o Supabase de verdade: depende da função de recebimento e das tabelas do lacre no projeto do frontend.
+- Envio HTTP ligado no firmware (o contrato está no guia do firmware 2.0) e a leitura da bateria no lacre.
+- Controle por perfil nas rotas abertas da equipe (`/devices`, `/iot/messages` e `/sync`).
+- HTTPS e limite de requisições.
 
 ## 1.10 Estado atual
 
-- API em funcionamento, validada pela suíte automatizada (`npm test`, 96/96) e pelo Roteiro de Teste completo no `oxide.db` real (até a versão anterior ao Worker).
-- Worker e integração com o FluxID implementados e testados pela IA em 07/10/2026 (Roteiro v1.10, sem falhas); aprovados por Natã da Silva Baracho em 07/10/2026 (seção 7.23).
-- Próximas entregas: API do frontend sobre o FluxID; geofence e rota; regras e alertas automáticos (incluindo comandos automáticos).
-- Pendências conhecidas: firmware do ESP32 precisa enviar `seal_status` e `attempt_count` e tratar as respostas da seção 1.5; `nodemon` com vulnerabilidade apenas em desenvolvimento.
+- API, fila única e Worker implementados e testados pela IA em 10/10/2026: suíte com 71/71 e simulador com 23/23, contra um recebedor de teste. **Aprovado por Natã da Silva Baracho em 10/10/2026** (seção 7.26).
+- O banco principal passou a ser o Supabase. O FluxID em PostgreSQL ficou como banco de teste.
+- Próximos passos:
+  - o professor Alisson cria a função de recebimento e passa o endereço;
+  - o Simão liga o envio no firmware;
+  - primeiro teste de ponta a ponta com o Supabase.
 
 ---
 
@@ -680,20 +544,66 @@ Pedido de Natã da Silva Baracho: simular um lacre de ponta a ponta e um operado
 
 Relatório: [Relatorio-de-Teste-2026-10-07-18h45.md](Doc_tese/Relatorio-de-Teste-2026-10-07-18h45.md). Questionário 7/7 sim: **aprovado por Natã da Silva Baracho** em 07/10/2026.
 
+### 7.25 Sistema completo sobre o FluxID e documentação final (07 a 09/10/2026)
+- **Sistema completo (07/10):** a pedido de Natã, a IA implementou numa branch o script `006` do FluxID, uma API para o frontend (`/api/v1/app`), alertas automáticos (incluindo rota e geocerca) e rotinas de manutenção. Os testes da IA passaram (108/108, 45/45 e 65/65). **A branch não entrou na `main`:** na avaliação seguinte, a equipe descobriu que o banco principal é o Supabase do frontend e que a API não atenderia o frontend. O trabalho ficou guardado no GitHub como `arquivo/sistema-completo`. Relatório: `Relatorio-de-Teste-2026-10-07-23h45.md`, nessa branch.
+- **Documentação final (08/10, PR #19):** pasta `DocumentacaoFinal/` com 19 registros de uso de IA e validação humana (Template 7 do evento INTEGRA 2026), um por parte do projeto.
+
+### 7.26 Oxide enxuta, fila única e envio ao Supabase (10/10/2026)
+Decisões de Natã da Silva Baracho, com as respostas do professor Alisson:
+
+| # | Decisão |
+| --- | --- |
+| 1 | O banco principal é o Supabase do projeto `fluxid_integra2026`. O FluxID em PostgreSQL fica só como teste |
+| 2 | A API não atende o frontend. Ela recebe os dados do lacre, interpreta e envia ao banco principal |
+| 3 | O envio é pela API REST do Supabase, com a chave `service_role`, por uma função de recebimento |
+| 4 | A Oxide fica com uma fila mínima: de 11 para 3 tabelas |
+| 5 | As rotas do lacre continuam as mesmas |
+| 6 | Posição e bateria são obrigatórias em toda mensagem. Sem sinal de GPS, vale a última posição com `gps_ok: false` |
+| 7 | Regras automáticas: só as que saem da própria mensagem (bateria, sinal e lacre). Rota, geocerca e tempo ficam no sistema principal |
+| 8 | Os comandos da válvula e o cadastro dos dispositivos vêm do banco principal |
+
+O que foi feito:
+- **Oxide:** tabelas `devices`, `mensagens` (fila única) e `commands`. Migração automática do modelo antigo, com cópia de segurança e remoção das tabelas que saíram. A leitura antiga com posição e bateria segue para o banco principal; o resto fica como `ARQUIVADA`.
+- **API:** validação comum de posição e bateria; `gps_ok`; `satelites`, `hdop` e `device_state` aceitos; alertas automáticos abertos na mudança de estado; `GET /iot/messages`; `GET /health`.
+- **Worker:** envio em lotes por HTTP, com resultado por mensagem (`stored`, `duplicate`, `rejected`); cadastro de dispositivos e comandos trazidos do banco principal.
+- **Removido:** rotas de lacres, cilindros e vínculos; análise e encerramento de alertas; envio ao FluxID; a página da proposta da API do frontend; a dependência `pg`.
+- **Manutenção:** `npm run backup` e `npm run retencao`.
+- **Documentos:** novo `Contrato-Entrega-Supabase.md`; guia do firmware 2.0, feito a partir do repositório `fluxid-firmware`; `Oxidedb.md` 2.0; regras 2.0.
+- **Documentação final do evento:** novo registro 20 em `DocumentacaoFinal/` (Oxide enxuta e envio ao Supabase) e registro 19 atualizado com as respostas do professor Alisson. A pasta passa a ter 20 registros.
+
+Achado: a suíte antiga precisava de uma cópia da `oxide.db` real para rodar. A nova roda numa pasta temporária, com banco novo, e não toca no banco do projeto.
+
+Testes:
+- compilação sem erros;
+- suíte nova com 71/71;
+- simulador novo com 23/23;
+- migração testada numa cópia da `oxide.db` real: 1 leitura completa na fila, 17 mensagens sem posição ou bateria arquivadas, 3 dispositivos mantidos e banco íntegro; o original ficou intacto (checksum igual).
+
+**O que não pôde ser testado:** o envio ao Supabase de verdade. A função de recebimento e as tabelas do lacre ainda não estão no repositório do frontend; os testes usaram um recebedor de teste que segue o contrato.
+
+Ajustes pedidos na validação e já feitos:
+- as mensagens antigas completas **são enviadas** ao banco principal (antes ficariam todas arquivadas);
+- na posição repetida, **só a data e a hora** são atualizadas (antes, também a bateria e o sinal).
+
+Relatório: [Relatorio-de-Teste-2026-10-10-12h40.md](Doc_tese/Relatorio-de-Teste-2026-10-10-12h40.md). Questionário respondido: **aprovado por Natã da Silva Baracho em 10/10/2026**, com duas confirmações pendentes (o código do alerta de lacre aberto e o envio do contrato ao professor Alisson).
+
 ## 9. Suíte de testes automatizados (`npm test`)
 
-A suíte `tests/api.test.ts` cobre hoje 96 casos de ponta a ponta:
+A suíte `tests/api.test.ts` foi reescrita em 10/10/2026 para o modelo enxuto e cobre 71 casos. Ela roda numa pasta temporária, com uma `oxide.db` nova e um recebedor de teste no lugar do Supabase.
 
-1. **Geral & Documentação:** `/`, `/api-docs/`, `/api-docs/swagger-ui-init.js` e a regra de que toda rota do Swagger tem um grupo declarado; página da proposta `/api-docs-fluxid` separada da atual, com as 21 funções em grupos e nenhuma rota `/api/v1/app` ainda.
-2. **Dispositivos:** listagem e busca sem `api_key`, `404`, validação `400`, criação `201`, `device_id` duplicado (`409`), `api_key` já usada (`409`) e `active` inválido (`400`).
-3. **Autenticação:** `401` sem header, `401` com chave inválida, `403` para dispositivo inativo e `200` com chave válida.
-4. **Telemetria:** campos obrigatórios (`400`), payload válido (`202`), `message_id` duplicado (`409`), posição repetida (`200`, sem nova linha), posição nova (nova linha), reenvio de posição repetida (`409`), `attempt_count` em `device_attempt_count`, tipo inválido (`400`), dispositivo inexistente (`404`), chave de outro dispositivo (`403`), `seal_status` inválido (`400`), mudança do lacre na mesma posição (nova linha), `attempt_count` negativo (`400`), latitude fora da faixa (`400`), só latitude (`400`) e JSON malformado (`400`).
-5. **Eventos:** sem chave (`401`), campos obrigatórios (`400`), `seal_status` inválido (`400`), evento válido (`202`), `attempt_count` em `device_attempt_count`, dispositivo não cadastrado (`404`, sem criação), chave de outro dispositivo (`403`) e duplicidade (`409`).
-6. **Comandos:** sem chave (`401`), chave de outro dispositivo (`403`), pendentes (`200`), status inválido (`400`), comando inexistente (`404`), confirmação (`200`), reconfirmação (`409`) e lista após confirmação, rejeição pelo banco de comando pendente fora do catálogo e de status desconhecido.
-7. **Alertas:** sem chave (`401`), chave de outro dispositivo (`403`), tipo inválido e `toString` (`400`), severidade inválida (`400`), nome antigo convertido para português com severidade padrão (`201`), severidade informada com campos antigos ignorados (`201`), duplicidade (`409`), código do catálogo (`201`), `CHECK` de tipo, listagem e filtros, transições `EM_ANALISE`/`ENCERRADO` (`200`), transição repetida e reabertura (`409`), encerrar sem motivo (`400`), inexistente (`404`) e `CHECK` de encerramento.
-8. **Associação:** cadastro de lacres e cilindros (inclusive duplicidades), vínculos, conflitos RN04/RN05, lacre danificado que não instala, troca com `replace`, encerramento, histórico, `INSTALADO` manual bloqueado, telemetria com lacre e cilindro do vínculo e os três `error_type`.
-9. **Integração com o FluxID:** rotas `/sync/status`, `/sync/problems` e `/sync/retry`, alerta que volta à fila ao mudar de status, autenticação pelo hash da chave (a chave em texto guardada deixa de valer) e `api_key_hash` fora das respostas.
-10. **Limpeza:** remoção dos registros `DSP-TEST%`, `LCR-TEST%` e `CIL-TEST%` ao final.
+1. **Geral, documentação e banco:** `/`, Swagger, regra de que toda rota tem um grupo, banco com só 3 tabelas e rota antiga removida.
+2. **Dispositivos:** cadastro provisório, duplicidades (`409`), validações (`400`) e respostas sem a chave.
+3. **Autenticação:** sem chave e chave inválida (`401`), dispositivo inativo e chave de outro dispositivo (`403`), dispositivo não cadastrado (`404`) e cabeçalho em minúsculas.
+4. **Telemetria:** leitura válida; campos obrigatórios (posição e bateria); tipos e faixas; `gps_ok`; JSON malformado; `message_id` repetido; posição repetida; posição nova; GPS sem sinal; campos da fila protegidos; listagem de mensagens.
+5. **Eventos:** `event_type` obrigatório, posição e bateria obrigatórias, duplicidade e chave.
+6. **Alertas enviados pelo lacre:** tipo do catálogo, severidade, título, posição e bateria, nome antigo convertido e duplicidade.
+7. **Alertas automáticos:** bateria baixa, sinal fraco e lacre aberto ou rompido, cada um aberto só na mudança; evento também dispara; último estado do dispositivo.
+8. **Worker:** configuração obrigatória; banco principal fora do ar e chave recusada sem gastar tentativa; mensagem aceita, recusada e sem resposta; parada depois da sexta falha; nova tentativa pelo gestor; reenvio sem duplicar; posição repetida reenviada; lotes; situação da fila.
+9. **Cadastro e comandos do banco principal:** dispositivo só com o hash; troca de chave; dispositivo desativado; comando trazido, buscado e confirmado; avisos; regras do banco.
+10. **Saúde:** `/health` com 200 e com 503.
+11. **Migração e manutenção:** banco do modelo antigo, backup e retenção.
+
+A suíte anterior (96 casos, modelo com filas separadas e envio ao FluxID) está no histórico do Git até o PR #19.
 
 ### Correção no cadastro de dispositivos (fase inicial)
 - Problema: quando `active` era omitido, o valor chegava como `undefined`, virava `NULL` e violava o `NOT NULL` (erro `500`).
@@ -703,7 +613,7 @@ A suíte `tests/api.test.ts` cobre hoje 96 casos de ponta a ponta:
 
 # Parte 3 — Histórico de PRs por funcionalidade
 
-Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **aprovada por Natã da Silva Baracho**. Esta parte e a seção "Quem faz o quê" (1.1) foram conferidas por questionário (6/6 sim) e **aprovadas por Natã da Silva Baracho** em 06/10/2026. O PR que mexeu em mais de uma parte aparece em cada grupo, só com o que mudou naquela parte. A cada novo PR, esta parte é atualizada.
+Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validação **aprovada por Natã da Silva Baracho**. O #20 (Oxide enxuta) foi **aprovado por Natã da Silva Baracho** em 10/10/2026. Esta parte e a seção "Quem faz o quê" (1.1) foram conferidas por questionário (6/6 sim) e **aprovadas por Natã da Silva Baracho** em 06/10/2026. O PR que mexeu em mais de uma parte aparece em cada grupo, só com o que mudou naquela parte. A cada novo PR, esta parte é atualizada.
 
 ## 3.1 API
 
@@ -718,6 +628,7 @@ Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **a
 | #14 | Swagger em grupos | 8 grupos com explicação (Dispositivos, Telemetria, Eventos, Comandos, Alertas, Lacres, Cilindros, Vínculos), sem grupo "default"; teste que barra rota sem grupo |
 | #15 | Integração Oxide ⇄ FluxID | Chave por hash; alerta volta à fila ao mudar de status; rotas `/sync/*` e grupo "Sincronização" |
 | #17 | Simulador e série do cilindro | Cadastro provisório de cilindro aceita série repetida (o código continua único); simulador `npm run simular` |
+| #20 | Oxide enxuta e envio ao Supabase | Posição e bateria obrigatórias em toda mensagem; `gps_ok`; alertas automáticos da própria mensagem; `GET /iot/messages` e `GET /health`; saem as rotas de lacres, cilindros, vínculos e de análise de alertas e a página da proposta do frontend |
 
 ## 3.2 Oxide (`oxide.db`)
 
@@ -730,6 +641,7 @@ Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **a
 | #12 | Alertas em português | `alerts` com `CHECK` do catálogo em `alert_type`, colunas `resolved_by` e `resolution_note` e `CHECK` de `ENCERRADO` com data; migração automática dos tipos em inglês; `Oxidedb.md` v1.6 validado |
 | #15 | Integração Oxide ⇄ FluxID | `next_attempt_at` na telemetria e nos eventos; `sync_*` nos alertas; `devices.api_key_hash`; `fluxid_id` nos vínculos; tabela `sync_logs`; `Oxidedb.md` v1.7 |
 | #17 | Simulador e série do cilindro | `cylinders.serial_number` sem `UNIQUE` (série única só por empresa, no FluxID); migração preservando os dados; `Oxidedb.md` v1.8 |
+| #20 | Oxide enxuta e envio ao Supabase | De 11 para 3 tabelas (`devices`, `mensagens`, `commands`); migração com cópia de segurança (leituras antigas completas seguem para o banco principal; as demais ficam arquivadas); backup e retenção; `Oxidedb.md` v2.0 |
 
 ## 3.3 FluxID
 
@@ -746,6 +658,8 @@ Todos os PRs abaixo foram mesclados na `main` em 06/10/2026, com validação **a
 | #14 | Docker e dump | FluxID de análise no Docker (container `fluxid-analise`, PostGIS 18), com `001`, `002` e `003` aplicados; dump movido para `sql/fluxid/FluxID.sql` |
 | #15 | Integração Oxide ⇄ FluxID | Script `004` (P1 a P8, gatilho FLX-26) e `005` (estruturas do frontend, histórico do cilindro integrado com a Oxide) |
 | #17 | Simulador | O simulador usa o FluxID de análise: operador (cadastro unitário, em massa por CSV, rota como entrega) e conferência dos dados que chegam |
+| #19 | Documentação final | Registros de uso de IA (Template 7) sobre o banco FluxID, entre as demais partes do projeto |
+| #20 | Oxide enxuta e envio ao Supabase | O FluxID em PostgreSQL deixa de ser o destino e vira banco de teste; os documentos dele ficam como referência histórica. O banco principal é o Supabase |
 
 ## 3.4 Worker
 
@@ -761,3 +675,4 @@ Implementado e aprovado em 07/10/2026 (PR #15). O que levou até ele:
 | #13 | Alerta com cilindro e lacre | O Worker busca o lacre e o cilindro do vínculo válido na data do alerta; sem vínculo, o alerta fica em erro na Oxide para o gestor |
 | #15 | Integração Oxide ⇄ FluxID | Worker completo (`src/worker/`, `npm run worker`): envio da fila, tentativas, espera do P3, cadastro de volta com o hash da chave |
 | #17 | Simulador | O simulador exercita o Worker de ponta a ponta: cadastro sem conflitos, fila, FluxID fora do ar, espera do vínculo e reenvio |
+| #20 | Oxide enxuta e envio ao Supabase | Worker reescrito: envia a fila única por HTTP à função de recebimento do Supabase, com resultado por mensagem, e traz os dispositivos e os comandos; simulador novo com recebedor de teste |
