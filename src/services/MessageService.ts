@@ -122,17 +122,12 @@ export class MessageService {
       const payload: Record<string, unknown> = { type: tipo, origin: "lacre", received_at: agora, ...leitura, ...extra };
 
       // Mesma posição e mesmo estado do lacre da última telemetria: não cria
-      // outra linha, só atualiza a data, a bateria e o sinal da que já existe
+      // outra linha, só atualiza a data e a hora da que já existe
       if (tipo === "TELEMETRIA" && this.samePosition(device, leitura)) {
         const anterior = this.messages.findByMessageId(device.last_telemetry_message_id!);
         if (anterior) {
           const atual = JSON.parse(anterior.payload_json) as Record<string, unknown>;
-          this.messages.updatePayload(anterior.message_id, {
-            ...atual,
-            last_seen_at: agora,
-            battery_percent: leitura.battery_percent,
-            ...(leitura.gsm_signal !== undefined ? { gsm_signal: leitura.gsm_signal } : {})
-          });
+          this.messages.updatePayload(anterior.message_id, { ...atual, last_seen_at: agora });
           this.devices.setLastRepeat(device.device_id, leitura.message_id);
           this.automaticAlerts(device, leitura, agora);
           this.updateState(leitura);

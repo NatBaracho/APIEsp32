@@ -6,7 +6,7 @@ export type SealStatus = typeof sealStatuses[number];
 
 // PENDING sem next_attempt_at: pronta; ERROR com next_attempt_at: nova
 // tentativa marcada; ERROR sem next_attempt_at: parada para o gestor;
-// ARQUIVADA: veio do modelo antigo e não é enviada
+// ARQUIVADA: veio do modelo antigo sem posição ou bateria e não é enviada
 export type QueueStatus = "PENDING" | "PROCESSING" | "SYNCED" | "ERROR" | "ARQUIVADA";
 
 export interface QueuedMessage {

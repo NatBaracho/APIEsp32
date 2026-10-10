@@ -102,8 +102,10 @@ if (chavesRepetidas.length === 0) {
 
 // Migração do modelo antigo (filas separadas, lacres, cilindros, vínculos).
 // 1. Cópia de segurança do arquivo inteiro, antes de qualquer mudança.
-// 2. O que estava nas filas antigas vai para mensagens como ARQUIVADA: fica
-//    guardado, mas não é enviado ao banco principal (eram dados de teste).
+// 2. O que estava nas filas antigas vai para mensagens. A leitura antiga que
+//    tem posição e bateria entra na fila (PENDING) e segue para o banco
+//    principal, no formato atual. A que não tem (o banco principal exige as
+//    duas) fica guardada como ARQUIVADA e não é enviada.
 // 3. As tabelas que saíram do modelo são removidas.
 const tabelasAntigas = [
   "cylinder_assignments", "seal_assignments", "seals", "cylinders",
@@ -124,6 +126,29 @@ if (tabelasAntigas.length > 0) {
 
   db.pragma("foreign_keys = OFF");
   db.transaction(() => {
+    // Leituras antigas completas: convertidas para o formato atual e enviadas.
+    // json_patch remove os campos opcionais vazios
+    const colunasTelemetria = tabelasAntigas.includes("telemetry_queue") ? new Set(colunasDe("telemetry_queue")) : new Set<string>();
+    if (["latitude", "longitude", "battery_percent"].every(c => colunasTelemetria.has(c))) {
+      const opcional = (coluna: string): string => (colunasTelemetria.has(coluna) ? `, '${coluna}', "${coluna}"` : "");
+      const enviadas = db.prepare(`
+        INSERT OR IGNORE INTO mensagens (message_id, device_id, tipo, payload_json, status)
+        SELECT message_id, device_id, 'TELEMETRIA', json_patch('{}', json_object(
+          'type', 'TELEMETRIA', 'origin', 'lacre', 'legacy', json('true'),
+          'received_at', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+          'message_id', message_id, 'device_id', device_id,
+          'latitude', latitude, 'longitude', longitude, 'gps_ok', json('true'), 'battery_percent', battery_percent
+          ${opcional("seal_status")}${opcional("speed_kmh")}${opcional("gsm_signal")}
+          ${opcional("device_attempt_count")}${opcional("last_seen_at")}
+        )), 'PENDING'
+        FROM telemetry_queue
+        WHERE device_id IN (SELECT device_id FROM devices)
+          AND latitude BETWEEN -90 AND 90 AND longitude BETWEEN -180 AND 180
+          AND battery_percent BETWEEN 0 AND 100
+      `).run().changes;
+      console.log(`   telemetry_queue: ${enviadas} leitura(s) completa(s) na fila para o banco principal`);
+    }
+
     for (const [tabela, chave, tipo] of filas) {
       if (!tabelasAntigas.includes(tabela)) continue;
       const pares = colunasDe(tabela).map(c => `'${c}', "${c}"`).join(", ");
@@ -133,7 +158,7 @@ if (tabelasAntigas.length > 0) {
         FROM ${tabela}
         WHERE device_id IN (SELECT device_id FROM devices)
       `).run().changes;
-      console.log(`   ${tabela}: ${guardadas} linha(s) guardada(s) como ARQUIVADA`);
+      console.log(`   ${tabela}: ${guardadas} linha(s) sem posição ou bateria guardada(s) como ARQUIVADA`);
     }
     for (const tabela of tabelasAntigas) db.exec(`DROP TABLE ${tabela}`);
     for (const coluna of ["device_status_id", "valve_status_id", "seal_status_id"]) {

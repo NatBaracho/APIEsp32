@@ -1,6 +1,6 @@
 # Catálogo de Tipos de Erro (`error_type`) — FluxID / Oxide
 
-**Versão:** 2.0 — 10/10/2026 — banco principal no Supabase e alertas automáticos da API (aguardando a validação de Natã da Silva Baracho)
+**Versão:** 2.0 — 10/10/2026 — banco principal no Supabase e alertas automáticos da API (aprovado por Natã da Silva Baracho em 10/10/2026; o uso de `LACRE_ABERTO_SEM_AUTORIZACAO` para o lacre aberto ainda aguarda confirmação)
 **Público:** equipe do projeto, programador do ESP32 e quem for implementar o Worker e as regras automáticas.
 
 Este catálogo dá **um código único** para cada ocorrência operacional que precisa ser registrada, investigada ou tratada: problemas no lacre, no cilindro, no dispositivo, no GPS, na comunicação, na rota e nos comandos. Hoje esses tipos estão espalhados em três lugares, com nomes diferentes:

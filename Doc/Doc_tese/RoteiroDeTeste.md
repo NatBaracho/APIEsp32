@@ -70,7 +70,7 @@ console.log(d.pragma('integrity_check',{simple:true}), d.pragma('foreign_key_che
 **Esperado:**
 - a mensagem "Modelo antigo encontrado. Cópia de segurança: ..." e um arquivo `oxide.db.bak-antes-da-fila-unica-<data>`;
 - tabelas: `commands,devices,mensagens`;
-- as mensagens antigas com status `ARQUIVADA`;
+- as leituras antigas com posição e bateria como `PENDING`, e as demais mensagens antigas como `ARQUIVADA`;
 - `ok` e `0` (banco íntegro, sem chave estrangeira quebrada).
 
 Se o banco copiado já estiver no modelo novo, não há migração: registre "já migrado".

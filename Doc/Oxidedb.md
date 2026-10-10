@@ -2,7 +2,7 @@
 
 ## Banco local da API do lacre (SQLite)
 
-**Versão:** 2.0 — 10/10/2026 — **aguardando a validação de Natã da Silva Baracho**
+**Versão:** 2.0 — 10/10/2026 — **aprovado por Natã da Silva Baracho em 10/10/2026**
 **Projeto:** FluxID / Oxide IoT
 
 A Oxide (`oxide.db`) é a **fila local** da API: guarda o que o lacre envia até chegar ao banco principal (Supabase). Desde a versão 2.0 ela tem só **três tabelas**.
@@ -43,7 +43,7 @@ Lacre ──► API (valida) ──► mensagens (fila) ──► Worker ──�
 | `SYNCED` | Gravada no banco principal |
 | `ERROR` com `next_attempt_at` | Falhou; nova tentativa marcada (1 min, 5 min, 15 min, 1 h e 6 h) |
 | `ERROR` sem `next_attempt_at` | Parada: recusada pelo banco principal ou sem tentativas. Precisa do gestor |
-| `ARQUIVADA` | Veio do modelo antigo. Fica guardada, mas não é enviada |
+| `ARQUIVADA` | Veio do modelo antigo **sem posição ou sem bateria**. Fica guardada, mas não é enviada, porque o banco principal exige as duas |
 
 # 4. Criação e migração
 
@@ -52,7 +52,9 @@ Lacre ──► API (valida) ──► mensagens (fila) ──► Worker ──�
 Se a API encontrar um banco no modelo antigo, ela faz, nesta ordem:
 
 1. uma **cópia de segurança** do arquivo inteiro, ao lado do original: `oxide.db.bak-antes-da-fila-unica-<data>`;
-2. guarda em `mensagens`, como `ARQUIVADA`, tudo o que estava nas filas antigas (`telemetry_queue`, `events` e `alerts`);
+2. passa para `mensagens` tudo o que estava nas filas antigas (`telemetry_queue`, `events` e `alerts`):
+   - a leitura que tem posição e bateria é convertida para o formato atual e entra na fila (`PENDING`), para seguir ao banco principal. Se ela já existir lá, o banco principal responde "repetida" e não duplica;
+   - o que não tem posição ou bateria fica guardado como `ARQUIVADA`;
 3. remove as tabelas que saíram do modelo e as três colunas antigas de `devices` que não eram usadas.
 
 Os dispositivos e os comandos são mantidos. A migração roda uma vez só.
@@ -134,7 +136,7 @@ CREATE TABLE IF NOT EXISTS commands (
 | `npm run backup` | Cópia consistente em `backups/` (pode rodar com a API ligada), conferida com `integrity_check`. Mantém as 14 mais novas |
 | `npm run retencao` | Mostra o que sairia: mensagens **já enviadas** há mais de 30 dias e comandos concluídos há mais de 30 dias |
 | `npm run retencao -- --confirmar` | Apaga de fato. Faça o backup antes |
-| `npm run retencao -- --arquivadas --confirmar` | Apaga também as mensagens `ARQUIVADA` (dados do modelo antigo) |
+| `npm run retencao -- --arquivadas --confirmar` | Apaga também as mensagens `ARQUIVADA` (antigas, sem posição ou bateria) |
 
 Mensagem que ainda não chegou ao banco principal nunca é apagada.
 

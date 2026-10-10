@@ -41,7 +41,7 @@ A suíte e o simulador não tocam no `oxide.db` do projeto nem no banco principa
 | V2-TEL-03 | Tipos e faixas (latitude como texto, fora da faixa, bateria 150, `gps_ok` e `seal_status` inválidos, `attempt_count` negativo) | `400` |
 | V2-TEL-04 | JSON malformado e corpo vazio | `400` |
 | V2-TEL-05 | `message_id` repetido | `409`, sem linha nova |
-| V2-TEL-06 | Mesma posição e mesmo lacre | `200`, sem linha nova; data, bateria e sinal atualizados na leitura anterior; reenvio desse `message_id` `409` |
+| V2-TEL-06 | Mesma posição e mesmo lacre | `200`, sem linha nova; só a data e a hora atualizadas na leitura anterior; reenvio desse `message_id` `409` |
 | V2-TEL-07 | Posição nova | `202` e nova linha |
 | V2-TEL-08 | GPS sem sinal (`gps_ok: false`) | `202`, gravado com `gps_ok` falso |
 | V2-TEL-09 | `status` e `attempt_count` enviados pelo lacre | Não mudam a fila |
@@ -70,7 +70,7 @@ A suíte e o simulador não tocam no `oxide.db` do projeto nem no banco principa
 | V2-CMD-02 | Confirmação | Status inválido `400`; inexistente `404`; `ERRO` gravado e enviado ao banco principal; de novo `409` |
 | V2-CMD-03 | Regras do banco | Comando pendente com tipo fora do catálogo e status desconhecido recusados |
 | V2-OPE-01 | `GET /health` | `200` normal; `503` com a última rodada falha; sem endereço nem chave |
-| V2-MIG-01 | Banco no modelo antigo | Cópia de segurança; mensagens antigas `ARQUIVADA`; tabelas antigas removidas; segunda execução não repete |
+| V2-MIG-01 | Banco no modelo antigo | Cópia de segurança; leitura antiga com posição e bateria na fila (`PENDING`), no formato atual; as demais `ARQUIVADA`; tabelas antigas removidas; segunda execução não repete |
 | V2-OPE-02 | Backup e retenção | Cópia íntegra, mantendo as mais novas; retenção só mostra sem `--confirmar` e só apaga o que foi enviado há mais de 30 dias |
 
 ### 0.3 O que ainda não pode ser testado
@@ -577,7 +577,7 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 
 | Indicador | Valor |
 | --- | --- |
-| Suíte automatizada (`npm test`) | **Modelo enxuto:** 71 casos, 71 aprovados em 10/10/2026 (aguardando validação). Modelo anterior: 96 casos aprovados em 07/10/2026 |
+| Suíte automatizada (`npm test`) | **Modelo enxuto:** 71 casos, 71 aprovados em 10/10/2026 (aprovado por Natã da Silva Baracho). Modelo anterior: 96 casos aprovados em 07/10/2026 |
 | Simulador (`npm run simular`) | 23 de 23 verificações em 10/10/2026 |
 | Compilação (`npx tsc --noEmit`) | Aprovada em 06/10/2026 |
 | Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas); [Relatorio-de-Teste-2026-10-06-20h00.md](Relatorio-de-Teste-2026-10-06-20h00.md): entrega E (banco FluxID); [Relatorio-de-Teste-2026-10-06-20h35.md](Relatorio-de-Teste-2026-10-06-20h35.md): entrega D (catálogo de comandos e tipos de erro); [Relatorio-de-Teste-2026-10-06-21h31.md](Relatorio-de-Teste-2026-10-06-21h31.md): entrega B (associação); [Relatorio-de-Teste-2026-10-06-23h40.md](Relatorio-de-Teste-2026-10-06-23h40.md): alertas em português, análise e encerramento; [Relatorio-de-Teste-2026-10-07-00h15.md](Relatorio-de-Teste-2026-10-07-00h15.md): FluxID, alerta com cilindro e lacre obrigatórios; [Relatorio-de-Teste-2026-10-07-00h45.md](Relatorio-de-Teste-2026-10-07-00h45.md): grupos do Swagger e FluxID no Docker; [Relatorio-de-Teste-2026-10-07-01h30.md](Relatorio-de-Teste-2026-10-07-01h30.md): integração Oxide ⇄ FluxID; [Relatorio-de-Teste-2026-10-07-18h45.md](Relatorio-de-Teste-2026-10-07-18h45.md): simulador do lacre e série do cilindro. Todos **aprovados por Natã da Silva Baracho** |

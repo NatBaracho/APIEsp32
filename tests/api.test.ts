@@ -205,12 +205,12 @@ async function main(): Promise<void> {
     const r = await tel("M-T1", { latitude: -7.5 });
     return { passou: r.status === 409 && total("message_id = 'M-T1'") === 1, detalhe: r.json?.message };
   });
-  await teste("Mesma posição e mesmo lacre -> 200, sem linha nova; data, bateria e sinal atualizados na leitura anterior", async () => {
+  await teste("Mesma posição e mesmo lacre -> 200, sem linha nova; só a data e a hora são atualizadas na leitura anterior", async () => {
     const antes = total("device_id = ? AND tipo = 'TELEMETRIA'", DEV);
     const r = await tel("M-T11", { seal_status: "LOCKED", battery_percent: 77, gsm_signal: -80 });
     const d = dados("M-T1");
     return {
-      passou: r.status === 200 && total("device_id = ? AND tipo = 'TELEMETRIA'", DEV) === antes && d.battery_percent === 77 && d.gsm_signal === -80 && Boolean(d.last_seen_at),
+      passou: r.status === 200 && total("device_id = ? AND tipo = 'TELEMETRIA'", DEV) === antes && d.battery_percent === 80 && d.gsm_signal === -70 && Boolean(d.last_seen_at),
       detalhe: r.json?.message
     };
   });
@@ -518,14 +518,15 @@ async function main(): Promise<void> {
 
   // ------------------------------------------ [11] migração e manutenção
   console.log("\n--- [11] Migração do modelo antigo e manutenção ---");
-  await teste("Banco no modelo antigo: cópia de segurança, mensagens antigas ARQUIVADAS e tabelas antigas removidas", () => {
+  await teste("Banco no modelo antigo: cópia de segurança; leitura completa vai para a fila, incompleta fica ARQUIVADA; tabelas antigas removidas", () => {
     const antiga = fs.mkdtempSync(path.join(os.tmpdir(), "oxide-antigo-"));
     const velho = new Database(path.join(antiga, "oxide.db"));
     velho.exec(`
       CREATE TABLE devices (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL UNIQUE, api_key TEXT NOT NULL,
         firmware_version TEXT, active INTEGER NOT NULL DEFAULT 1, device_status_id INTEGER, valve_status_id INTEGER, seal_status_id INTEGER);
       CREATE TABLE status (id INTEGER PRIMARY KEY, code TEXT);
-      CREATE TABLE telemetry_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id TEXT UNIQUE, device_id TEXT, latitude REAL, longitude REAL, status TEXT DEFAULT 'PENDING');
+      CREATE TABLE telemetry_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id TEXT UNIQUE, device_id TEXT, latitude REAL, longitude REAL,
+        battery_percent REAL, seal_status TEXT, gsm_signal INTEGER, status TEXT DEFAULT 'PENDING');
       CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id TEXT UNIQUE, device_id TEXT, message_type TEXT, status TEXT);
       CREATE TABLE alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, alert_id TEXT UNIQUE, device_id TEXT, alert_type TEXT, title TEXT);
       CREATE TABLE commands (id INTEGER PRIMARY KEY AUTOINCREMENT, command_id TEXT NOT NULL UNIQUE, device_id TEXT NOT NULL, command_type TEXT NOT NULL,
@@ -536,7 +537,9 @@ async function main(): Promise<void> {
       CREATE TABLE cylinder_assignments (id INTEGER PRIMARY KEY, seal_code TEXT, cylinder_code TEXT);
       CREATE TABLE sync_logs (id INTEGER PRIMARY KEY, status TEXT);
       INSERT INTO devices (device_id, api_key) VALUES ('DSP-000001', 'auto-DSP-000001');
-      INSERT INTO telemetry_queue (message_id, device_id, latitude, longitude) VALUES ('MSG-OLD-1', 'DSP-000001', -7.1, -39.1), ('MSG-OLD-2', 'DSP-000001', -7.2, -39.2);
+      INSERT INTO telemetry_queue (message_id, device_id, latitude, longitude, battery_percent, seal_status, status) VALUES
+        ('MSG-OLD-1', 'DSP-000001', -7.1, -39.1, 57, 'LOCKED', 'SYNCED'), ('MSG-OLD-2', 'DSP-000001', -7.2, -39.2, NULL, NULL, 'PENDING'),
+        ('MSG-OLD-3', 'DSP-000001', NULL, NULL, 80, NULL, 'PENDING');
       INSERT INTO events (message_id, device_id, message_type) VALUES ('EVT-OLD-1', 'DSP-000001', 'startup');
       INSERT INTO alerts (alert_id, device_id, alert_type, title) VALUES ('ALT-OLD-1', 'DSP-000001', 'LACRE_VIOLADO', 'antigo');
       INSERT INTO commands (command_id, device_id, command_type, created_at) VALUES ('CMD-OLD-1', 'DSP-000001', 'TRAVAR_VALVULA', '2026-10-01 10:00:00');
@@ -547,7 +550,9 @@ async function main(): Promise<void> {
     const novo = new Database(path.join(antiga, "oxide.db"), { readonly: true });
     const tabelas = (novo.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as any[]).map(t => t.name).join(",");
     const arquivadas = (novo.prepare("SELECT count(*) AS n FROM mensagens WHERE status = 'ARQUIVADA'").get() as any).n;
-    const antigaMsg = JSON.parse((novo.prepare("SELECT payload_json FROM mensagens WHERE message_id = 'MSG-OLD-1'").get() as any).payload_json);
+    const completa = novo.prepare("SELECT status, payload_json FROM mensagens WHERE message_id = 'MSG-OLD-1'").get() as any;
+    const antigaMsg = JSON.parse(completa.payload_json);
+    const semBateria = (novo.prepare("SELECT status FROM mensagens WHERE message_id = 'MSG-OLD-2'").get() as any).status;
     const colunas = (novo.prepare("PRAGMA table_info(devices)").all() as any[]).map(c => c.name);
     const dispositivo = novo.prepare("SELECT api_key FROM devices WHERE device_id = 'DSP-000001'").get() as any;
     const comando = (novo.prepare("SELECT count(*) AS n FROM commands").get() as any).n;
@@ -559,10 +564,13 @@ async function main(): Promise<void> {
     const segundaVez = rodar("src/database/connection.ts", antiga);
 
     return {
-      passou: tabelas === "commands,devices,mensagens" && arquivadas === 4 && antigaMsg.latitude === -7.1 && dispositivo.api_key === "auto-DSP-000001" && comando === 1 &&
-        !colunas.includes("device_status_id") && colunas.includes("last_contact_at") && copias.length === 1 && naCopia === 2 &&
+      passou: tabelas === "commands,devices,mensagens" && arquivadas === 4 && completa.status === "PENDING" && semBateria === "ARQUIVADA" &&
+        antigaMsg.type === "TELEMETRIA" && antigaMsg.latitude === -7.1 && antigaMsg.battery_percent === 57 && antigaMsg.gps_ok === true &&
+        antigaMsg.seal_status === "LOCKED" && antigaMsg.legacy === true && !("gsm_signal" in antigaMsg) &&
+        dispositivo.api_key === "auto-DSP-000001" && comando === 1 &&
+        !colunas.includes("device_status_id") && colunas.includes("last_contact_at") && copias.length === 1 && naCopia === 3 &&
         saida.includes("Cópia de segurança") && !segundaVez.includes("Cópia de segurança"),
-      detalhe: `${arquivadas} arquivadas; cópia com ${naCopia} telemetrias; segunda execução não repete`
+      detalhe: `1 leitura completa na fila; ${arquivadas} arquivadas; cópia com ${naCopia} telemetrias; segunda execução não repete`
     };
   });
   await teste("npm run backup: cópia íntegra em backups/; mantém só as mais novas", () => {

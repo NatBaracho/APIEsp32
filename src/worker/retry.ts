@@ -7,7 +7,7 @@
 //   ERROR, com next_attempt_at    -> falhou; nova tentativa agendada
 //   ERROR, sem next_attempt_at    -> parada: precisa do gestor
 //   SYNCED                        -> gravada no banco principal
-//   ARQUIVADA                     -> veio do modelo antigo; não é enviada
+//   ARQUIVADA                     -> veio do modelo antigo sem posição ou bateria; não é enviada
 
 export const RETRY_DELAYS_SECONDS = [60, 300, 900, 3600, 21600];
 

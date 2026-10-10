@@ -75,7 +75,7 @@ const openApiSpec = {
       post: {
         tags: ["Lacre"],
         summary: "Enviar a leitura periódica",
-        description: "Posição e estado do lacre iguais aos da última leitura: responde `200` e só atualiza a data, a bateria e o sinal da leitura anterior, sem criar outra.",
+        description: "Posição e estado do lacre iguais aos da última leitura: responde `200` e só atualiza a data e a hora da leitura anterior, sem criar outra.",
         security: chave,
         requestBody: jsonBody(
           { message_id: { type: "string", example: "MSG-000123", description: "Único por mensagem; repetir no reenvio" }, ...leitura },

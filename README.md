@@ -20,7 +20,7 @@ npm start        # ou npm run dev (recarrega ao salvar)
 
 O servidor inicia na porta `3000`. As tabelas são criadas sozinhas.
 
-Se a `oxide.db` for de uma versão anterior, a API faz uma cópia de segurança ao lado do arquivo (`oxide.db.bak-antes-da-fila-unica-<data>`), guarda as mensagens antigas como arquivadas e remove as tabelas que saíram. Detalhes: [Oxidedb.md](Doc/Oxidedb.md).
+Se a `oxide.db` for de uma versão anterior, a API faz uma cópia de segurança ao lado do arquivo (`oxide.db.bak-antes-da-fila-unica-<data>`), passa as mensagens antigas para a fila nova (as que têm posição e bateria seguem para o banco principal; as outras ficam arquivadas) e remove as tabelas que saíram. Detalhes: [Oxidedb.md](Doc/Oxidedb.md).
 
 O npm 11 avisa que os scripts de instalação do `better-sqlite3` ainda não estão autorizados (`allowScripts`); hoje é só um aviso e o módulo instala normalmente. Se uma versão futura do npm bloquear o script e a API não conseguir abrir o banco, rode `npm install-scripts approve better-sqlite3` e depois `npm install`.
 
@@ -101,7 +101,7 @@ Use **Try it out** para executar as requisições. Para as rotas do lacre, cliqu
 - **Chave:** as rotas do lacre exigem `X-API-Key` do próprio `device_id` enviado (`403` se for de outro). O dispositivo precisa estar cadastrado: não há criação automática (`404`). A chave nunca aparece nas respostas.
 - **Posição e bateria obrigatórias:** toda leitura, evento e alerta leva `latitude`, `longitude` e `battery_percent` (`400` sem eles). Sem sinal de GPS, o lacre manda a última posição conhecida com `gps_ok: false`.
 - **Sem duplicar:** `message_id` (ou `alert_id`) repetido responde `409` e não cria outro registro.
-- **Posição repetida:** leitura com a mesma posição e o mesmo estado do lacre da anterior responde `200` e só atualiza a data, a bateria e o sinal da leitura anterior.
+- **Posição repetida:** leitura com a mesma posição e o mesmo estado do lacre da anterior responde `200` e só atualiza a data e a hora da leitura anterior.
 - **Alertas automáticos:** a API abre sozinha, uma vez a cada mudança: `BATERIA_BAIXA` (abaixo de 15%), `GSM_SINAL_FRACO` (abaixo de -105 dBm), `LACRE_VIOLADO` (lacre `BROKEN`) e `LACRE_ABERTO_SEM_AUTORIZACAO` (lacre `UNLOCKED`). Os limites mudam no `.env`.
 - **O que a API não faz:** regras de rota, de geocerca e de tempo sem comunicar, e o tratamento dos alertas. Ficam no sistema principal.
 - **Comandos:** vêm do banco principal (`TRAVAR_VALVULA`, `DESTRAVAR_VALVULA`). O lacre busca e confirma `EXECUTADO` ou `ERRO`, e a confirmação volta ao banco principal.

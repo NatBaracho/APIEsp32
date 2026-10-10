@@ -1,6 +1,6 @@
 # Guia do firmware do lacre IoT (ESP32)
 
-**Versão:** 2.0 — 10/10/2026 — **aguardando a validação de Natã da Silva Baracho**
+**Versão:** 2.0 — 10/10/2026 — **aprovado por Natã da Silva Baracho em 10/10/2026**
 **Para:** quem programa o lacre IoT (repositório `fluxid-firmware`, ESP32-C3 em C++)
 **Base:** API do lacre com a fila única e o envio ao Supabase
 
@@ -107,7 +107,7 @@ Campo a mais: `message_id` (**obrigatório**).
 
 Respostas:
 - `202`: gravada;
-- `200` "Posição já registrada": a posição e o estado do lacre são os mesmos da última leitura. O servidor só atualiza a hora, a bateria e o sinal. Tratar como sucesso;
+- `200` "Posição já registrada": a posição e o estado do lacre são os mesmos da última leitura. O servidor só atualiza a data e a hora. Tratar como sucesso;
 - `409`: mensagem já recebida.
 
 ### 4.3 Evento (algo aconteceu) — `POST /iot/events`

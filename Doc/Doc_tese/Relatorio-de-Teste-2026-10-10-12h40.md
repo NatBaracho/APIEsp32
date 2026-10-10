@@ -4,7 +4,7 @@
 **Executado por:** IA (Claude Code, modelo Claude Opus 5.5), a pedido de Natã da Silva Baracho
 **Branch:** `feat/oxide-enxuta`, a partir da `main` `547a1f2` (merge do PR #19). Commits locais; **ainda não enviada ao GitHub**
 **Base:** `PlanoDeTeste.md` v2.0 (seção 0) e `RoteiroDeTeste.md` v2.0
-**Situação:** **aguardando a validação de Natã da Silva Baracho** (questionário na seção 8)
+**Situação:** ✅ **aprovado por Natã da Silva Baracho em 10/10/2026**, com dois ajustes já feitos e duas confirmações pendentes (seção 10)
 
 ---
 
@@ -199,3 +199,43 @@ Com tudo "sim", registro **"aprovado por Natã da Silva Baracho"** nos documento
 2. O professor Alisson cria a função de recebimento e passa o endereço.
 3. Você coloca `SUPABASE_IOT_URL` e `SUPABASE_SERVICE_KEY` no `.env` do servidor (a chave nunca por mensagem).
 4. Rodamos o passo 6 do roteiro: o primeiro envio de verdade ao Supabase.
+
+## 10. Validação (10/10/2026)
+
+Respostas de Natã da Silva Baracho ao questionário da seção 8:
+
+| # | Resposta | O que foi feito |
+| --- | --- | --- |
+| 1 | Não deixar as tabelas de antes | Mantidas só as três tabelas novas |
+| 2 | Sim | — |
+| 3 | **As mensagens antigas devem ser enviadas.** Só não se envia de novo o que for duplicado; nesse caso, só a data e a hora são atualizadas | **Ajuste feito** (abaixo) |
+| 4, 5, 6 | Sim | — |
+| 7 | **Sem resposta** | Pendente: o lacre aberto continua abrindo `LACRE_ABERTO_SEM_AUTORIZACAO` até a confirmação |
+| 8, 9 | Sim | — |
+| 10 | **Sem resposta** | Pendente: o contrato ainda não foi enviado ao professor Alisson |
+| 11, 12, 13, 14, 15 | Sim | Branch enviada e PR aberto |
+
+### Ajustes feitos depois da validação
+
+1. **Mensagens antigas (resposta 3).** As seções 3.1, 4.3 e a escolha E3 descrevem o comportamento testado antes da validação, em que todas as mensagens antigas ficavam arquivadas. Agora:
+   - a leitura antiga que tem posição e bateria é convertida para o formato atual e **entra na fila para o banco principal**, marcada com `legacy: true`;
+   - a que não tem posição ou bateria fica arquivada, porque o banco principal exige as duas (resposta 4).
+
+   Na cópia do `oxide.db` real: **1 leitura na fila** e **17 mensagens arquivadas** (9 leituras sem bateria ou sem posição e 8 eventos).
+2. **Posição repetida (resposta 3).** Agora só a data e a hora (`last_seen_at`) são atualizadas. Antes, a bateria e o sinal também eram.
+
+### Testes depois dos ajustes
+
+| Teste | Resultado |
+| --- | --- |
+| Compilação | Sem erros |
+| Suíte (`npm test`) | 71 de 71 |
+| Simulador (`npm run simular`) | 23 de 23 |
+| Migração numa cópia do `oxide.db` real | 1 leitura na fila, 17 arquivadas, banco íntegro |
+| `oxide.db` do projeto | Intacto (SHA-256 igual) |
+
+### Pendências
+
+- **Pergunta 7:** confirmar o código do alerta de lacre aberto.
+- **Pergunta 10:** confirmar o envio do contrato ao professor Alisson.
+- Envio ao Supabase de verdade: continua sem teste, até existir a função de recebimento.

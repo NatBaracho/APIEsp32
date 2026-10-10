@@ -1,6 +1,6 @@
 # Contrato de entrega: API do lacre → Supabase
 
-**Versão:** 1.0 — 10/10/2026 — proposta do backend, **aguardando a validação de Natã da Silva Baracho e a revisão do professor Alisson**
+**Versão:** 1.0 — 10/10/2026 — proposta do backend; implementação **aprovado por Natã da Silva Baracho em 10/10/2026**; aguardando a revisão do professor Alisson
 **Para:** quem mantém o Supabase (projeto `fluxid_integra2026`).
 **De:** a API do lacre (este repositório).
 
@@ -86,7 +86,7 @@ Até 100 mensagens por chamada (`WORKER_BATCH_SIZE`).
 
 **Regra de ouro:** o `message_id` é único. Se a mesma mensagem chegar de novo, a função deve responder `duplicate` e **atualizar** o registro com os dados novos, sem criar outro. Isso acontece em dois casos:
 - reenvio depois de uma falha de rede;
-- lacre parado no mesmo lugar: a API reenvia a mesma leitura com `last_seen_at`, `battery_percent` e `gsm_signal` atualizados.
+- lacre parado no mesmo lugar: a API reenvia a mesma leitura só com a data e a hora atualizadas (`last_seen_at`).
 
 ### 3.2 `list_devices` — dispositivos autorizados
 
@@ -152,6 +152,7 @@ O lacre busca o comando na API e confirma. A confirmação volta ao Supabase com
 | `device_state` | texto | não | Estado informado pelo firmware (ex.: `OPERACIONAL`) |
 | `device_attempt_count` | inteiro | não | Quantas vezes o lacre tentou enviar |
 | `last_seen_at` | data ISO 8601 | não | Só na telemetria: última vez que o lacre repetiu a mesma posição |
+| `legacy` | verdadeiro | não | Só nas leituras recebidas antes de 10/10/2026 (modelo antigo) que tinham posição e bateria. Nelas, `received_at` é a hora da migração |
 
 A `CONFIRMACAO_COMANDO` não tem posição nem bateria (seção 4.4).
 

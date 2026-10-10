@@ -8,7 +8,7 @@ Legenda: ✅ feito e validado; ⏳ feito, falta o passo indicado no item; [ ] a 
 
 Em 10/10/2026 ficou decidido que o banco principal é o Supabase do projeto do frontend, que a API só entrega os dados do lacre e que a Oxide fica com uma fila mínima. Esta seção é a que vale hoje. As seções seguintes são o **histórico do modelo anterior** (até 09/10/2026).
 
-Os itens marcados com ⏳ foram feitos e testados pela IA em 10/10/2026 e aguardam a validação de Natã.
+Os itens desta seção foram feitos e testados pela IA em 10/10/2026 e **aprovados por Natã da Silva Baracho em 10/10/2026**. Ficaram duas confirmações pendentes: o código do alerta de lacre aberto e o envio do contrato ao professor Alisson.
 
 ### API do lacre
 
@@ -23,7 +23,7 @@ Os itens marcados com ⏳ foram feitos e testados pela IA em 10/10/2026 e aguard
 ### Oxide (banco local)
 
 - ⏳ Três tabelas: `devices`, `mensagens` (fila única) e `commands`.
-- ⏳ Migração automática do modelo antigo, com cópia de segurança e mensagens antigas arquivadas.
+- ⏳ Migração automática do modelo antigo, com cópia de segurança: leituras antigas completas vão para a fila; as sem posição ou bateria ficam arquivadas.
 - ⏳ Backup (`npm run backup`) e retenção (`npm run retencao`).
 
 ### Worker e banco principal

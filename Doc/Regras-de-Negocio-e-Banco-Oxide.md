@@ -1,6 +1,6 @@
 # Regras de Negócio da API do Lacre e do Banco Oxide
 
-**Versão:** 2.0 — 10/10/2026 — **aguardando a validação de Natã da Silva Baracho**
+**Versão:** 2.0 — 10/10/2026 — **aprovado por Natã da Silva Baracho em 10/10/2026**
 
 Este documento descreve as regras que a API aplica hoje. O banco local está em [Oxidedb.md](Oxidedb.md); o que vai para o banco principal, em [Contrato-Entrega-Supabase.md](Contrato-Entrega-Supabase.md).
 
@@ -54,7 +54,7 @@ Não existem mais rotas de lacres, cilindros, vínculos, nem de análise e encer
 ### 4.2 Leitura (`telemetries`)
 
 - Exige `message_id`. Repetido: `409`, sem novo registro.
-- **Posição repetida:** se a posição, o `gps_ok` e o estado do lacre forem iguais aos da última leitura do dispositivo, a API responde `200` e não cria outra linha. Ela atualiza `last_seen_at`, a bateria e o sinal da leitura anterior. Se essa leitura já tinha sido enviada, ela volta para a fila, para o banco principal receber a atualização.
+- **Posição repetida:** se a posição, o `gps_ok` e o estado do lacre forem iguais aos da última leitura do dispositivo, a API responde `200` e não cria outra linha. Ela atualiza só a data e a hora (`last_seen_at`) da leitura anterior. Se essa leitura já tinha sido enviada, ela volta para a fila, para o banco principal receber a atualização.
 - O `message_id` da posição repetida também não pode ser reenviado (`409`).
 
 ### 4.3 Evento (`events`)

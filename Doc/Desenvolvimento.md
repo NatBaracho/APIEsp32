@@ -49,7 +49,7 @@ Supabase: banco principal, usado pelo frontend
 - Recebe por HTTP as leituras, os eventos, os alertas e as confirmações de comando do lacre.
 - Autentica cada dispositivo pela `X-API-Key`, que precisa ser do próprio `device_id`. Dispositivo vindo do banco principal é conferido pelo hash da chave.
 - Exige **posição e bateria** em toda leitura, evento e alerta. Sem sinal de GPS, aceita a última posição conhecida com `gps_ok: false`.
-- Evita duplicidade pelo `message_id` e não grava de novo uma posição repetida: só atualiza a data, a bateria e o sinal.
+- Evita duplicidade pelo `message_id` e não grava de novo uma posição repetida: só atualiza a data e a hora.
 - Abre sozinha os alertas que saem da própria mensagem: bateria baixa, sinal fraco e lacre aberto ou rompido. Cada um abre uma vez, na mudança.
 - Entrega ao lacre os comandos da válvula e recebe a confirmação.
 - Mostra as últimas mensagens (`GET /iot/messages`), a situação da fila (`/sync/*`) e a saúde (`GET /health`).
@@ -176,7 +176,7 @@ Sistema principal fica sabendo do resultado
 | `SYNCED` | Gravada no banco principal |
 | `ERROR` com próxima tentativa | Falhou; nova tentativa marcada |
 | `ERROR` sem próxima tentativa | Parada: precisa do gestor |
-| `ARQUIVADA` | Veio do modelo antigo; não é enviada |
+| `ARQUIVADA` | Veio do modelo antigo sem posição ou bateria; não é enviada |
 
 ### Rodar o Worker
 
@@ -214,7 +214,7 @@ Roda numa pasta temporária, com uma `oxide.db` nova, a própria API na porta 31
 
 ## 1.10 Estado atual
 
-- API, fila única e Worker implementados e testados pela IA em 10/10/2026: suíte com 71/71 e simulador com 23/23, contra um recebedor de teste. **Aguardando a validação de Natã da Silva Baracho** (seção 7.26).
+- API, fila única e Worker implementados e testados pela IA em 10/10/2026: suíte com 71/71 e simulador com 23/23, contra um recebedor de teste. **Aprovado por Natã da Silva Baracho em 10/10/2026** (seção 7.26).
 - O banco principal passou a ser o Supabase. O FluxID em PostgreSQL ficou como banco de teste.
 - Próximos passos:
   - o professor Alisson cria a função de recebimento e passa o endereço;
@@ -563,7 +563,7 @@ Decisões de Natã da Silva Baracho, com as respostas do professor Alisson:
 | 8 | Os comandos da válvula e o cadastro dos dispositivos vêm do banco principal |
 
 O que foi feito:
-- **Oxide:** tabelas `devices`, `mensagens` (fila única) e `commands`. Migração automática do modelo antigo, com cópia de segurança, mensagens antigas guardadas como `ARQUIVADA` e remoção das tabelas que saíram.
+- **Oxide:** tabelas `devices`, `mensagens` (fila única) e `commands`. Migração automática do modelo antigo, com cópia de segurança e remoção das tabelas que saíram. A leitura antiga com posição e bateria segue para o banco principal; o resto fica como `ARQUIVADA`.
 - **API:** validação comum de posição e bateria; `gps_ok`; `satelites`, `hdop` e `device_state` aceitos; alertas automáticos abertos na mudança de estado; `GET /iot/messages`; `GET /health`.
 - **Worker:** envio em lotes por HTTP, com resultado por mensagem (`stored`, `duplicate`, `rejected`); cadastro de dispositivos e comandos trazidos do banco principal.
 - **Removido:** rotas de lacres, cilindros e vínculos; análise e encerramento de alertas; envio ao FluxID; a página da proposta da API do frontend; a dependência `pg`.
@@ -576,11 +576,15 @@ Testes:
 - compilação sem erros;
 - suíte nova com 71/71;
 - simulador novo com 23/23;
-- migração testada numa cópia da `oxide.db` real: 18 mensagens arquivadas, 3 dispositivos mantidos e banco íntegro; o original ficou intacto (checksum igual).
+- migração testada numa cópia da `oxide.db` real: 1 leitura completa na fila, 17 mensagens sem posição ou bateria arquivadas, 3 dispositivos mantidos e banco íntegro; o original ficou intacto (checksum igual).
 
 **O que não pôde ser testado:** o envio ao Supabase de verdade. A função de recebimento e as tabelas do lacre ainda não estão no repositório do frontend; os testes usaram um recebedor de teste que segue o contrato.
 
-Relatório: [Relatorio-de-Teste-2026-10-10-12h40.md](Doc_tese/Relatorio-de-Teste-2026-10-10-12h40.md). **Aguardando a validação de Natã da Silva Baracho.**
+Ajustes pedidos na validação e já feitos:
+- as mensagens antigas completas **são enviadas** ao banco principal (antes ficariam todas arquivadas);
+- na posição repetida, **só a data e a hora** são atualizadas (antes, também a bateria e o sinal).
+
+Relatório: [Relatorio-de-Teste-2026-10-10-12h40.md](Doc_tese/Relatorio-de-Teste-2026-10-10-12h40.md). Questionário respondido: **aprovado por Natã da Silva Baracho em 10/10/2026**, com duas confirmações pendentes (o código do alerta de lacre aberto e o envio do contrato ao professor Alisson).
 
 ## 9. Suíte de testes automatizados (`npm test`)
 
@@ -608,7 +612,7 @@ A suíte anterior (96 casos, modelo com filas separadas e envio ao FluxID) está
 
 # Parte 3 — Histórico de PRs por funcionalidade
 
-Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validação **aprovada por Natã da Silva Baracho**. O #20 (Oxide enxuta) está aguardando a validação. Esta parte e a seção "Quem faz o quê" (1.1) foram conferidas por questionário (6/6 sim) e **aprovadas por Natã da Silva Baracho** em 06/10/2026. O PR que mexeu em mais de uma parte aparece em cada grupo, só com o que mudou naquela parte. A cada novo PR, esta parte é atualizada.
+Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validação **aprovada por Natã da Silva Baracho**. O #20 (Oxide enxuta) foi **aprovado por Natã da Silva Baracho** em 10/10/2026. Esta parte e a seção "Quem faz o quê" (1.1) foram conferidas por questionário (6/6 sim) e **aprovadas por Natã da Silva Baracho** em 06/10/2026. O PR que mexeu em mais de uma parte aparece em cada grupo, só com o que mudou naquela parte. A cada novo PR, esta parte é atualizada.
 
 ## 3.1 API
 
@@ -623,7 +627,7 @@ Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validaç�
 | #14 | Swagger em grupos | 8 grupos com explicação (Dispositivos, Telemetria, Eventos, Comandos, Alertas, Lacres, Cilindros, Vínculos), sem grupo "default"; teste que barra rota sem grupo |
 | #15 | Integração Oxide ⇄ FluxID | Chave por hash; alerta volta à fila ao mudar de status; rotas `/sync/*` e grupo "Sincronização" |
 | #17 | Simulador e série do cilindro | Cadastro provisório de cilindro aceita série repetida (o código continua único); simulador `npm run simular` |
-| #20 | Oxide enxuta e envio ao Supabase (aguardando validação) | Posição e bateria obrigatórias em toda mensagem; `gps_ok`; alertas automáticos da própria mensagem; `GET /iot/messages` e `GET /health`; saem as rotas de lacres, cilindros, vínculos e de análise de alertas e a página da proposta do frontend |
+| #20 | Oxide enxuta e envio ao Supabase | Posição e bateria obrigatórias em toda mensagem; `gps_ok`; alertas automáticos da própria mensagem; `GET /iot/messages` e `GET /health`; saem as rotas de lacres, cilindros, vínculos e de análise de alertas e a página da proposta do frontend |
 
 ## 3.2 Oxide (`oxide.db`)
 
@@ -636,7 +640,7 @@ Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validaç�
 | #12 | Alertas em português | `alerts` com `CHECK` do catálogo em `alert_type`, colunas `resolved_by` e `resolution_note` e `CHECK` de `ENCERRADO` com data; migração automática dos tipos em inglês; `Oxidedb.md` v1.6 validado |
 | #15 | Integração Oxide ⇄ FluxID | `next_attempt_at` na telemetria e nos eventos; `sync_*` nos alertas; `devices.api_key_hash`; `fluxid_id` nos vínculos; tabela `sync_logs`; `Oxidedb.md` v1.7 |
 | #17 | Simulador e série do cilindro | `cylinders.serial_number` sem `UNIQUE` (série única só por empresa, no FluxID); migração preservando os dados; `Oxidedb.md` v1.8 |
-| #20 | Oxide enxuta e envio ao Supabase (aguardando validação) | De 11 para 3 tabelas (`devices`, `mensagens`, `commands`); migração com cópia de segurança e mensagens antigas arquivadas; backup e retenção; `Oxidedb.md` v2.0 |
+| #20 | Oxide enxuta e envio ao Supabase | De 11 para 3 tabelas (`devices`, `mensagens`, `commands`); migração com cópia de segurança (leituras antigas completas seguem para o banco principal; as demais ficam arquivadas); backup e retenção; `Oxidedb.md` v2.0 |
 
 ## 3.3 FluxID
 
@@ -654,7 +658,7 @@ Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validaç�
 | #15 | Integração Oxide ⇄ FluxID | Script `004` (P1 a P8, gatilho FLX-26) e `005` (estruturas do frontend, histórico do cilindro integrado com a Oxide) |
 | #17 | Simulador | O simulador usa o FluxID de análise: operador (cadastro unitário, em massa por CSV, rota como entrega) e conferência dos dados que chegam |
 | #19 | Documentação final | Registros de uso de IA (Template 7) sobre o banco FluxID, entre as demais partes do projeto |
-| #20 | Oxide enxuta e envio ao Supabase (aguardando validação) | O FluxID em PostgreSQL deixa de ser o destino e vira banco de teste; os documentos dele ficam como referência histórica. O banco principal é o Supabase |
+| #20 | Oxide enxuta e envio ao Supabase | O FluxID em PostgreSQL deixa de ser o destino e vira banco de teste; os documentos dele ficam como referência histórica. O banco principal é o Supabase |
 
 ## 3.4 Worker
 
@@ -670,4 +674,4 @@ Implementado e aprovado em 07/10/2026 (PR #15). O que levou até ele:
 | #13 | Alerta com cilindro e lacre | O Worker busca o lacre e o cilindro do vínculo válido na data do alerta; sem vínculo, o alerta fica em erro na Oxide para o gestor |
 | #15 | Integração Oxide ⇄ FluxID | Worker completo (`src/worker/`, `npm run worker`): envio da fila, tentativas, espera do P3, cadastro de volta com o hash da chave |
 | #17 | Simulador | O simulador exercita o Worker de ponta a ponta: cadastro sem conflitos, fila, FluxID fora do ar, espera do vínculo e reenvio |
-| #20 | Oxide enxuta e envio ao Supabase (aguardando validação) | Worker reescrito: envia a fila única por HTTP à função de recebimento do Supabase, com resultado por mensagem, e traz os dispositivos e os comandos; simulador novo com recebedor de teste |
+| #20 | Oxide enxuta e envio ao Supabase | Worker reescrito: envia a fila única por HTTP à função de recebimento do Supabase, com resultado por mensagem, e traz os dispositivos e os comandos; simulador novo com recebedor de teste |

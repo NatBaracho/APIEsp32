@@ -5,7 +5,7 @@ import path from "path";
 // npm run retencao — a Oxide é uma fila: o que já chegou ao banco principal
 // (SYNCED) pode sair depois de RETENCAO_DIAS (padrão 30). Mensagem que ainda
 // não foi enviada nunca é apagada.
-//   --arquivadas  inclui as mensagens ARQUIVADA (dados do modelo antigo)
+//   --arquivadas  inclui as mensagens ARQUIVADA (antigas, sem posição ou bateria)
 //   --confirmar   apaga de fato; sem ele, só mostra. Faça npm run backup antes
 
 const confirmar = process.argv.includes("--confirmar");
