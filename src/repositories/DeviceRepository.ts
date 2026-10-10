@@ -1,5 +1,5 @@
 import db from "../database/connection";
-import { Device } from "../models/Device";
+import { Device, ResultadoDoVinculo, Vinculo, marcaDoVinculo } from "../models/Device";
 
 export class DeviceRepository {
 
@@ -128,6 +128,70 @@ export class DeviceRepository {
       WHERE device_id = ?
     `).run(apiKeyHash, active, firmwareVersion, deviceId);
     return "atualizado";
+  }
+
+  // Ordem de vinculação vinda do sistema principal. null (ou sem cilindro)
+  // = desfazer o vínculo. Só vale para lacre ativo e com o identificador
+  // que a API gerou
+  setBinding(deviceId: string, vinculo: Vinculo | null): ResultadoDoVinculo {
+    const atual = this.findByDeviceId(deviceId);
+    if (!atual) return "igual";
+
+    if (!vinculo || !vinculo.cylinder_code) {
+      if (!atual.cylinder_code && !atual.binding_id) return "igual";
+      db.prepare(`
+        UPDATE devices
+        SET binding_id = NULL, cylinder_code = NULL, customer_code = NULL, customer_name = NULL, bound_at = NULL
+        WHERE device_id = ?
+      `).run(deviceId);
+      return "aplicado";
+    }
+
+    if (atual.ended_binding && atual.ended_binding === marcaDoVinculo(vinculo)) return "encerrado_pelo_lacre";
+    if (atual.activation_status !== "ATIVO") return "lacre_inativo";
+    if (!atual.seal_code || vinculo.seal_code !== atual.seal_code) return "lacre_diferente";
+    if ((["binding_id", "cylinder_code", "customer_code", "customer_name", "bound_at"] as const).every(c => (atual[c] ?? null) === vinculo[c])) return "igual";
+
+    db.prepare(`
+      UPDATE devices
+      SET binding_id = ?, cylinder_code = ?, customer_code = ?, customer_name = ?, bound_at = ?, ended_binding = NULL
+      WHERE device_id = ?
+    `).run(vinculo.binding_id, vinculo.cylinder_code, vinculo.customer_code, vinculo.customer_name, vinculo.bound_at, deviceId);
+    return "aplicado";
+  }
+
+  sealCodeExists(sealCode: string): boolean {
+    return Boolean(db.prepare("SELECT 1 FROM devices WHERE seal_code = ?").get(sealCode));
+  }
+
+  // O lacre avisou que está ativo. O identificador é gravado só na primeira vez
+  activate(deviceId: string, sealCode: string): void {
+    db.prepare(`
+      UPDATE devices
+      SET seal_code = COALESCE(seal_code, ?),
+          activated_at = CASE WHEN activation_status = 'ATIVO' THEN activated_at ELSE CURRENT_TIMESTAMP END,
+          binding_alert = CASE WHEN activation_status = 'ATIVO' THEN binding_alert ELSE NULL END,
+          activation_status = 'ATIVO'
+      WHERE device_id = ?
+    `).run(sealCode, deviceId);
+  }
+
+  // O lacre avisou que desativou: o vínculo acaba aqui e fica marcado, para
+  // não voltar enquanto o sistema principal ainda o mandar
+  deactivate(deviceId: string): void {
+    const atual = this.findByDeviceId(deviceId);
+    if (!atual) return;
+    db.prepare(`
+      UPDATE devices
+      SET activation_status = 'INATIVO', deactivated_at = CURRENT_TIMESTAMP,
+          ended_binding = COALESCE(?, ended_binding),
+          binding_id = NULL, cylinder_code = NULL, customer_code = NULL, customer_name = NULL, bound_at = NULL, binding_alert = NULL
+      WHERE device_id = ?
+    `).run(atual.cylinder_code ? marcaDoVinculo(atual) : null, deviceId);
+  }
+
+  setBindingAlert(deviceId: string, tipo: string | null): void {
+    db.prepare("UPDATE devices SET binding_alert = ? WHERE device_id = ?").run(tipo, deviceId);
   }
 
   touch(deviceId: string): void {

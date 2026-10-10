@@ -22,7 +22,7 @@ export interface CycleResult {
   enviadas: number;
   com_erro: number;
   paradas: number;
-  dispositivos?: { criados: number; atualizados: number };
+  dispositivos?: { criados: number; atualizados: number; vinculos: number };
   comandos_novos: number;
   avisos: string[];
   erro?: string;
@@ -39,10 +39,11 @@ export function lerUltimaRodada(): { em: string; resultado: CycleResult } | null
   }
 }
 
-// Cadastro de dispositivos (com o hash da chave) do banco principal → Oxide
+// Cadastro de dispositivos (com o hash da chave) e a ordem de vinculação de
+// cada lacre ativo (cilindro e cliente) do sistema principal → Oxide
 async function trazerDispositivos(config: WorkerConfig, result: CycleResult): Promise<void> {
   const lista = await listarDispositivos(config);
-  const contagem = { criados: 0, atualizados: 0 };
+  const contagem = { criados: 0, atualizados: 0, vinculos: 0 };
 
   for (const d of lista) {
     const feito = devices.upsertFromMain(
@@ -50,6 +51,11 @@ async function trazerDispositivos(config: WorkerConfig, result: CycleResult): Pr
       `sem-chave-em-texto:${randomBytes(12).toString("hex")}`
     );
     contagem[feito === "criado" ? "criados" : "atualizados"]++;
+    if (d.binding === undefined) continue;
+    const vinculo = devices.setBinding(d.device_id, d.binding);
+    if (vinculo === "aplicado") contagem.vinculos++;
+    if (vinculo === "lacre_inativo") result.avisos.push(`vínculo de ${d.device_id} ignorado: o lacre não está ativo`);
+    if (vinculo === "lacre_diferente") result.avisos.push(`vínculo de ${d.device_id} ignorado: o identificador do lacre não é o que a API gerou`);
   }
 
   result.dispositivos = contagem;

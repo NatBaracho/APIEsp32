@@ -73,7 +73,7 @@ npm run simular
 npm run simular:massa
 ```
 
-A suíte roda numa pasta temporária, com uma `oxide.db` nova e um recebedor de teste no lugar do Supabase. Ela não toca no `oxide.db` do projeto nem no banco principal, e pode rodar com a sua API ligada. Resultado atual: suíte 92/92, simulador 23/23 e teste em massa 24/24.
+A suíte roda numa pasta temporária, com uma `oxide.db` nova e um recebedor de teste no lugar do Supabase. Ela não toca no `oxide.db` do projeto nem no banco principal, e pode rodar com a sua API ligada. Resultado atual: suíte 110/110, simulador 26/26 e teste em massa 32/32.
 
 O registro de cada entrega (validação da IA e do responsável) fica em `Doc/Doc_tese/Relatorio-de-Teste-*.md`.
 
@@ -96,6 +96,7 @@ Use **Try it out** para executar as requisições. Para as rotas do lacre, cliqu
 | `POST` | `/api/v1/iot/telemetries` | Leitura periódica do lacre |
 | `POST` | `/api/v1/iot/events` | Evento do lacre (ligou, lacre mudou, falha) |
 | `POST` | `/api/v1/iot/alerts` | Alerta identificado pelo lacre |
+| `POST` | `/api/v1/iot/activations` | O lacre avisa que foi ativado ou desativado; a API gera o identificador do lacre |
 | `GET` | `/api/v1/iot/commands/:deviceId` | Comandos pendentes do dispositivo |
 | `POST` | `/api/v1/iot/commands/confirm` | Confirmar execução ou erro de comando |
 | `GET` | `/api/v1/iot/messages` | Últimas mensagens recebidas (aberta e provisória) |
@@ -119,7 +120,9 @@ Use **Try it out** para executar as requisições. Para as rotas do lacre, cliqu
 
 ## Documentos
 
+- [Como o sistema se comporta](Doc/Como-o-Sistema-se-Comporta.md): explicação simples do que acontece em cada situação (comece por aqui)
 - [Guia do firmware do lacre IoT](Doc/Guia-Firmware-Lacre-IoT.md): o contrato entre o lacre e a API
+- [ESP32: como enviar dados](Doc/ESP32-envio-de-dados.md): o exemplo de cada mensagem e de cada resposta, campo por campo
 - [Contrato de entrega ao Supabase](Doc/Contrato-Entrega-Supabase.md): o que a API envia ao banco principal
 - [Banco local Oxide](Doc/Oxidedb.md)
 - [Desenvolvimento: como a API funciona e histórico](Doc/Desenvolvimento.md)
@@ -133,4 +136,4 @@ Use **Try it out** para executar as requisições. Para as rotas do lacre, cliqu
 - [Banco PostgreSQL FluxID](Doc/Banco_FluxID.md) e scripts em [`sql/fluxid/`](sql/fluxid)
 - [Integração Oxide ⇄ FluxID](Doc/Integracao-Oxide-FluxID.md)
 - [Contrato da API para o frontend](Doc/Contrato-API-Frontend.md) (proposta não seguida)
-- [Payloads antigos do ESP32](Doc/ESP32-envio-de-dados.md) (substituído pelo guia do firmware 2.0)
+

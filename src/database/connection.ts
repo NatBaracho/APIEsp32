@@ -2,10 +2,12 @@ import Database from "better-sqlite3";
 import path from "path";
 
 // Oxide: fila local da API (oxide.db), com três tabelas.
-//   devices   - quem pode enviar (chave do lacre) e o último estado conhecido
+//   devices   - quem pode enviar (chave do lacre), o último estado conhecido
+//               e o vínculo atual (identificador do lacre, cilindro e cliente)
 //   mensagens - fila única de tudo o que o lacre manda, até chegar ao Supabase
 //   commands  - comandos da válvula que o lacre busca e confirma
-// Lacre, cilindro, vínculos, alertas e histórico ficam só no banco principal.
+// O cadastro de lacres, cilindros e clientes, o histórico de vínculos e o
+// tratamento dos alertas ficam só no banco principal.
 
 const databasePath = path.resolve(process.cwd(), "oxide.db");
 const db: Database.Database = new Database(databasePath);
@@ -42,14 +44,31 @@ const tabelas: Array<[string, string]> = [
     last_battery_percent REAL,
     last_signal INTEGER,
     last_telemetry_message_id TEXT,
-    last_repeat_message_id TEXT
+    last_repeat_message_id TEXT,
+    -- Identificador do lacre, gerado pela API na primeira ativação. É com ele
+    -- que o sistema principal vincula o cilindro e o cliente
+    seal_code TEXT UNIQUE,
+    activation_status TEXT NOT NULL DEFAULT 'INATIVO' CHECK (activation_status IN ('ATIVO', 'INATIVO')),
+    activated_at DATETIME,
+    deactivated_at DATETIME,
+    -- Vínculo atual, mandado pelo sistema principal: cilindro e cliente
+    binding_id TEXT,
+    cylinder_code TEXT,
+    customer_code TEXT,
+    customer_name TEXT,
+    bound_at DATETIME,
+    -- Vínculo que o próprio lacre encerrou ao desativar: não volta, mesmo que
+    -- o sistema principal ainda o mande
+    ended_binding TEXT,
+    -- Alerta de vínculo já aberto para a situação atual (para não repetir)
+    binding_alert TEXT
   )`],
   ["mensagens", `(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     message_id TEXT NOT NULL UNIQUE,
     device_id TEXT NOT NULL,
     tipo TEXT NOT NULL
-      CHECK (tipo IN ('TELEMETRIA', 'EVENTO', 'ALERTA', 'CONFIRMACAO_COMANDO')),
+      CHECK (tipo IN ('TELEMETRIA', 'EVENTO', 'ALERTA', 'CONFIRMACAO_COMANDO', 'ATIVACAO')),
     -- A mensagem já validada, no formato que vai para o banco principal
     payload_json TEXT NOT NULL,
     received_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -103,9 +122,11 @@ const modeloAntigo = tabelasAntigas.length > 0 || tabelasARefazer.length > 0;
 // 4. As tabelas que saíram do modelo são removidas.
 if (modeloAntigo) {
   const carimbo = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15);
-  const copia = `${databasePath}.bak-antes-da-fila-unica-${carimbo}`;
+  // Modelo antigo (filas separadas) ou só uma tabela de versão anterior
+  const antigo = tabelasAntigas.length > 0;
+  const copia = `${databasePath}.bak-antes-da-${antigo ? "fila-unica" : "atualizacao"}-${carimbo}`;
   db.prepare("VACUUM INTO ?").run(copia);
-  console.log(`📦 Modelo antigo encontrado. Cópia de segurança: ${copia}`);
+  console.log(`📦 ${antigo ? "Modelo antigo encontrado" : "Banco de versão anterior encontrado"}. Cópia de segurança: ${copia}`);
 }
 
 db.pragma("foreign_keys = OFF");

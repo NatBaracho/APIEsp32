@@ -1,4 +1,4 @@
-export const messageTypes = ["TELEMETRIA", "EVENTO", "ALERTA", "CONFIRMACAO_COMANDO"] as const;
+export const messageTypes = ["TELEMETRIA", "EVENTO", "ALERTA", "CONFIRMACAO_COMANDO", "ATIVACAO"] as const;
 export type MessageType = typeof messageTypes[number];
 
 export const sealStatuses = ["LOCKED", "UNLOCKED", "BROKEN"] as const;

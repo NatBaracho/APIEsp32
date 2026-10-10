@@ -638,7 +638,7 @@ async function main(): Promise<void> {
     return {
       passou: nomes("table") === "commands,devices,mensagens" &&
         nomes("index") === "idx_devices_api_key,idx_devices_api_key_hash,idx_mensagens_device,idx_mensagens_fila" && nomes("trigger") === "" &&
-        colunas("devices") === "id,device_id,api_key,api_key_hash,firmware_version,active,last_contact_at,last_latitude,last_longitude,last_gps_ok,last_seal_status,last_battery_percent,last_signal,last_telemetry_message_id,last_repeat_message_id" &&
+        colunas("devices") === "id,device_id,api_key,api_key_hash,firmware_version,active,last_contact_at,last_latitude,last_longitude,last_gps_ok,last_seal_status,last_battery_percent,last_signal,last_telemetry_message_id,last_repeat_message_id,seal_code,activation_status,activated_at,deactivated_at,binding_id,cylinder_code,customer_code,customer_name,bound_at,ended_binding,binding_alert" &&
         colunas("mensagens") === "id,message_id,device_id,tipo,payload_json,received_at,status,attempt_count,last_error,next_attempt_at,synced_at" &&
         colunas("commands") === "id,command_id,device_id,command_type,status,created_at,executed_at,error_message"
     };
@@ -695,10 +695,10 @@ async function main(): Promise<void> {
     recusa(novaMsg, "NOT NULL constraint failed: mensagens.tipo", "BD-MN2", BD, null, "{}", "PENDING"),
     recusa(novaMsg, "NOT NULL constraint failed: mensagens.payload_json", "BD-MN3", BD, "EVENTO", null, "PENDING")
   ));
-  await teste("mensagens: os quatro tipos e as cinco situações são aceitos", () => {
-    ["TELEMETRIA", "EVENTO", "ALERTA", "CONFIRMACAO_COMANDO"].forEach((t, i) => db.prepare(novaMsg).run(`BD-TIPO-${i}`, BD, t, "{}", "ARQUIVADA"));
+  await teste("mensagens: os cinco tipos e as cinco situações são aceitos", () => {
+    ["TELEMETRIA", "EVENTO", "ALERTA", "CONFIRMACAO_COMANDO", "ATIVACAO"].forEach((t, i) => db.prepare(novaMsg).run(`BD-TIPO-${i}`, BD, t, "{}", "ARQUIVADA"));
     ["PENDING", "PROCESSING", "SYNCED", "ERROR", "ARQUIVADA"].forEach((s, i) => db.prepare(novaMsg).run(`BD-SIT-${i}`, BD, "EVENTO", "{}", s));
-    return { passou: total("message_id LIKE 'BD-TIPO-%' OR message_id LIKE 'BD-SIT-%'") === 9 };
+    return { passou: total("message_id LIKE 'BD-TIPO-%' OR message_id LIKE 'BD-SIT-%'") === 10 };
   });
   await teste("mensagens: dispositivo com mensagens não pode ser apagado; trocar o device_id leva as mensagens junto", () => {
     const barrado = recusa("DELETE FROM devices WHERE device_id = ?", "FOREIGN KEY constraint failed", BD);
@@ -831,6 +831,184 @@ async function main(): Promise<void> {
   db.prepare("DELETE FROM mensagens WHERE message_id LIKE 'BD-%'").run();
   db.prepare("DELETE FROM commands WHERE command_id LIKE 'BD-%'").run();
   db.prepare("DELETE FROM devices WHERE device_id LIKE 'DSP-BD-%'").run();
+
+  // --------------------------------------------- [13] ativação e vínculo
+  console.log("\n--- [13] Ativação do lacre e vínculo com o cilindro e o cliente ---");
+  const V1 = { id: "DSP-TEST-V1", key: "key-test-v1" };
+  const V2 = { id: "DSP-TEST-V2", key: "key-test-v2" };
+  const V3 = { id: "DSP-TEST-V3", key: "key-test-v3" };
+  const V4 = { id: "DSP-TEST-V4", key: "key-test-v4" };
+  type Lacre = { id: string; key: string };
+  const noPrincipal = (id: string) => recebedor.dispositivos.find(d => d.device_id === id)!;
+  const naOxide = (d: Lacre): any => umaLinha<any>("SELECT * FROM devices WHERE device_id = ?", d.id);
+  const vinculo = (d: Lacre, cilindro: string, ordem = `VINC-${cilindro}`) =>
+    ({ binding_id: ordem, seal_code: naOxide(d).seal_code as string, cylinder_code: cilindro, customer_code: "CLI-0007", customer_name: "Hospital de Teste", bound_at: "2026-10-10T12:00:00Z" });
+  let passoV = 0;
+  const telV = (d: Lacre, id: string, extra: Record<string, unknown> = {}) =>
+    api("POST", "/api/v1/iot/telemetries", { message_id: id, device_id: d.id, ...POS, latitude: -7.5 - (++passoV) / 1000, ...extra }, d.key);
+  const ativar = (d: Lacre, id: string, status: unknown = "ATIVO", extra: Record<string, unknown> = {}) =>
+    api("POST", "/api/v1/iot/activations", { message_id: id, device_id: d.id, status, ...POS, ...extra }, d.key);
+
+  await teste("Lacre avisa que está ativo: a API gera o identificador e manda o aviso ao sistema principal", async () => {
+    for (const d of [V1, V2, V3, V4]) recebedor.dispositivos.push({ device_id: d.id, api_key_hash: sha(d.key), active: true });
+    await worker(true);
+    const antes = naOxide(V1);
+    const r = await ativar(V1, "ATV-V1-1");
+    await worker();
+    const d = naOxide(V1);
+    const fila = dados("ATV-V1-1");
+    const destino = recebedor.mensagens.get("ATV-V1-1") as any;
+    return {
+      passou: antes.activation_status === "INATIVO" && antes.seal_code === null && r.status === 202 && /^LCR-[A-Z2-9]{8}$/.test(r.json.seal_code) &&
+        r.json.activation_status === "ATIVO" && d.activation_status === "ATIVO" && d.seal_code === r.json.seal_code && Boolean(d.activated_at) &&
+        fila.type === "ATIVACAO" && fila.activation_status === "ATIVO" && fila.seal_code === d.seal_code && !("cylinder_code" in fila) &&
+        destino?.type === "ATIVACAO" && destino?.seal_code === d.seal_code,
+      detalhe: `identificador ${r.json.seal_code}`
+    };
+  });
+  await teste("Ativar de novo mantém o mesmo identificador; repetida -> 409; status inválido e sem bateria -> 400; chave de outro -> 403", async () => {
+    const codigo = naOxide(V1).seal_code;
+    const denovo = await ativar(V1, "ATV-V1-2");
+    const repetida = await ativar(V1, "ATV-V1-2");
+    const invalido = await ativar(V1, "ATV-V1-3", "LIGADO");
+    const semBateria = await api("POST", "/api/v1/iot/activations", { message_id: "ATV-V1-4", device_id: V1.id, status: "ATIVO", latitude: -7.2, longitude: -39.3 }, V1.key);
+    const deOutro = await api("POST", "/api/v1/iot/activations", { message_id: "ATV-V1-5", device_id: V1.id, status: "ATIVO", ...POS }, V2.key);
+    return {
+      passou: denovo.status === 202 && denovo.json.seal_code === codigo && repetida.status === 409 && invalido.status === 400 &&
+        semBateria.status === 400 && deOutro.status === 403 && naOxide(V1).seal_code === codigo
+    };
+  });
+  await teste("Cada lacre recebe um identificador diferente", async () => {
+    const a = await ativar(V2, "ATV-V2-1");
+    const b = await ativar(V3, "ATV-V3-1");
+    const codigos = new Set([naOxide(V1).seal_code, a.json.seal_code, b.json.seal_code]);
+    return { passou: a.status === 202 && b.status === 202 && codigos.size === 3 };
+  });
+  await teste("Sistema vincula o cilindro e o cliente pelo identificador; a Oxide guarda", async () => {
+    noPrincipal(V1.id).binding = vinculo(V1, "CIL-000111");
+    const r = await worker(true);
+    const denovo = await worker(true);
+    const d = naOxide(V1);
+    return {
+      passou: r.dispositivos?.vinculos === 1 && denovo.dispositivos?.vinculos === 0 && d.cylinder_code === "CIL-000111" && d.customer_code === "CLI-0007" &&
+        d.customer_name === "Hospital de Teste" && d.binding_id === "VINC-CIL-000111" && d.activation_status === "ATIVO",
+      detalhe: `${r.dispositivos?.vinculos} vínculo gravado; na rodada seguinte, ${denovo.dispositivos?.vinculos}`
+    };
+  });
+  await teste("GET /devices/{id} mostra a ativação e o vínculo, sem a chave", async () => {
+    const r = await api("GET", `/api/v1/devices/${V1.id}`);
+    return { passou: r.status === 200 && r.json.activation_status === "ATIVO" && r.json.cylinder_code === "CIL-000111" && r.json.seal_code === naOxide(V1).seal_code && r.json.customer_name === "Hospital de Teste" && !("api_key" in r.json) && !("api_key_hash" in r.json) };
+  });
+  await teste("Leitura do lacre vinculado sai com o identificador, o cilindro e o cliente, e chega assim ao sistema principal", async () => {
+    const r = await telV(V1, "M-V1-1");
+    await worker();
+    const fila = dados("M-V1-1");
+    const destino = recebedor.mensagens.get("M-V1-1") as any;
+    return {
+      passou: r.status === 202 && fila.seal_code === naOxide(V1).seal_code && fila.cylinder_code === "CIL-000111" && fila.customer_code === "CLI-0007" &&
+        fila.binding_id === "VINC-CIL-000111" && destino?.cylinder_code === "CIL-000111" && destino?.customer_name === "Hospital de Teste"
+    };
+  });
+  await teste("Evento, alerta do lacre e alerta automático também saem com o cilindro", async () => {
+    await api("POST", "/api/v1/iot/events", { message_id: "E-V1-1", device_id: V1.id, event_type: "startup", ...POS }, V1.key);
+    await api("POST", "/api/v1/iot/alerts", { alert_id: "A-V1-1", device_id: V1.id, alert_type: "GPS_SEM_SINAL", title: "GPS sem sinal", ...POS }, V1.key);
+    await telV(V1, "M-V1-2", { battery_percent: 9 });
+    const automatico = JSON.parse(umaLinha<any>("SELECT payload_json FROM mensagens WHERE device_id = ? AND message_id LIKE 'AUT-%' AND json_extract(payload_json, '$.alert_type') = 'BATERIA_BAIXA'", V1.id).payload_json);
+    return { passou: dados("E-V1-1").cylinder_code === "CIL-000111" && dados("A-V1-1").cylinder_code === "CIL-000111" && automatico.cylinder_code === "CIL-000111" && automatico.customer_code === "CLI-0007" };
+  });
+  await teste("Vínculo com identificador que a API não gerou é ignorado, com aviso", async () => {
+    noPrincipal(V2.id).binding = { ...vinculo(V2, "CIL-000444"), seal_code: "LCR-INVENTADO" };
+    const r = await worker(true);
+    return { passou: r.avisos.some(a => a.includes(V2.id) && a.includes("identificador")) && naOxide(V2).cylinder_code === null && r.dispositivos?.vinculos === 0 };
+  });
+  await teste("Vínculo para lacre que não está ativo é ignorado, com aviso", async () => {
+    noPrincipal(V4.id).binding = { binding_id: "VINC-V4", seal_code: "LCR-QUALQUER", cylinder_code: "CIL-000555" };
+    const r = await worker(true);
+    delete noPrincipal(V4.id).binding;
+    return { passou: r.avisos.some(a => a.includes(V4.id) && a.includes("não está ativo")) && naOxide(V4).cylinder_code === null };
+  });
+  await teste("Lacre ativo sem cilindro: a mensagem é aceita; o alerta LACRE_SEM_CILINDRO abre só depois do prazo, uma vez", async () => {
+    const dentroDoPrazo = await telV(V3, "M-V3-1");
+    const antes = alertas(V3.id, "LACRE_SEM_CILINDRO");
+    db.prepare("UPDATE devices SET activated_at = datetime('now', '-20 minutes') WHERE device_id = ?").run(V3.id);
+    await telV(V3, "M-V3-2");
+    await telV(V3, "M-V3-3");
+    const p = dados("M-V3-2");
+    return { passou: dentroDoPrazo.status === 202 && antes === 0 && alertas(V3.id, "LACRE_SEM_CILINDRO") === 1 && p.seal_code === naOxide(V3).seal_code && !("cylinder_code" in p) };
+  });
+  await teste("Lacre que nunca avisou a ativação: a mensagem é aceita, sem alerta e sem identificador", async () => {
+    const a = await telV(V4, "M-V4-1");
+    const p = dados("M-V4-1");
+    return { passou: a.status === 202 && total("device_id = ? AND tipo = 'ALERTA'", V4.id) === 0 && !("cylinder_code" in p) && !("seal_code" in p) };
+  });
+  await teste("Troca de cilindro: a mensagem nova sai com o cilindro novo; a que já estava gravada fica com o antigo", async () => {
+    noPrincipal(V1.id).binding = vinculo(V1, "CIL-000222");
+    const r = await worker(true);
+    await telV(V1, "M-V1-3");
+    return { passou: r.dispositivos?.vinculos === 1 && dados("M-V1-3").cylinder_code === "CIL-000222" && dados("M-V1-1").cylinder_code === "CIL-000111" };
+  });
+  await teste("Confirmação de comando sai com o cilindro", async () => {
+    recebedor.comandos.push({ command_id: "CMD-V1", device_id: V1.id, command_type: "TRAVAR_VALVULA" });
+    await worker();
+    const c = await api("POST", "/api/v1/iot/commands/confirm", { command_id: "CMD-V1", device_id: V1.id, status: "EXECUTADO" }, V1.key);
+    return { passou: c.status === 200 && dados("CONF-CMD-V1").cylinder_code === "CIL-000222" && dados("CONF-CMD-V1").seal_code === naOxide(V1).seal_code };
+  });
+  await teste("Sistema desfaz o vínculo: o lacre continua ativo e as mensagens saem sem cilindro", async () => {
+    noPrincipal(V1.id).binding = null;
+    const r = await worker(true);
+    await telV(V1, "M-V1-4");
+    const d = naOxide(V1);
+    const p = dados("M-V1-4");
+    return { passou: r.dispositivos?.vinculos === 1 && d.cylinder_code === null && d.customer_code === null && d.activation_status === "ATIVO" && p.seal_code === d.seal_code && !("cylinder_code" in p) };
+  });
+  await teste("Lacre avisa que desativou: o aviso sai com o vínculo, e o vínculo acaba na hora", async () => {
+    noPrincipal(V2.id).binding = vinculo(V2, "CIL-000333");
+    await worker(true);
+    const vinculado = naOxide(V2).cylinder_code;
+    const r = await ativar(V2, "ATV-V2-OFF", "INATIVO");
+    const d = naOxide(V2);
+    const aviso = dados("ATV-V2-OFF");
+    await telV(V2, "M-V2-1");
+    return {
+      passou: vinculado === "CIL-000333" && r.status === 202 && r.json.activation_status === "INATIVO" && aviso.activation_status === "INATIVO" &&
+        aviso.cylinder_code === "CIL-000333" && d.activation_status === "INATIVO" && d.cylinder_code === null && Boolean(d.deactivated_at) &&
+        Boolean(d.seal_code) && !("cylinder_code" in dados("M-V2-1"))
+    };
+  });
+  await teste("Vínculo encerrado pelo lacre não volta, mesmo que o sistema ainda o mande; um vínculo novo vale depois de ativar de novo", async () => {
+    const codigo = naOxide(V2).seal_code;
+    const aindaManda = await worker(true);
+    const semVoltar = naOxide(V2).cylinder_code;
+    const reativado = await ativar(V2, "ATV-V2-2");
+    const mesmoVinculo = await worker(true);
+    const aindaSem = naOxide(V2).cylinder_code;
+    noPrincipal(V2.id).binding = vinculo(V2, "CIL-000333", "VINC-NOVO");
+    const novo = await worker(true);
+    return {
+      passou: semVoltar === null && !aindaManda.avisos.some(a => a.includes(V2.id)) && reativado.json.seal_code === codigo && aindaSem === null &&
+        mesmoVinculo.dispositivos?.vinculos === 0 && novo.dispositivos?.vinculos === 1 && naOxide(V2).cylinder_code === "CIL-000333" && naOxide(V2).binding_id === "VINC-NOVO"
+    };
+  });
+  await teste("Dado do vínculo com tipo errado é ignorado, sem derrubar o cadastro", async () => {
+    noPrincipal(V3.id).binding = { seal_code: "  ", cylinder_code: { codigo: 1 } as unknown as string, customer_name: 12 as unknown as string };
+    const r = await worker(true);
+    return { passou: r.status !== "FALHOU" && naOxide(V3).cylinder_code === null && naOxide(V3).activation_status === "ATIVO" };
+  });
+
+  await teste("Posição repetida enquanto o Worker envia a leitura: ela volta para a fila e a data nova chega ao sistema principal", async () => {
+    const corpo = { device_id: V4.id, ...POS, latitude: -7.9, longitude: -39.9 };
+    await api("POST", "/api/v1/iot/telemetries", { message_id: "M-CORRIDA-1", ...corpo }, V4.key);
+    // O Worker pegou a leitura para enviar e ainda não terminou
+    db.prepare("UPDATE mensagens SET status = 'PROCESSING' WHERE message_id = 'M-CORRIDA-1'").run();
+    const repetida = await api("POST", "/api/v1/iot/telemetries", { message_id: "M-CORRIDA-2", ...corpo }, V4.key);
+    const linha = umaLinha<any>("SELECT id, status FROM mensagens WHERE message_id = 'M-CORRIDA-1'");
+    // O Worker termina o envio da versão antiga: não pode marcar como enviada
+    db.prepare("UPDATE mensagens SET status = 'SYNCED' WHERE id = ? AND status = 'PROCESSING'").run(linha.id);
+    const depois = umaLinha<any>("SELECT status FROM mensagens WHERE message_id = 'M-CORRIDA-1'").status;
+    await worker();
+    const destino = recebedor.mensagens.get("M-CORRIDA-1") as any;
+    return { passou: repetida.status === 200 && linha.status === "PENDING" && depois === "PENDING" && typeof destino?.last_seen_at === "string" };
+  });
 
   // ---------------------------------------------------------------- resumo
   const falhas = resultados.filter(r => !r.passou);

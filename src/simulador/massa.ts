@@ -61,6 +61,12 @@ interface Lacre {
   device_id: string; chave: string; organizacao: Organizacao; destino: Unidade;
   cilindro: { serie: string; qr: string; nfc: string; gas: string }; veiculo: string; motorista: string;
   passos: Passo[]; chegada: string; violado: boolean;
+  // Identificador que a API gerou na ativação
+  selo: string;
+  // completo: o sistema vincula o cilindro e o cliente; sem_cilindro: ninguém vincula
+  vinculo: "completo" | "sem_cilindro";
+  // O lacre avisa que desativou no fim da viagem
+  desativa: boolean;
   comando?: { command_id: string; command_type: string; status: "EXECUTADO" | "ERRO" };
 }
 
@@ -96,8 +102,8 @@ function montarOrganizacoes(): Organizacao[] {
 // Contas do que a API deve fazer, feitas aqui por fora, para comparar no fim
 const previsto = {
   respostas: new Map<number, number>(),
-  linhas: { TELEMETRIA: 0, EVENTO: 0, ALERTA_DO_LACRE: 0, CONFIRMACAO_COMANDO: 0 },
-  automaticos: { BATERIA_BAIXA: 0, GSM_SINAL_FRACO: 0, LACRE_VIOLADO: 0, LACRE_ABERTO_SEM_AUTORIZACAO: 0 }
+  linhas: { TELEMETRIA: 0, EVENTO: 0, ALERTA_DO_LACRE: 0, CONFIRMACAO_COMANDO: 0, ATIVACAO: 0 },
+  automaticos: { BATERIA_BAIXA: 0, GSM_SINAL_FRACO: 0, LACRE_VIOLADO: 0, LACRE_ABERTO_SEM_AUTORIZACAO: 0, LACRE_SEM_CILINDRO: 0 }
 };
 
 function montarLacre(indice: number, organizacoes: Organizacao[], chaveDoVizinho: () => string): Lacre {
@@ -112,8 +118,13 @@ function montarLacre(indice: number, organizacoes: Organizacao[], chaveDoVizinho
     cilindro: { serie, qr: `QR-${serie}`, nfc: `NFC-${sha(serie).slice(0, 14).toUpperCase()}`, gas: ["O2 medicinal", "N2O", "CO2", "Argônio"][indice % 4]! },
     veiculo: organizacao.veiculos[indice % organizacao.veiculos.length]!,
     motorista: organizacao.motoristas[indice % organizacao.motoristas.length]!,
-    passos: [], chegada: "", violado: chance(0.05)
+    passos: [], chegada: "", violado: chance(0.05),
+    selo: "", vinculo: chance(0.05) ? "sem_cilindro" : "completo", desativa: chance(0.15)
   };
+  // Lacre ativo que viaja sem cilindro vinculado: o alerta abre uma vez
+  if (lacre.vinculo === "sem_cilindro") previsto.automaticos.LACRE_SEM_CILINDRO++;
+  // Um aviso de ativação na saída e, para alguns, um de desativação na chegada
+  previsto.linhas.ATIVACAO += lacre.desativa ? 2 : 1;
 
   const bateriaFraca = chance(0.15);
   const tunel = chance(0.15);
@@ -289,6 +300,14 @@ async function percorrer(lacre: Lacre, recebedor: Awaited<ReturnType<typeof inic
     medidas.feitos++;
   }
 
+  if (lacre.comando) await comandar(lacre, recebedor);
+  if (lacre.desativa) {
+    const r = await avisar(lacre, "INATIVO", lacre.destino);
+    if (r.status !== 202 && r.status !== 409) medidas.fora.push(`${lacre.device_id} comando de desativar: ${r.status}`);
+  }
+}
+
+async function comandar(lacre: Lacre, recebedor: Awaited<ReturnType<typeof iniciarRecebedor>>): Promise<void> {
   if (!lacre.comando) return;
   // O operador do sistema principal manda o comando na chegada; o lacre busca e confirma
   recebedor.comandos.push({ command_id: lacre.comando.command_id, device_id: lacre.device_id, command_type: lacre.comando.command_type, created_at: new Date().toISOString() });
@@ -307,13 +326,22 @@ async function percorrer(lacre: Lacre, recebedor: Awaited<ReturnType<typeof inic
   if (!certo) medidas.fora.push(`${lacre.device_id} comando ${lacre.comando.command_id}: achou=${achou}, confirmar ${c1.status}, confirmar de novo ${c2.status}`);
 }
 
+// O lacre avisa a API que foi ativado ou desativado, com a posição e a bateria
+async function avisar(lacre: Lacre, status: "ATIVO" | "INATIVO", posicao: { latitude: number; longitude: number }): Promise<{ status: number; json: any }> {
+  return pedir("POST", "/api/v1/iot/activations", {
+    message_id: `ATV-${lacre.device_id.slice(-5)}-${status}`, device_id: lacre.device_id, status, ...posicao, battery_percent: 90
+  }, lacre.chave);
+}
+
 // --------------------------------------------------------------------- main
 async function main(): Promise<number> {
   const pasta = fs.mkdtempSync(path.join(os.tmpdir(), "oxide-massa-"));
   const recebedor = await iniciarRecebedor();
   const ambiente = {
     PORT: String(PORTA), SUPABASE_IOT_URL: recebedor.url, SUPABASE_SERVICE_KEY: recebedor.chave,
-    WORKER_INTERVAL_SECONDS: "1", WORKER_CADASTRO_INTERVAL_SECONDS: "5", WORKER_BATCH_SIZE: "200"
+    WORKER_INTERVAL_SECONDS: "1", WORKER_CADASTRO_INTERVAL_SECONDS: "5", WORKER_BATCH_SIZE: "200",
+    // Sem prazo de espera: o alerta de lacre sem cilindro abre na primeira mensagem da viagem
+    REGRA_MINUTOS_SEM_VINCULO: "0"
   };
   let api: ChildProcess | undefined;
   let worker: ChildProcess | undefined;
@@ -352,6 +380,7 @@ async function main(): Promise<number> {
     console.log(`   ${organizacoes.length} organizações, ${unidades / 2} clientes, ${unidades} unidades com geocerca de 150 m, ${organizacoes.length * 8} veículos e ${organizacoes.length * 8} motoristas`);
     console.log(`   ${LACRES} cilindros, cada um com um lacre; ${PONTOS} pontos por trajeto; ${PARALELO} lacres enviando ao mesmo tempo`);
     console.log(`   ${totalPedidos} pedidos planejados; ${lacres.filter(l => l.violado).length} lacres rompidos; ${lacres.filter(l => l.comando).length} comandos`);
+    console.log(`   Vínculos: ${lacres.filter(l => l.vinculo === "completo").length} lacres com cilindro e cliente e ${lacres.filter(l => l.vinculo === "sem_cilindro").length} que ninguém vincula; ${lacres.filter(l => l.desativa).length} avisam que desativaram na chegada`);
 
     etapa("1. API e Worker em processos separados; cadastro vem do banco principal");
     api = subir("src/server.ts", pasta, ambiente);
@@ -366,6 +395,40 @@ async function main(): Promise<number> {
     conferir("Worker traz os dispositivos (só o hash da chave)", `${LACRES + inativos.length}`, `${cadastrados} dispositivos na Oxide`, cadastrados === LACRES + inativos.length);
     const comChave = ler<{ n: number }>("SELECT count(*) AS n FROM devices WHERE api_key NOT LIKE 'sem-chave-em-texto:%'")[0]!.n;
     conferir("Nenhuma chave em texto na Oxide", "0", `${comChave}`, comChave === 0);
+
+    etapa("1b. Lacres ativados: a API gera o identificador e o sistema vincula o cilindro e o cliente");
+    let aAtivar = 0;
+    let ativados = 0;
+    await Promise.all(Array.from({ length: Math.min(PARALELO, LACRES) }, async () => {
+      while (aAtivar < lacres.length) {
+        const l = lacres[aAtivar++]!;
+        const r = await avisar(l, "ATIVO", l.organizacao.deposito);
+        l.selo = String(r.json?.seal_code ?? "");
+        if (r.status === 202 && /^LCR-[A-Z2-9]{8}$/.test(l.selo)) ativados++;
+      }
+    }));
+    const diferentes = new Set(lacres.map(l => l.selo)).size;
+    conferir("Todo lacre avisou que está ativo e recebeu um identificador só dele", `${LACRES}`, `${ativados} ativados; ${diferentes} identificadores diferentes`, ativados === LACRES && diferentes === LACRES);
+    const prazoAviso = Date.now() + 60000;
+    const avisados = (): number => [...recebedor.mensagens.values()].filter(m => m.type === "ATIVACAO" && m.activation_status === "ATIVO").length;
+    while (Date.now() < prazoAviso && avisados() < LACRES) await espera(500);
+    conferir("O sistema principal recebeu a lista de lacres ativados", `${LACRES}`, `${avisados()} avisos de ativação`, avisados() === LACRES);
+
+    // No sistema, alguém vincula o cilindro e o cliente usando o identificador
+    const completos = lacres.filter(l => l.vinculo === "completo");
+    for (const l of completos) {
+      recebedor.dispositivos.find(d => d.device_id === l.device_id)!.binding = {
+        binding_id: `VINC-${l.device_id.slice(-5)}`, seal_code: l.selo, cylinder_code: l.cilindro.serie,
+        customer_code: l.destino.cliente.replace("Cliente ", "CLI-"), customer_name: l.destino.cliente, bound_at: new Date().toISOString()
+      };
+    }
+    const prazoVinculo = Date.now() + 60000;
+    let vinculados = 0;
+    while (Date.now() < prazoVinculo && vinculados < completos.length) {
+      await espera(500);
+      vinculados = ler<{ n: number }>("SELECT count(*) AS n FROM devices WHERE cylinder_code IS NOT NULL")[0]!.n;
+    }
+    conferir("Ordem de vinculação gravada na Oxide (cilindro e cliente)", `${completos.length}`, `${vinculados} lacres com cilindro`, vinculados === completos.length);
 
     etapa("2. Envio em massa, com quedas no meio");
     const inicio = Date.now();
@@ -430,6 +493,7 @@ async function main(): Promise<number> {
     conferir("Eventos gravados", `${previsto.linhas.EVENTO}`, `${porTipo.get("EVENTO") ?? 0}`, porTipo.get("EVENTO") === previsto.linhas.EVENTO);
     conferir("Alertas gravados (do lacre + automáticos)", `${previsto.linhas.ALERTA_DO_LACRE} + ${totalAuto}`, `${porTipo.get("ALERTA") ?? 0}`, porTipo.get("ALERTA") === previsto.linhas.ALERTA_DO_LACRE + totalAuto);
     conferir("Confirmações de comando gravadas", `${previsto.linhas.CONFIRMACAO_COMANDO}`, `${porTipo.get("CONFIRMACAO_COMANDO") ?? 0}`, (porTipo.get("CONFIRMACAO_COMANDO") ?? 0) === previsto.linhas.CONFIRMACAO_COMANDO);
+    conferir("Avisos de ativação e de desativação gravados", `${previsto.linhas.ATIVACAO}`, `${porTipo.get("ATIVACAO") ?? 0}`, (porTipo.get("ATIVACAO") ?? 0) === previsto.linhas.ATIVACAO);
     for (const [tipo, n] of Object.entries(previsto.automaticos)) {
       conferir(`Alerta automático ${tipo}`, `${n}`, `${auto.get(tipo) ?? 0}`, (auto.get(tipo) ?? 0) === n);
     }
@@ -461,6 +525,28 @@ async function main(): Promise<number> {
       lista.push(m);
       doDispositivo.set(String(m.device_id), lista);
     }
+    // Cada mensagem tem de chegar com o cilindro e o cliente do vínculo do dispositivo
+    let vinculoErrado = 0;
+    for (const l of lacres) {
+      for (const m of doDispositivo.get(l.device_id) ?? []) {
+        // O aviso de ativação sai antes do vínculo; todo o resto, com o cilindro e o cliente
+        const semCilindro = l.vinculo === "sem_cilindro" || (m.type === "ATIVACAO" && m.activation_status === "ATIVO");
+        const certo = m.seal_code === l.selo && (semCilindro
+          ? !("cylinder_code" in m)
+          : m.cylinder_code === l.cilindro.serie && m.customer_name === l.destino.cliente);
+        if (!certo) vinculoErrado++;
+      }
+    }
+    conferir("Toda mensagem chegou com o identificador do lacre, o cilindro e o cliente certos", "0 com vínculo errado", `${recebedor.mensagens.size} mensagens; ${vinculoErrado} com vínculo errado`, vinculoErrado === 0);
+    // O sistema ainda manda o vínculo de quem desativou: ele não pode voltar
+    await espera(7000);
+    const desativados = lacres.filter(l => l.desativa);
+    const encerrados = ler<{ n: number }>("SELECT count(*) AS n FROM devices WHERE activation_status = 'INATIVO' AND seal_code IS NOT NULL AND cylinder_code IS NULL")[0]!.n;
+    const avisosDeFim = [...recebedor.mensagens.values()].filter(m => m.type === "ATIVACAO" && m.activation_status === "INATIVO").length;
+    conferir("Lacre que avisou a desativação: vínculo encerrado na Oxide e aviso entregue ao sistema", `${desativados.length}`, `${encerrados} encerrados; ${avisosDeFim} avisos`, encerrados === desativados.length && avisosDeFim === desativados.length);
+    const aindaVinculados = ler<{ n: number }>("SELECT count(*) AS n FROM devices WHERE cylinder_code IS NOT NULL")[0]!.n;
+    const esperados = lacres.filter(l => l.vinculo === "completo" && !l.desativa).length;
+    conferir("Quem não desativou continua vinculado", `${esperados}`, `${aindaVinculados}`, aindaVinculados === esperados);
     let entregas = 0;
     let rompidos = 0;
     for (const l of lacres) {

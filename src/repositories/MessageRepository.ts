@@ -20,13 +20,15 @@ export class MessageRepository {
   }
 
   // Posição repetida: atualiza a mesma mensagem e a devolve à fila se já
-  // tinha sido enviada, para o banco principal receber a nova data
+  // tinha sido enviada, para o banco principal receber a nova data. Se o
+  // Worker está enviando a versão anterior neste instante (PROCESSING), ela
+  // também volta para a fila: senão seria marcada como enviada sem a data nova
   updatePayload(messageId: string, payload: Record<string, unknown>): void {
     db.prepare(`
       UPDATE mensagens
       SET payload_json = ?,
-          status = CASE WHEN status = 'SYNCED' THEN 'PENDING' ELSE status END,
-          next_attempt_at = CASE WHEN status = 'SYNCED' THEN NULL ELSE next_attempt_at END
+          next_attempt_at = CASE WHEN status IN ('SYNCED', 'PROCESSING') THEN NULL ELSE next_attempt_at END,
+          status = CASE WHEN status IN ('SYNCED', 'PROCESSING') THEN 'PENDING' ELSE status END
       WHERE message_id = ?
     `).run(JSON.stringify(payload), messageId);
   }

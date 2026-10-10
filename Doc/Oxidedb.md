@@ -30,9 +30,25 @@ Lacre ──► API (valida) ──► mensagens (fila) ──► Worker ──�
 
 | Tabela | Para quê |
 | --- | --- |
-| `devices` | Quem pode enviar: código, chave (ou o hash vindo do banco principal), ativo ou não, e o **último estado recebido** (contato, posição, GPS, lacre, bateria e sinal) |
-| `mensagens` | Fila única: leitura, evento, alerta e confirmação de comando, com a mensagem validada em JSON, a hora de chegada e a situação do envio |
+| `devices` | Quem pode enviar: código, chave (ou o hash vindo do banco principal), ativo ou não, o **último estado recebido** (contato, posição, GPS, lacre, bateria e sinal), a **ativação** (identificador do lacre, ativo ou não) e o **vínculo atual** (cilindro e cliente) |
+| `mensagens` | Fila única: leitura, evento, alerta, confirmação de comando e aviso de ativação, com a mensagem validada em JSON, a hora de chegada e a situação do envio |
 | `commands` | Comandos da válvula vindos do banco principal, que o lacre busca e confirma |
+
+### Ativação e vínculo (`devices`)
+
+| Coluna | O que guarda |
+| --- | --- |
+| `seal_code` | Identificador do lacre, gerado pela API na primeira ativação (`LCR-` e 8 caracteres). Não se repete e nunca muda |
+| `activation_status` | `ATIVO` ou `INATIVO` |
+| `activated_at`, `deactivated_at` | Datas da ativação e da desativação |
+| `binding_id` | Identificador do vínculo no sistema principal |
+| `cylinder_code` | Código do cilindro vinculado |
+| `customer_code`, `customer_name` | Cliente |
+| `bound_at` | Data da vinculação |
+| `ended_binding` | Vínculo que o lacre encerrou ao desativar, para ele não voltar |
+| `binding_alert` | Alerta de vínculo já aberto para a situação atual, para não repetir |
+
+O cadastro de lacres, cilindros e clientes e o histórico dos vínculos continuam só no sistema principal. A Oxide guarda apenas o vínculo que vale agora.
 
 ### Situação de uma mensagem (`mensagens.status`)
 
@@ -58,7 +74,9 @@ Se a API encontrar um banco no modelo antigo, ela faz, nesta ordem:
    - o que não tem posição ou bateria fica guardado como `ARQUIVADA`;
 4. remove as tabelas que saíram do modelo.
 
-Os dispositivos e os comandos são mantidos. A migração roda uma vez só. Se uma linha antiga não couber nas regras atuais, a API não sobe e nada é alterado; a cópia de segurança já terá sido feita.
+Os dispositivos e os comandos são mantidos. A migração roda uma vez só.
+
+O mesmo vale para um banco já no modelo de três tabelas, mas de uma versão anterior (por exemplo, sem as colunas da ativação e do vínculo): a API faz a cópia `oxide.db.bak-antes-da-atualizacao-<data>` e refaz as tabelas com os mesmos dados. Se uma linha antiga não couber nas regras atuais, a API não sobe e nada é alterado; a cópia de segurança já terá sido feita.
 
 ## 4.1 Modo de gravação (WAL) e gravação ao mesmo tempo
 
@@ -96,7 +114,20 @@ CREATE TABLE IF NOT EXISTS devices (
     last_battery_percent REAL,
     last_signal INTEGER,
     last_telemetry_message_id TEXT,
-    last_repeat_message_id TEXT
+    last_repeat_message_id TEXT,
+    -- Identificador do lacre, gerado pela API na primeira ativação
+    seal_code TEXT UNIQUE,
+    activation_status TEXT NOT NULL DEFAULT 'INATIVO' CHECK (activation_status IN ('ATIVO', 'INATIVO')),
+    activated_at DATETIME,
+    deactivated_at DATETIME,
+    -- Vínculo atual, mandado pelo sistema principal: cilindro e cliente
+    binding_id TEXT,
+    cylinder_code TEXT,
+    customer_code TEXT,
+    customer_name TEXT,
+    bound_at DATETIME,
+    ended_binding TEXT,
+    binding_alert TEXT
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_api_key ON devices(api_key);
@@ -108,7 +139,7 @@ CREATE TABLE IF NOT EXISTS mensagens (
     message_id TEXT NOT NULL UNIQUE,
     device_id TEXT NOT NULL,
     tipo TEXT NOT NULL
-        CHECK (tipo IN ('TELEMETRIA', 'EVENTO', 'ALERTA', 'CONFIRMACAO_COMANDO')),
+        CHECK (tipo IN ('TELEMETRIA', 'EVENTO', 'ALERTA', 'CONFIRMACAO_COMANDO', 'ATIVACAO')),
     -- A mensagem já validada, no formato que vai para o banco principal
     payload_json TEXT NOT NULL,
     received_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -171,3 +202,4 @@ PRAGMA foreign_key_check;
 | 1.0 a 1.8 | até 07/10/2026 | Modelo com filas separadas, alertas, lacres, cilindros, vínculos e registro das rodadas do Worker |
 | 2.0 | 10/10/2026 | Modelo enxuto: `devices`, `mensagens` e `commands`; migração automática com cópia de segurança |
 | 2.1 | 10/10/2026 | Depois do teste do banco e do teste em massa: a migração refaz `devices` e `commands` no formato atual; cópia de segurança antes de qualquer mudança; modo WAL; operações de gravação pedem a vez no início (nova seção 4.1). **Aprovado por Natã da Silva Baracho em 10/10/2026** |
+| 2.2 | 10/10/2026 | Ativação e vínculo: colunas novas em `devices` (identificador do lacre, ativação, cilindro e cliente); tipo `ATIVACAO` em `mensagens`; cópia de segurança `bak-antes-da-atualizacao` para banco de versão anterior. **Aprovado por Natã da Silva Baracho em 10/10/2026** |

@@ -103,6 +103,20 @@ const openApiSpec = {
         responses: { "202": resposta("Evento recebido", { success: true, message: "Evento recebido" }), ...errosDoLacre }
       }
     },
+    "/api/v1/iot/activations": {
+      post: {
+        tags: ["Lacre"],
+        summary: "Avisar que o lacre foi ativado ou desativado",
+        description: "Na primeira ativação, a API gera o identificador do lacre (`seal_code`) e o devolve na resposta. O aviso segue para o sistema principal, que usa o identificador para vincular o cilindro e o cliente. `INATIVO` encerra o vínculo.",
+        security: chave,
+        requestBody: jsonBody(
+          { message_id: { type: "string", example: "ATV-000001" }, status: { type: "string", enum: ["ATIVO", "INATIVO"] }, ...leitura },
+          ["message_id", "status", ...obrigatorios],
+          { message_id: "ATV-000001", device_id: "DSP-000001", status: "ATIVO", latitude: -7.2091939, longitude: -39.3063666, battery_percent: 97 }
+        ),
+        responses: { "202": resposta("Lacre ativado", { success: true, message: "Lacre ativado", activation_status: "ATIVO", seal_code: "LCR-7K2MPQ9X" }), ...errosDoLacre }
+      }
+    },
     "/api/v1/iot/alerts": {
       post: {
         tags: ["Lacre"],
@@ -194,7 +208,7 @@ const openApiSpec = {
         tags: ["Acompanhamento"],
         summary: "Últimas mensagens recebidas",
         parameters: [
-          { name: "type", in: "query", schema: { type: "string", enum: ["TELEMETRIA", "EVENTO", "ALERTA", "CONFIRMACAO_COMANDO"] } },
+          { name: "type", in: "query", schema: { type: "string", enum: ["TELEMETRIA", "EVENTO", "ALERTA", "CONFIRMACAO_COMANDO", "ATIVACAO"] } },
           { name: "device_id", in: "query", schema: { type: "string" } },
           { name: "limit", in: "query", schema: { type: "integer", default: 50, maximum: 200 } }
         ],

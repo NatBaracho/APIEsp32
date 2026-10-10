@@ -71,9 +71,21 @@ async function main(): Promise<number> {
     const lista = await chamar("GET", `/api/v1/devices/${DISP}`);
     conferir("Dispositivo consultado sem mostrar a chave", "200 sem api_key", `${lista.status}; campos: ${Object.keys(lista.json ?? {}).filter(k => k.includes("key")).join(",") || "nenhum com chave"}`, lista.status === 200 && !("api_key" in lista.json) && !("api_key_hash" in lista.json));
 
+    etapa("1b. Lacre ativado: a API gera o identificador e o sistema vincula o cilindro e o cliente");
+    const ativacao = await chamar("POST", "/api/v1/iot/activations", { message_id: "ATV-SIM-001", device_id: DISP, status: "ATIVO", ...pos, battery_percent: 95 }, CHAVE);
+    const identificador = String(ativacao.json?.seal_code ?? "");
+    conferir("Lacre avisa que está ativo e recebe o identificador", "202 e um código LCR-...", `${ativacao.status} ${identificador}`, ativacao.status === 202 && /^LCR-[A-Z2-9]{8}$/.test(identificador));
+    recebedor.dispositivos[0]!.binding = { binding_id: "VINC-SIM-001", seal_code: identificador, cylinder_code: "CIL-SIM-001", customer_code: "CLI-SIM-001", customer_name: "Cliente da simulação" };
+    const rv = await worker(true);
+    conferir("Sistema vincula o cilindro e o cliente pelo identificador; a Oxide guarda", "1 vínculo", `${rv.dispositivos?.vinculos} vínculo(s) gravado(s)`, rv.dispositivos?.vinculos === 1);
+
     etapa("2. Lacre ativo: leituras com posição e bateria");
     const t1 = await chamar("POST", "/api/v1/iot/telemetries", leitura(), CHAVE);
     conferir("Primeira leitura", "202", `${t1.status} ${t1.json?.message}`, t1.status === 202);
+    const primeira = JSON.parse((db.prepare("SELECT payload_json FROM mensagens WHERE message_id = 'MSG-SIM-002'").get() as { payload_json: string }).payload_json);
+    conferir("A leitura sai com o identificador do lacre, o cilindro e o cliente", `${identificador}, CIL-SIM-001, Cliente da simulação`,
+      `${primeira.seal_code}, ${primeira.cylinder_code}, ${primeira.customer_name}`,
+      primeira.seal_code === identificador && primeira.cylinder_code === "CIL-SIM-001" && primeira.customer_name === "Cliente da simulação");
     const semBateria = await chamar("POST", "/api/v1/iot/telemetries", { message_id: "MSG-SIM-SB", device_id: DISP, ...pos }, CHAVE);
     conferir("Leitura sem bateria", "400", `${semBateria.status} ${semBateria.json?.message}`, semBateria.status === 400);
     const semPosicao = await chamar("POST", "/api/v1/iot/telemetries", { message_id: "MSG-SIM-SP", device_id: DISP, battery_percent: 90 }, CHAVE);
@@ -110,16 +122,18 @@ async function main(): Promise<number> {
     etapa("6. Fila: banco principal fora do ar e reenvio");
     const antes = (await chamar("GET", "/api/v1/sync/status")).json.fila;
     console.log(`   Fila antes do envio: ${JSON.stringify(antes)}`);
+    // O aviso de ativação já foi entregue na etapa 1b
+    const jaEntregues = recebedor.mensagens.size;
     recebedor.foraDoAr = true;
     const fora = await worker();
     const tentativas = (db.prepare("SELECT COALESCE(max(attempt_count), 0) AS n FROM mensagens").get() as { n: number }).n;
     conferir("Banco principal fora do ar", "rodada FALHOU, nada perdido, nenhuma tentativa gasta", `${fora.status}; maior número de tentativas = ${tentativas}`, fora.status === "FALHOU" && tentativas === 0);
     recebedor.foraDoAr = false;
     const envio = await worker();
-    conferir("Banco principal de volta", "tudo enviado", `rodada ${envio.status}; ${envio.enviadas} enviada(s); ${recebedor.mensagens.size} no banco principal`, envio.status === "OK" && envio.enviadas === antes.pendentes && recebedor.mensagens.size === antes.pendentes);
+    conferir("Banco principal de volta", "tudo enviado", `rodada ${envio.status}; ${envio.enviadas} enviada(s); ${recebedor.mensagens.size} no banco principal`, envio.status === "OK" && envio.enviadas === antes.pendentes && recebedor.mensagens.size === antes.pendentes + jaEntregues);
     db.prepare("UPDATE mensagens SET status = 'PENDING'").run();
     const denovo = await worker();
-    conferir("Reenvio de tudo de novo", "nada duplicado", `${denovo.enviadas} reenviada(s); ${recebedor.mensagens.size} no banco principal`, recebedor.mensagens.size === antes.pendentes);
+    conferir("Reenvio de tudo de novo", "nada duplicado", `${denovo.enviadas} reenviada(s); ${recebedor.mensagens.size} no banco principal`, recebedor.mensagens.size === antes.pendentes + jaEntregues);
 
     etapa("7. Comando da válvula criado no sistema principal");
     recebedor.comandos.push({ command_id: "CMD-SIM-001", device_id: DISP, command_type: "TRAVAR_VALVULA" });

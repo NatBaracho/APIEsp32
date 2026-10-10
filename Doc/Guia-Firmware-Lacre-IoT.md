@@ -178,12 +178,45 @@ Respostas: `201` criado; `409` "Alerta duplicado" (tratar como sucesso).
 
 A busca de comandos também conta como "o lacre está vivo". Busque com frequência.
 
+### 4.6 Ativação — `POST /iot/activations`
+
+O lacre avisa que está **ativo** (ligado e pronto) ou que foi **desativado**. É por este aviso que o sistema sabe quais lacres estão ativos e pode vincular o cilindro e o cliente.
+
+```json
+{
+  "message_id": "ATV-DSP000001-000001",
+  "device_id": "DSP-000001",
+  "status": "ATIVO",
+  "latitude": -7.209194,
+  "longitude": -39.306367,
+  "gps_ok": true,
+  "battery_percent": 97
+}
+```
+
+| Campo | Obrigatório | Regra |
+| --- | --- | --- |
+| `status` | Sim | `ATIVO` ou `INATIVO` |
+| `message_id`, `device_id`, `latitude`, `longitude`, `battery_percent` | Sim | Como nas outras mensagens |
+
+Resposta `202`:
+
+```json
+{ "success": true, "message": "Lacre ativado", "activation_status": "ATIVO", "seal_code": "LCR-JKFL6VBR" }
+```
+
+- `seal_code` é o **identificador do lacre**, gerado pelo servidor na primeira ativação. Ele nunca muda. O firmware pode guardar e mostrar, mas **não precisa enviar** em nenhuma mensagem.
+- Envie `ATIVO` **toda vez que o lacre ligar ou reiniciar**. Repetir não cria outro identificador.
+- Envie `INATIVO` só no desligamento de propósito (fim de uso). Isso **encerra o vínculo** com o cilindro e o cliente. Queda de energia não precisa avisar.
+- Sem resposta: tente de novo com o mesmo `message_id`. `409` = o servidor já tinha recebido (tratar como sucesso).
+
 ## 5. Quando enviar o quê
 
 | Situação no lacre | O que enviar |
 | --- | --- |
 | Funcionamento normal | **Leitura** periódica com `seal_status` |
-| Ligou ou reiniciou | **Evento** `startup` |
+| Ligou ou reiniciou | **Aviso de ativação** (`status: "ATIVO"`, seção 4.6) e **evento** `startup` |
+| Vai ser desligado de propósito (fim de uso) | **Aviso de desativação** (`status: "INATIVO"`) |
 | O lacre mudou de estado (fechou, abriu, rompeu) | **Evento** `seal_changed` com o novo `seal_status`. O servidor abre o alerta sozinho |
 | GPS funcionando, mas sem sinal | **Leitura** com a última posição e `gps_ok: false` |
 | Módulo GPS não responde | **Alerta** `GPS_INATIVO`, com a última posição e `gps_ok: false` |
@@ -191,7 +224,7 @@ A busca de comandos também conta como "o lacre está vivo". Busque com frequên
 | Comando falhou | Confirmar com `ERRO` e o motivo em `error_message` |
 
 **Não envie** (o servidor resolve):
-- o lacre e o cilindro: vêm do cadastro;
+- o identificador do lacre, o cilindro e o cliente: o servidor gera o identificador e o sistema faz o vínculo;
 - alerta de bateria baixa, de sinal fraco e de lacre aberto ou rompido: o servidor abre a partir de `battery_percent`, `gsm_signal` e `seal_status`. Se o firmware mandar também, o alerta fica duplicado.
 
 **Estados do firmware.** O `enum EstadoDispositivo` do lacre pode ir no campo `device_state`, só para acompanhamento. O que vale para o servidor é:
@@ -354,6 +387,7 @@ void VerificarComandos() {
 - [ ] Chave errada → `401`, e o firmware não fica insistindo.
 - [ ] Sem rede → mensagens guardadas e enviadas depois, na ordem, sem `message_id` novo.
 - [ ] Comando `TRAVAR_VALVULA` executado e confirmado; reconfirmar → `409` tratado como sucesso.
+- [ ] Aviso de ativação ao ligar → `202` com o `seal_code`; avisar de novo devolve o mesmo código.
 - [ ] Depois de reiniciar, o `message_id` continua sem repetir.
 
 ## 10. Ainda a definir (combinar com o backend)
@@ -365,6 +399,7 @@ void VerificarComandos() {
 | Limites de bateria baixa e de sinal fraco | 15% e -105 dBm. Mudam no servidor, sem mudar o firmware |
 | HTTPS | A API ainda usa HTTP; planejar a troca antes da produção |
 | Leitura do NFC do lacre | Prevista para a conferência física na auditoria |
+| Aviso de ativação | Rota pronta no servidor (seção 4.6). Falta o firmware enviar ao ligar |
 
 ## 11. Referências
 
@@ -378,3 +413,4 @@ void VerificarComandos() {
 | --- | --- | --- |
 | 1.0 | 07/10/2026 | Primeira versão |
 | 2.0 | 10/10/2026 | Posição e bateria obrigatórias; `gps_ok`; `satelites`, `hdop` e `device_state`; exemplo no estilo do firmware `fluxid-firmware`; banco principal passa a ser o Supabase |
+| 2.1 | 10/10/2026 | Nova seção 4.6: aviso de ativação e de desativação (`POST /iot/activations`); o servidor gera o identificador do lacre. **Aprovado por Natã da Silva Baracho em 10/10/2026** |

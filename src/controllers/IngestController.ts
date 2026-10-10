@@ -1,11 +1,12 @@
 import { Request, Response } from "express";
 import { AlertSeverity, alertSeverities, defaultSeverityByType, normalizeAlertType } from "../models/Alert";
+import { ActivationStatus, activationStatuses } from "../models/Device";
 import { messageTypes } from "../models/Message";
 import { MessageRepository } from "../repositories/MessageRepository";
 import { MessageService, ReceiveResult, validarLeitura } from "../services/MessageService";
 
-// Rotas do lacre: telemetria, evento e alerta. As três exigem posição e
-// bateria e gravam na mesma fila (tabela mensagens)
+// Rotas do lacre: telemetria, evento, alerta e ativação. Todas exigem
+// posição e bateria e gravam na mesma fila (tabela mensagens)
 export class IngestController {
 
   private service = new MessageService();
@@ -38,6 +39,32 @@ export class IngestController {
     } catch (error) {
       console.error(error);
       res.status(500).json({ success: false, message: "Erro ao receber telemetria" });
+    }
+  }
+
+  // O lacre avisa que foi ativado (ligado e pronto) ou desativado
+  activation(req: Request, res: Response): void {
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      if (!activationStatuses.includes(body.status as ActivationStatus)) {
+        return this.invalid(res, "status deve ser ATIVO ou INATIVO");
+      }
+      const validacao = validarLeitura(body);
+      if (!validacao.ok) return this.invalid(res, validacao.message);
+
+      const status = body.status as ActivationStatus;
+      const feito = this.service.activation(validacao.leitura, status);
+      if (feito.result === "duplicate") {
+        res.status(409).json({ success: false, message: "Mensagem duplicada" });
+        return;
+      }
+      res.status(202).json({
+        success: true, message: status === "ATIVO" ? "Lacre ativado" : "Lacre desativado",
+        activation_status: status, seal_code: feito.seal_code
+      });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ success: false, message: "Erro ao registrar a ativação" });
     }
   }
 

@@ -2,7 +2,7 @@
 
 **Data:** 10/10/2026, 14:00
 **Executado por:** IA (Claude Code, modelo Claude Opus 5.5), a pedido de Natã da Silva Baracho
-**Branch:** `feat/oxide-enxuta` (PR #20), enviada ao GitHub depois da aprovação
+**Branch:** os testes rodaram na `feat/oxide-enxuta`; a entrega foi na `fix/teste-banco-e-massa` (PR #21), enviada ao GitHub depois da aprovação
 **Base:** descrição do sistema principal (FluxID) enviada por Natã, `Contrato-Entrega-Supabase.md` e `Guia-Firmware-Lacre-IoT.md` 2.0
 **Situação:** ✅ **aprovado por Natã da Silva Baracho em 10/10/2026** (seção 9)
 
@@ -188,7 +188,7 @@ Arquivo novo: `src/simulador/massa.ts`. Nenhuma regra da API foi alterada nesta 
 
 ## 9. Validação e modo WAL adotado (10/10/2026)
 
-Natã da Silva Baracho respondeu **sim** às cinco perguntas: **aprovado por Natã da Silva Baracho em 10/10/2026**.
+Natã da Silva Baracho respondeu **sim** às cinco perguntas: **aprovado por Natã da Silva Baracho em 10/10/2026**. O PR #20 já tinha sido mesclado na `main`, então as mudanças foram enviadas no PR #21.
 
 Com a aprovação, o modo WAL foi adotado (`src/database/connection.ts`), mantendo a gravação garantida em disco a cada mensagem. Dois ajustes vieram junto:
 
