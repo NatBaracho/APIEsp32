@@ -107,21 +107,54 @@ Use **Try it out** para executar as requisições. Para as rotas do lacre, cliqu
 
 ## Endpoints
 
-| Método | Endpoint | Uso |
+Todos os endereços abaixo são com a API ligada na porta 3000. De outro aparelho, troque `localhost` pelo IP do computador.
+
+### Endpoints da API usados pelo lacre
+
+Exigem o cabeçalho `X-API-Key`, com a chave do próprio dispositivo.
+
+| Método | Endereço | Para quê |
 | --- | --- | --- |
-| `POST` | `/api/v1/iot/telemetries` | Leitura periódica do lacre |
-| `POST` | `/api/v1/iot/events` | Evento do lacre (ligou, lacre mudou, falha) |
-| `POST` | `/api/v1/iot/alerts` | Alerta identificado pelo lacre |
-| `POST` | `/api/v1/iot/activations` | O lacre avisa que foi ativado ou desativado; a API gera o identificador do lacre |
-| `GET` | `/api/v1/iot/commands/:deviceId` | Comandos pendentes do dispositivo |
-| `POST` | `/api/v1/iot/commands/confirm` | Confirmar execução ou erro de comando |
-| `GET` | `/api/v1/iot/messages` | Últimas mensagens recebidas (aberta e provisória) |
-| `GET` | `/api/v1/devices` e `/api/v1/devices/:deviceId` | Consultar dispositivos, sem a chave |
-| `POST` | `/api/v1/devices` | Cadastrar dispositivo (provisório, para testes) |
-| `GET` | `/api/v1/sync/status` | Situação da fila e da última rodada do Worker |
-| `GET` | `/api/v1/sync/problems` | Mensagens que não chegaram ao banco principal |
-| `POST` | `/api/v1/sync/retry` | Devolver à fila uma mensagem com erro |
-| `GET` | `/health` | Saúde da API, da fila e do Worker |
+| `POST` | `http://localhost:3000/api/v1/iot/activations` | O lacre avisa que foi ativado ou desativado; a API gera o identificador do lacre |
+| `POST` | `http://localhost:3000/api/v1/iot/telemetries` | Leitura periódica: posição, bateria, sinal e estado do lacre |
+| `POST` | `http://localhost:3000/api/v1/iot/events` | Evento: algo aconteceu (ligou, o lacre mudou de estado, falha) |
+| `POST` | `http://localhost:3000/api/v1/iot/alerts` | Alerta: problema identificado pelo lacre |
+| `GET` | `http://localhost:3000/api/v1/iot/commands/{device_id}` | Buscar os comandos de válvula pendentes |
+| `POST` | `http://localhost:3000/api/v1/iot/commands/confirm` | Confirmar o comando executado ou com erro |
+
+O exemplo de cada mensagem e de cada resposta está em [ESP32-envio-de-dados.md](Doc/ESP32-envio-de-dados.md).
+
+### Endpoints para ver o que está na Oxide
+
+A Oxide é o arquivo `oxide.db`: ela **não tem porta nem endereço próprio**. Quem mostra o que está guardado nela é a API, pelos endpoints abaixo. São abertos (sem chave) e provisórios, para a equipe acompanhar os testes; abrem direto no navegador.
+
+| Método | Endereço | O que mostra | Tabela da Oxide |
+| --- | --- | --- | --- |
+| `GET` | `http://localhost:3000/api/v1/iot/messages` | As últimas mensagens recebidas (até 50), da mais nova para a mais antiga. Não mostra as arquivadas do modelo antigo | `mensagens` |
+| `GET` | `http://localhost:3000/api/v1/iot/messages?type=TELEMETRIA&device_id=DSP-000001&limit=20` | O mesmo, com filtro por tipo (`TELEMETRIA`, `EVENTO`, `ALERTA`, `CONFIRMACAO_COMANDO` ou `ATIVACAO`), por dispositivo e com limite (até 200) | `mensagens` |
+| `GET` | `http://localhost:3000/api/v1/devices` | Todos os dispositivos: ativo ou não, último estado, identificador do lacre e vínculo com o cilindro e o cliente. Nunca mostra a chave | `devices` |
+| `GET` | `http://localhost:3000/api/v1/devices/{device_id}` | Um dispositivo | `devices` |
+| `GET` | `http://localhost:3000/api/v1/sync/status` | A fila em números (pendentes, enviando, com nova tentativa, paradas, enviadas e arquivadas) e a última rodada do Worker | `mensagens` |
+| `GET` | `http://localhost:3000/api/v1/sync/problems` | As mensagens que não chegaram ao banco principal, com o motivo | `mensagens` |
+| `POST` | `http://localhost:3000/api/v1/sync/retry` | Devolve à fila uma mensagem com erro. Corpo: `{"message_id": "..."}` | `mensagens` |
+| `POST` | `http://localhost:3000/api/v1/devices` | Cadastra um dispositivo para teste de bancada. Corpo: `device_id` e `api_key` | `devices` |
+
+Os comandos (`commands`) aparecem para o lacre em `GET /api/v1/iot/commands/{device_id}` e, em quantidade, no `/health` (`comandos_pendentes`).
+
+### Endpoints gerais
+
+| Método | Endereço | Para quê |
+| --- | --- | --- |
+| `GET` | `http://localhost:3000/` | Ver se a API está no ar (responde "API ESP32 Online") |
+| `GET` | `http://localhost:3000/health` | Situação da API, da fila e do Worker (`200` normal, `503` com problema) |
+| `GET` | `http://localhost:3000/api-docs` | Documentação interativa (Swagger): mostra e deixa testar todos os endpoints |
+
+### Abrir a Oxide direto, sem a API
+
+Para olhar as tabelas, o `oxide.db` abre em qualquer programa de SQLite (por exemplo, o DB Browser for SQLite). Dois cuidados:
+
+- **Não abra o arquivo em uso para gravar.** Com a API ligada, faça uma cópia com `npm run backup` e abra a cópia, que fica na pasta `backups/`.
+- As tabelas são três: `devices`, `mensagens` e `commands`. O que cada uma guarda está em [Oxidedb.md](Doc/Oxidedb.md).
 
 ## Regras principais
 
