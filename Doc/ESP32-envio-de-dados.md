@@ -1,5 +1,7 @@
 # ESP32 - Como enviar dados para a API e armazenamento no SQLite
 
+> **Substituído (10/10/2026).** Os exemplos deste documento são do contrato antigo, em que posição e bateria eram opcionais. O contrato atual do lacre está em [Guia-Firmware-Lacre-IoT.md](Guia-Firmware-Lacre-IoT.md) (versão 2.0): posição e bateria obrigatórias e `gps_ok`.
+
 > **Para quem programa o lacre:** o guia principal é o [Guia-Firmware-Lacre-IoT.md](Guia-Firmware-Lacre-IoT.md) (o que enviar, quando, o que fazer com cada resposta, fila sem rede e exemplo em C++). Este documento traz os exemplos detalhados de cada payload.
 
 ## Visão geral

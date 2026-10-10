@@ -1,6 +1,6 @@
 # Catálogo de Tipos de Erro (`error_type`) — FluxID / Oxide
 
-**Versão:** 1.2 — 06/10/2026 — `alert_type` da Oxide passa a usar os códigos deste catálogo
+**Versão:** 2.0 — 10/10/2026 — banco principal no Supabase e alertas automáticos da API (aguardando a validação de Natã da Silva Baracho)
 **Público:** equipe do projeto, programador do ESP32 e quem for implementar o Worker e as regras automáticas.
 
 Este catálogo dá **um código único** para cada ocorrência operacional que precisa ser registrada, investigada ou tratada: problemas no lacre, no cilindro, no dispositivo, no GPS, na comunicação, na rota e nos comandos. Hoje esses tipos estão espalhados em três lugares, com nomes diferentes:
@@ -9,13 +9,22 @@ Este catálogo dá **um código único** para cada ocorrência operacional que p
 - `alertas.tipo` no FluxID (ex.: `VIOLACAO_LACRE`);
 - `eventos_lacre.tipo` no FluxID (ex.: `VIOLACAO`, `ABERTURA_NAO_AUTORIZADA`).
 
-Desde a entrega B, a API Oxide grava na coluna `error_type` de `telemetry_queue` e `events` o código detectado no recebimento (`LACRE_ABERTO_EM_TRANSITO`, `DISPOSITIVO_SEM_LACRE` ou `LACRE_SEM_CILINDRO`, nessa ordem de prioridade), sem gerar alerta. A geração automática de alertas virá na entrega de regras automáticas.
+**Desde 10/10/2026, quem detecta cada código mudou.** O banco principal é o Supabase, e a API do lacre deixou de guardar lacres, cilindros e vínculos. Por isso:
+
+- **A API do lacre** recebe qualquer código deste catálogo enviado pelo lacre e abre sozinha só os quatro que saem da própria mensagem: `BATERIA_BAIXA`, `GSM_SINAL_FRACO`, `LACRE_VIOLADO` e `LACRE_ABERTO_SEM_AUTORIZACAO`. Cada um abre uma vez, na mudança (ao cruzar o limite ou quando o lacre muda de estado).
+- **O sistema principal** (Supabase e frontend) fica com tudo o que depende de cadastro, de rota, de geocerca ou de tempo: lacre sem cilindro, lacre aberto em trânsito, saída de rota, saída da geocerca, sem comunicação e os demais.
+
+Na coluna **Situação**, "API" quer dizer que a API do lacre já abre o alerta, e "Sistema principal" quer dizer que a regra é do lado do Supabase.
+
+A coluna `error_type`, que a API gravava nas filas antigas, deixou de existir.
 
 A coluna **Equivalente atual** mostra onde cada código já existe. A coluna **Situação** diz se a detecção já está implementada:
 
 - **Implementado:** a API já recebe ou detecta;
 - **Parcial:** o dado existe, mas a regra automática ainda não;
-- **Previsto:** depende de funcionalidade futura (geofence, Worker, rotas).
+- **Previsto:** depende de funcionalidade futura;
+- **API:** a API do lacre abre o alerta sozinha (10/10/2026);
+- **Sistema principal:** a regra fica no Supabase e no frontend.
 
 Limites ainda não decididos estão marcados como **a definir** e não devem ser inventados.
 
@@ -31,11 +40,11 @@ Limites ainda não decididos estão marcados como **a definir** e não devem ser
 
 | Código | Significado | Quem detecta / como | Severidade sugerida | Equivalente atual | Situação |
 | --- | --- | --- | --- | --- | --- |
-| `LACRE_VIOLADO` | O lacre foi rompido fisicamente | ESP32 envia `seal_status: BROKEN` | CRITICA | Oxide `LACRE_VIOLADO` (nome antigo `SEAL_BROKEN`); FluxID `VIOLACAO_LACRE` e evento `VIOLACAO` | Implementado (recebimento) |
-| `LACRE_ABERTO_EM_TRANSITO` | O lacre foi aberto enquanto o cilindro está em trânsito, onde deve estar sempre fechado (regra 3) | ESP32 envia `seal_status: UNLOCKED` ou `BROKEN` com o cilindro `EM_TRANSITO` ou a entrega `EM_ANDAMENTO` | CRITICA | — (no FluxID, entra como `ABERTURA_NAO_AUTORIZADA`) | Implementado (registrado em `error_type`, sem alerta) |
-| `LACRE_ABERTO_SEM_AUTORIZACAO` | O lacre foi aberto no cliente sem autorização registrada (RN09) | ESP32 envia `seal_status: UNLOCKED` e não há autorização para aquele lacre | CRITICA | FluxID alerta e evento `ABERTURA_NAO_AUTORIZADA` | Parcial (falta o registro de autorização) |
-| `DISPOSITIVO_SEM_LACRE` | O dispositivo enviou dados sem estar vinculado a nenhum lacre | API Oxide: dispositivo sem vínculo ativo em `seal_assignments` | MEDIA | — | Implementado (registrado em `error_type`, sem alerta) |
-| `LACRE_SEM_CILINDRO` | O lacre está em uso (envia dados) mas não tem vínculo ativo com nenhum cilindro | API Oxide: lacre do dispositivo sem vínculo ativo em `cylinder_assignments` | ALTA | — | Implementado (registrado em `error_type`, sem alerta) |
+| `LACRE_VIOLADO` | O lacre foi rompido fisicamente | ESP32 envia `seal_status: BROKEN` (leitura ou evento) | CRITICA | Nome antigo `SEAL_BROKEN` | **API**: abre quando o lacre passa a `BROKEN` |
+| `LACRE_ABERTO_EM_TRANSITO` | O lacre foi aberto enquanto o cilindro está em trânsito, onde deve estar sempre fechado (regra 3) | Lacre `UNLOCKED` ou `BROKEN` com o cilindro em trânsito | CRITICA | — | **Sistema principal** (a API não sabe se o cilindro está em trânsito; ela manda `LACRE_ABERTO_SEM_AUTORIZACAO` ou `LACRE_VIOLADO`) |
+| `LACRE_ABERTO_SEM_AUTORIZACAO` | O lacre foi aberto no cliente sem autorização registrada (RN09) | ESP32 envia `seal_status: UNLOCKED` | CRITICA | — | **API**: abre quando o lacre passa a `UNLOCKED`. A API não sabe se havia autorização; o sistema principal confere |
+| `DISPOSITIVO_SEM_LACRE` | O dispositivo enviou dados sem estar vinculado a nenhum lacre | Dispositivo sem vínculo ativo com um lacre | MEDIA | — | **Sistema principal** |
+| `LACRE_SEM_CILINDRO` | O lacre está em uso (envia dados) mas não tem vínculo ativo com nenhum cilindro | Lacre do dispositivo sem vínculo ativo com um cilindro | ALTA | — | **Sistema principal** |
 | `LACRE_SEM_DISPOSITIVO` | O lacre está instalado num cilindro mas sem dispositivo ativo vinculado | FluxID: lacre `INSTALADO` sem `vinculos_dispositivo_lacre` ativo | MEDIA | — | Previsto (entrega B) |
 | `LACRE_REVISAO_VENCIDA` | Passou a data da revisão quinquenal do lacre (RN16) | FluxID: `lacres.proxima_revisao` < hoje | MEDIA | FluxID `REVISAO_LACRE` | Parcial (falta a rotina diária) |
 | `LACRE_REPROVADO_EM_USO` | Lacre reprovado ou inutilizado na inspeção continua instalado | FluxID: inspeção `REPROVADO`/`INUTILIZADO` e lacre `INSTALADO` | ALTA | — | Previsto |
@@ -54,10 +63,10 @@ Limites ainda não decididos estão marcados como **a definir** e não devem ser
 | Código | Significado | Quem detecta / como | Severidade sugerida | Equivalente atual | Situação |
 | --- | --- | --- | --- | --- | --- |
 | `GPS_INATIVO` | O módulo GPS não responde (falha de hardware ou desligado) | ESP32 identifica e envia evento/alerta | ALTA | Oxide `GPS_INATIVO` (antes, o genérico `DEVICE_ERROR`) | Previsto (firmware precisa enviar) |
-| `GPS_SEM_SINAL` | O GPS funciona, mas está sem posição (sem satélites) há mais tempo que o limite | Oxide: telemetrias seguidas sem latitude/longitude por mais de **[a definir]** minutos | MEDIA | — | Parcial (telemetria sem posição já é aceita) |
+| `GPS_SEM_SINAL` | O GPS funciona, mas está sem posição (sem satélites) há mais tempo que o limite | Leituras com `gps_ok: false` (última posição conhecida) por mais de **[a definir]** minutos | MEDIA | — | **Sistema principal** (a API entrega o `gps_ok` em toda mensagem) |
 | `POSICAO_INVALIDA` | O dispositivo enviou coordenada impossível ou incompleta | API Oxide responde `400` (entrega C) | BAIXA | — | Implementado (rejeição) |
-| `SAIDA_GEOCERCA` | Depois da entrega, o lacre saiu do raio de **10 metros** do destino final (regra 1, RN10) | Geofence: distância da posição até `locais_entrega` > 10 m (`raio_geocerca_metros`, padrão 10) | ALTA | Oxide `SAIDA_GEOCERCA` (nome antigo `GEOFENCE_EXIT`); FluxID `SAIDA_GEOCERCA` | Previsto (geofence) |
-| `SAIDA_ROTA` | Durante a entrega, o cilindro saiu da rota sem desvio **justificado antes** ou **programado** (regra 2) | Comparação da posição com a rota da entrega `EM_ANDAMENTO`; não gera alerta se houver desvio justificado/programado para aquele trecho. Precisa de: rota planejada e registro de desvios no banco (não existem), e uma margem técnica para a imprecisão do GPS (**[a definir]** metros) | ALTA | — | Previsto (rotas ainda não existem no banco) |
+| `SAIDA_GEOCERCA` | Depois da entrega, o lacre saiu do raio de **10 metros** do destino final (regra 1, RN10) | Distância da posição até a geocerca do cliente (raio padrão de 10 m) | ALTA | Nome antigo `GEOFENCE_EXIT` | **Sistema principal** (as geocercas estão no Supabase) |
+| `SAIDA_ROTA` | Durante a entrega, o cilindro saiu da rota sem desvio **justificado antes** ou **programado** (regra 2) | Comparação da posição com a rota da viagem; não gera alerta durante um desvio justificado ou programado. Margem para a imprecisão do GPS: **[a definir]** metros | ALTA | — | **Sistema principal** (viagens e rotas ficam no Supabase) |
 | `MOVIMENTACAO_SUSPEITA` | Movimento incompatível com o estado: ex.: velocidade > 0 com o cilindro `COM_CLIENTE` ou `DISPONIVEL` no depósito | Regra sobre `speed_kmh` e status do cilindro (RN11) | ALTA | FluxID `MOVIMENTACAO_SUSPEITA` | Previsto |
 | `PARADA_PROLONGADA` | Em trânsito, o cilindro ficou parado fora de local conhecido por mais que o limite | Entrega `EM_ANDAMENTO` com posição repetida por mais de **[a definir]** minutos | MEDIA | — | Previsto |
 
@@ -65,9 +74,9 @@ Limites ainda não decididos estão marcados como **a definir** e não devem ser
 
 | Código | Significado | Quem detecta / como | Severidade sugerida | Equivalente atual | Situação |
 | --- | --- | --- | --- | --- | --- |
-| `BATERIA_BAIXA` | A bateria está abaixo do limite de alerta | ESP32 envia alerta, ou regra sobre `battery_percent` < **[a definir]** % | BAIXA | Oxide `BATERIA_BAIXA` (nome antigo `LOW_BATTERY`); FluxID `BATERIA_BAIXA` | Implementado (recebimento) |
-| `SEM_COMUNICACAO` | O dispositivo parou de enviar dados por mais que o limite | Servidor: último `last_seen_at`/telemetria há mais de **[a definir]** minutos | ALTA | Oxide `SEM_COMUNICACAO` (nome antigo `COMMUNICATION_LOST`); FluxID `SEM_COMUNICACAO` | Parcial (falta a rotina de monitoramento) |
-| `GSM_SINAL_FRACO` | O sinal do modem GSM está abaixo do limite, com risco de perder comunicação | Regra sobre `gsm_signal` < **[a definir]** dBm | BAIXA | — | Previsto |
+| `BATERIA_BAIXA` | A bateria está abaixo do limite de alerta | Regra sobre `battery_percent` < **15%** (`REGRA_BATERIA_MINIMA`) | BAIXA | Nome antigo `LOW_BATTERY` | **API**: abre quando a bateria cai abaixo do limite |
+| `SEM_COMUNICACAO` | O dispositivo parou de enviar dados por mais que o limite | Nenhuma mensagem do lacre há mais de **[a definir]** minutos | ALTA | Nome antigo `COMMUNICATION_LOST` | **Sistema principal** (a API guarda o último contato em `devices.last_contact_at` e entrega a hora de chegada de cada mensagem) |
+| `GSM_SINAL_FRACO` | O sinal do modem GSM está abaixo do limite, com risco de perder comunicação | Regra sobre `gsm_signal` < **-105 dBm** (`REGRA_SINAL_MINIMO_DBM`) | BAIXA | — | **API**: abre quando o sinal cai abaixo do limite |
 | `DISPOSITIVO_FALHA` | Falha de hardware do ESP32 ou de sensor não coberta por outro código | ESP32 envia alerta | MEDIA | Oxide `DISPOSITIVO_FALHA` (nome antigo `DEVICE_ERROR`) | Implementado (recebimento) |
 | `DISPOSITIVO_NAO_CADASTRADO` | Um dispositivo tentou enviar dados sem estar cadastrado | API Oxide responde `404` (entrega A) | MEDIA | — | Implementado (rejeição) |
 | `CHAVE_INVALIDA` | Tentativa de envio com chave ausente, inválida ou de outro dispositivo | API Oxide responde `401`/`403` | ALTA | — | Implementado (rejeição) |
@@ -76,8 +85,8 @@ Limites ainda não decididos estão marcados como **a definir** e não devem ser
 
 | Código | Significado | Quem detecta / como | Severidade sugerida | Equivalente atual | Situação |
 | --- | --- | --- | --- | --- | --- |
-| `COMANDO_FALHOU` | O ESP32 tentou executar o comando e confirmou `ERRO` | Confirmação com `status: ERRO` | ALTA | Oxide `COMANDO_FALHOU` (nome antigo `COMMAND_FAILURE`) | Implementado (confirmação) |
-| `COMANDO_SEM_RESPOSTA` | Um comando ficou `PENDENTE` além do limite sem confirmação | Servidor: `created_at` há mais de **[a definir]** minutos e status `PENDENTE` | MEDIA | — | Previsto |
+| `COMANDO_FALHOU` | O ESP32 tentou executar o comando e confirmou `ERRO` | Confirmação com `status: ERRO` | ALTA | Nome antigo `COMMAND_FAILURE` | **Sistema principal** (a API entrega a confirmação com o erro, como mensagem `CONFIRMACAO_COMANDO`) |
+| `COMANDO_SEM_RESPOSTA` | Um comando ficou `PENDENTE` além do limite sem confirmação | Comando pendente há mais de **[a definir]** minutos | MEDIA | — | **Sistema principal** (os comandos são criados lá) |
 | `COMANDO_DESCONTINUADO` | Comando antigo com tipo fora do catálogo, marcado na migração da entrega D | Migração: `error_message` "tipo de comando descontinuado" | BAIXA | — | Implementado (migração) |
 
 ---
@@ -106,17 +115,17 @@ Alerta ENCERRADO (com quem encerrou e quando)
 | Estados usados | `ABERTO` → `EM_ANALISE` (justificado) → `ENCERRADO` (liberado), os mesmos valores do FluxID |
 | Registro | A justificativa, quem justificou, quem encerrou e quando ficam guardados (RN20, auditoria) |
 
-O que ainda precisa existir para este fluxo funcionar:
+**Desde 10/10/2026, este fluxo é do sistema principal** (Supabase e frontend): a API do lacre não guarda rotas nem trata alertas, e a rota `PATCH /api/v1/iot/alerts/{alert_id}/status` foi removida. O que ainda precisa existir, do lado do sistema principal:
 
 - rota planejada da entrega e registro de desvios programados ou justificados antes;
 - campos para a justificativa e para quem encerrou o alerta (o FluxID já tem `alertas.encerrado_por` e `encerrado_em`);
-- rota da API para o motorista justificar (a de analisar e encerrar já existe: `PATCH /api/v1/iot/alerts/{alert_id}/status`, com `resolved_by` e `resolution_note`);
+- telas para o motorista justificar e para o gestor analisar e encerrar;
 - forma de avisar o motorista e o gestor (aplicativo, SMS, e-mail: **a definir**);
 - correspondência de papéis com os perfis do FluxID: hoje existem `OPERADOR` e `SUPERVISOR`, mas não "motorista" e "gestor". Sugestão: motorista → `OPERADOR`; gestor → `SUPERVISOR` ou `ORG_ADMIN`, que têm a permissão `ENCERRAR_ALERTAS`. Falta uma permissão para **justificar** alerta (**a definir**).
 
 ## 7. Como o catálogo se liga ao que já existe
 
-Desde 06/10/2026, a Oxide aceita **todos** os códigos deste catálogo em `alert_type` (a API e o banco recusam outros). Na transição, os nomes antigos da primeira coluna continuam aceitos e são gravados como o código do catálogo.
+Desde 06/10/2026, a API aceita **todos** os códigos deste catálogo em `alert_type` e recusa os demais (`400`). Na transição, os nomes antigos da primeira coluna continuam aceitos e são gravados como o código do catálogo.
 
 | Nome antigo na Oxide (convertido) | Código do catálogo (gravado) | FluxID `alertas.tipo` (dump atual) |
 | --- | --- | --- |
@@ -137,6 +146,6 @@ Aprovadas por Natã da Silva Baracho em 06/10/2026:
 
 1. **Idioma e padrão dos códigos:** português, em maiúsculas com `_`, como no FluxID.
 2. **Uso do catálogo:** primeiro como documentação de referência; os códigos e regras são implementados aos poucos, em cada entrega (B, geofence, Worker, comandos automáticos).
-3. **Limites:** definidos o raio de 10 m no destino, a rota sem saída sem justificativa/programação e o lacre fechado em trânsito. **Ainda a definir:** minutos sem sinal de GPS, sem comunicação e sem resposta de comando; percentual de bateria; dBm de GSM; margem técnica do GPS na rota; minutos de parada prolongada.
+3. **Limites:** definidos o raio de 10 m no destino, a rota sem saída sem justificativa/programação e o lacre fechado em trânsito. **Adotados na API em 10/10/2026, para validação:** bateria 15% e sinal -105 dBm (mudam no `.env`). **Ainda a definir, no sistema principal:** minutos sem sinal de GPS, sem comunicação e sem resposta de comando; margem técnica do GPS na rota; minutos de parada prolongada.
 4. **`alert_type` da Oxide em português:** ✅ implementado em 06/10/2026. A API Oxide usa os códigos deste catálogo (ex.: `LACRE_VIOLADO` no lugar de `SEAL_BROKEN`), com severidade padrão igual à sugerida aqui. Na transição, os nomes antigos em inglês continuam aceitos e são convertidos, para não quebrar o firmware, até nova decisão.
 5. **Códigos que faltam:** a equipe e o programador do ESP32 podem propor novos códigos (ex.: tampa do lacre forçada, temperatura alta), que entram numa nova versão deste documento.

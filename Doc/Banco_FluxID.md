@@ -1,5 +1,7 @@
 
 # FluxID  
+
+> **Referência histórica (10/10/2026).** O banco principal do projeto passou a ser o **Supabase** do repositório `fluxid_integra2026`. Este banco FluxID em PostgreSQL e os scripts de `sql/fluxid/` ficam só como banco de teste e registro do que foi estudado. O que vale hoje: [Contrato-Entrega-Supabase.md](Contrato-Entrega-Supabase.md).
 ### Especificação Atualizada do MVP e do Banco de Dados  
 **Segurança • Rastreabilidade • Controle Operacional**  
 **Versão 3.3 — revisada em 07/10/2026: integração com a Oxide (script 004) e estruturas do frontend (script 005)**  

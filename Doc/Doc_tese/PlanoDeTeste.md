@@ -1,11 +1,85 @@
 # Plano de Teste — FluxID / Oxide IoT
 
-**Versão:** 1.12
-**Data:** 06/10/2026
+**Versão:** 2.0
+**Data:** 10/10/2026
 **Escopo:** API Oxide (Node.js + TypeScript + Express + SQLite), sincronização com o PostgreSQL FluxID e API FluxID (NestJS) planejada
 **Validação humana:** Natã da Silva Baracho
 
 > Este plano consolida o que já foi implementado e testado (suíte `tests/api.test.ts`, 96 casos) e o que ainda precisa ser testado conforme o `Checklist-Projeto.md`, o `Banco_FluxID.md` (v3.0) e o `Regras-de-Negocio-e-Banco-Oxide.md`. Cada caso indica sua situação: **Automatizado**, **Manual executado** ou **Pendente**.
+
+---
+
+## 0. Plano atual: modelo enxuto (desde 10/10/2026)
+
+Em 10/10/2026 a API passou a ter uma fila única e a entregar os dados ao Supabase. **Esta seção é o plano que vale hoje.** As seções 6 a 13 são o histórico do modelo anterior (filas separadas, cópia do cadastro e envio ao FluxID); muitos daqueles casos deixaram de existir junto com as rotas.
+
+### 0.1 Como testar
+
+| Teste | Comando | Onde roda |
+| --- | --- | --- |
+| Compilação | `npx tsc --noEmit` | Projeto |
+| Suíte (71 casos) | `npm test` | Pasta temporária, banco novo, recebedor de teste no lugar do Supabase |
+| Simulador (23 verificações) | `npm run simular` | Pasta temporária, banco novo, recebedor de teste |
+| Migração do banco real | Roteiro, seção 4 | Numa **cópia** da `oxide.db` |
+
+A suíte e o simulador não tocam no `oxide.db` do projeto nem no banco principal, e podem rodar com a API ligada.
+
+### 0.2 Casos (todos automatizados na suíte)
+
+| ID | Caso | Esperado |
+| --- | --- | --- |
+| V2-GER-01 | `/`, Swagger e regra dos grupos | `200`; nenhuma rota sem grupo |
+| V2-GER-02 | Banco novo | Só `commands`, `devices` e `mensagens` |
+| V2-GER-03 | Rota antiga (`/api/v1/seals`) | `404` |
+| V2-DEV-01 | Cadastro provisório de dispositivo | `201`; campos faltando `400`; `device_id` ou chave repetidos `409`; `active` e `firmware_version` inválidos `400` |
+| V2-DEV-02 | Consulta de dispositivos | Sem `api_key` e sem `api_key_hash`; inexistente `404` |
+| V2-AUT-01 | Sem chave e chave inválida | `401`, nada gravado |
+| V2-AUT-02 | Dispositivo inativo; chave de outro dispositivo | `403`, nada gravado |
+| V2-AUT-03 | Dispositivo não cadastrado | `404`, sem criação automática |
+| V2-TEL-01 | Leitura válida | `202`, `PENDING`, com posição, bateria e `gps_ok` verdadeiro; `satelites` aceito; `attempt_count` do lacre em `device_attempt_count` |
+| V2-TEL-02 | Sem `message_id`, sem posição, só latitude ou sem bateria | `400`, nada gravado |
+| V2-TEL-03 | Tipos e faixas (latitude como texto, fora da faixa, bateria 150, `gps_ok` e `seal_status` inválidos, `attempt_count` negativo) | `400` |
+| V2-TEL-04 | JSON malformado e corpo vazio | `400` |
+| V2-TEL-05 | `message_id` repetido | `409`, sem linha nova |
+| V2-TEL-06 | Mesma posição e mesmo lacre | `200`, sem linha nova; data, bateria e sinal atualizados na leitura anterior; reenvio desse `message_id` `409` |
+| V2-TEL-07 | Posição nova | `202` e nova linha |
+| V2-TEL-08 | GPS sem sinal (`gps_ok: false`) | `202`, gravado com `gps_ok` falso |
+| V2-TEL-09 | `status` e `attempt_count` enviados pelo lacre | Não mudam a fila |
+| V2-TEL-10 | `GET /iot/messages` | Últimas mensagens, com filtros; tipo inválido `400` |
+| V2-EVT-01 | Evento sem `event_type`; sem posição e bateria | `400` |
+| V2-EVT-02 | Evento válido; repetido; chave de outro; sem chave | `202`; `409`; `403`; `401` |
+| V2-ALT-01 | Alerta com tipo fora do catálogo, severidade inválida, sem título ou sem posição e bateria | `400` |
+| V2-ALT-02 | Alerta válido | `201` com a severidade do catálogo; severidade informada respeitada; nome antigo convertido; repetido `409` |
+| V2-REG-01 | Bateria abaixo de 15% | `BATERIA_BAIXA` com origem `servidor`, posição e a mensagem de origem |
+| V2-REG-02 | Bateria continua baixa; recupera e cai de novo | Não repete; depois, novo alerta |
+| V2-REG-03 | Sinal abaixo de -105 dBm | `GSM_SINAL_FRACO` uma vez |
+| V2-REG-04 | Lacre `UNLOCKED` e `BROKEN` | `LACRE_ABERTO_SEM_AUTORIZACAO` e `LACRE_VIOLADO` (CRITICA); sem repetir; fechar não alerta; evento também dispara |
+| V2-REG-05 | Último estado do dispositivo | Contato, posição, bateria e lacre atualizados |
+| V2-SYN-01 | Worker sem configuração | Não sobe e diz o que falta |
+| V2-SYN-02 | Banco principal fora do ar; chave recusada (`401`) | Rodada `FALHOU`, fila intacta, nenhuma tentativa gasta |
+| V2-SYN-03 | Mensagem aceita, recusada e sem resposta | `SYNCED`; parada com o motivo; nova tentativa marcada |
+| V2-SYN-04 | Sexta falha | Para, sem próxima tentativa |
+| V2-SYN-05 | `/sync/problems` e `/sync/retry` | Lista com a situação; `400`, `404` e `200` |
+| V2-SYN-06 | Reenviar tudo de novo | Nada duplicado no banco principal |
+| V2-SYN-07 | Posição repetida depois do envio | A leitura volta à fila e o banco principal recebe a nova data |
+| V2-SYN-08 | Lotes | 5 mensagens em 3 lotes de até 2 |
+| V2-CAD-01 | Dispositivo novo do banco principal | Chega só com o hash; autentica com a chave; a chave em texto guardada não autentica |
+| V2-CAD-02 | Dispositivo existente recebe o hash | A chave antiga deixa de valer |
+| V2-CAD-03 | Dispositivo desativado no banco principal | `403`; nada é apagado |
+| V2-CMD-01 | Comando do banco principal | Chega ao lacre uma vez; tipo e dispositivo desconhecidos viram aviso |
+| V2-CMD-02 | Confirmação | Status inválido `400`; inexistente `404`; `ERRO` gravado e enviado ao banco principal; de novo `409` |
+| V2-CMD-03 | Regras do banco | Comando pendente com tipo fora do catálogo e status desconhecido recusados |
+| V2-OPE-01 | `GET /health` | `200` normal; `503` com a última rodada falha; sem endereço nem chave |
+| V2-MIG-01 | Banco no modelo antigo | Cópia de segurança; mensagens antigas `ARQUIVADA`; tabelas antigas removidas; segunda execução não repete |
+| V2-OPE-02 | Backup e retenção | Cópia íntegra, mantendo as mais novas; retenção só mostra sem `--confirmar` e só apaga o que foi enviado há mais de 30 dias |
+
+### 0.3 O que ainda não pode ser testado
+
+| ID | Caso | Depende de |
+| --- | --- | --- |
+| V2-INT-01 | Envio ao Supabase de verdade | Função de recebimento e tabelas do lacre no projeto do frontend |
+| V2-INT-02 | Lacre real enviando para a API | Envio HTTP ligado no firmware e leitura da bateria |
+| V2-INT-03 | Ponta a ponta: lacre → API → Supabase → tela | Os dois anteriores |
 
 ---
 
@@ -503,7 +577,8 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 
 | Indicador | Valor |
 | --- | --- |
-| Suíte automatizada (`npm test`) | 96 casos (95 testes e 1 de teardown), 96 aprovados em 07/10/2026 (teste formal com o Roteiro v1.10; aprovado por Natã da Silva Baracho) |
+| Suíte automatizada (`npm test`) | **Modelo enxuto:** 71 casos, 71 aprovados em 10/10/2026 (aguardando validação). Modelo anterior: 96 casos aprovados em 07/10/2026 |
+| Simulador (`npm run simular`) | 23 de 23 verificações em 10/10/2026 |
 | Compilação (`npx tsc --noEmit`) | Aprovada em 06/10/2026 |
 | Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas); [Relatorio-de-Teste-2026-10-06-20h00.md](Relatorio-de-Teste-2026-10-06-20h00.md): entrega E (banco FluxID); [Relatorio-de-Teste-2026-10-06-20h35.md](Relatorio-de-Teste-2026-10-06-20h35.md): entrega D (catálogo de comandos e tipos de erro); [Relatorio-de-Teste-2026-10-06-21h31.md](Relatorio-de-Teste-2026-10-06-21h31.md): entrega B (associação); [Relatorio-de-Teste-2026-10-06-23h40.md](Relatorio-de-Teste-2026-10-06-23h40.md): alertas em português, análise e encerramento; [Relatorio-de-Teste-2026-10-07-00h15.md](Relatorio-de-Teste-2026-10-07-00h15.md): FluxID, alerta com cilindro e lacre obrigatórios; [Relatorio-de-Teste-2026-10-07-00h45.md](Relatorio-de-Teste-2026-10-07-00h45.md): grupos do Swagger e FluxID no Docker; [Relatorio-de-Teste-2026-10-07-01h30.md](Relatorio-de-Teste-2026-10-07-01h30.md): integração Oxide ⇄ FluxID; [Relatorio-de-Teste-2026-10-07-18h45.md](Relatorio-de-Teste-2026-10-07-18h45.md): simulador do lacre e série do cilindro. Todos **aprovados por Natã da Silva Baracho** |
 | Cobertura da suíte | Dispositivos, autenticação, telemetria, eventos, comandos, alertas (criação, listagem, análise e encerramento) e associação |
@@ -566,5 +641,6 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | 1.8 | 06/10/2026 | Entrega de alertas, decisões de Natã da Silva Baracho: `alert_type` com os códigos do catálogo em português (nomes antigos convertidos), severidade padrão do catálogo, listagem e rota para analisar e encerrar alertas; ALT-03, ALT-05, ALT-07, ALT-08 e BD-06 revisados; novos ALT-13 a ALT-21 e BD-19; suíte com 86 casos |
 | 1.9 | 07/10/2026 | FluxID, decisão de Natã da Silva Baracho: alerta com cilindro e lacre obrigatórios (script `003`); novos FLX-23 a FLX-25 executados num servidor PostgreSQL temporário e FLX-26 (gatilho) pendente; SYN-09 passa a citar o script `004` |
 | 1.10 | 07/10/2026 | Swagger organizado em grupos (novo GER-06); FluxID de análise no Docker; dump em `sql/fluxid/FluxID.sql`; suíte com 87 casos |
+| 2.0 | 10/10/2026 | Modelo enxuto: nova seção 0 com o plano atual (casos V2-*), suíte reescrita com 71 casos e simulador com 23 verificações, os dois com recebedor de teste no lugar do Supabase. As seções 6 a 13 ficam como histórico |
 | 1.12 | 07/10/2026 | Simulador do lacre (seção 10.7, SIM-01 a SIM-09); ASC-13 revisto (série repetida aceita; achado A3) |
 | 1.11 | 07/10/2026 | Integração Oxide ⇄ FluxID implementada: SYN-01 a SYN-16 revistos com as regras aprovadas, novos SYN-17 a SYN-24 e INT-01 a INT-07; BD-01 e BD-02 com `sync_logs`; página `/api-docs-fluxid` com a proposta da API do frontend (GER-07, GER-08); suíte com 96 casos. Teste formal da IA em 07/10/2026, sem falhas |

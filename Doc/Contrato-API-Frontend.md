@@ -1,5 +1,7 @@
 # Contrato da API para o frontend (FluxID)
 
+> **Proposta não seguida (10/10/2026).** Ficou decidido que a API do lacre **não atende o frontend**: o frontend fala direto com o Supabase, que é o banco principal. Este documento fica só como registro. O que vale hoje: [Contrato-Entrega-Supabase.md](Contrato-Entrega-Supabase.md).
+
 **Versão:** 0.1 — 07/10/2026 — **proposta aprovada por Natã da Silva Baracho (backend) em 07/10/2026**, aguardando a aprovação de aalissonalmeidaq (frontend)
 **Público:** quem programa o frontend (repositório `fluxid_integra2026`) e quem programa a API do backend (este repositório).
 **Base:**

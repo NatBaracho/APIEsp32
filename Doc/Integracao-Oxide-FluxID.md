@@ -1,5 +1,7 @@
 # Integração Oxide ⇄ FluxID
 
+> **Referência histórica (10/10/2026).** O Worker descrito aqui enviava os dados ao FluxID em PostgreSQL. O banco principal passou a ser o **Supabase**, e a Oxide foi reduzida a três tabelas. As decisões P1, P6 e P7 continuam valendo; o resto foi substituído por [Contrato-Entrega-Supabase.md](Contrato-Entrega-Supabase.md) e [Oxidedb.md](Oxidedb.md).
+
 **Versão:** 2.0 — 07/10/2026 (Worker implementado, testado e aprovado por Natã da Silva Baracho em 07/10/2026)
 **Público:** equipe do projeto, quem mantém a API Oxide e quem vai construir a API do frontend sobre o FluxID.
 **Base:** API Oxide, `oxide.db` e dump `sql/fluxid/FluxID.sql` de 23/09/2026 com os scripts `sql/fluxid/001` a `005`.
