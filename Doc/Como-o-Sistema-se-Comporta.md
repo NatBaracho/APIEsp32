@@ -4,7 +4,7 @@ Explicação em linguagem simples do que a API do lacre faz em cada situação. 
 
 Para os detalhes técnicos, veja [Desenvolvimento.md](Desenvolvimento.md) (rotas e campos), [Oxidedb.md](Oxidedb.md) (banco local), [Contrato-Entrega-Supabase.md](Contrato-Entrega-Supabase.md) (envio ao banco principal) e [Guia-Firmware-Lacre-IoT.md](Guia-Firmware-Lacre-IoT.md) (lacre).
 
-**Versão:** 1.1, de 10/10/2026.
+**Versão:** 1.2, de 10/10/2026.
 
 ---
 
@@ -241,9 +241,26 @@ Para ver as tabelas preenchidas por um teste, abra a `oxide.db` da pasta que o s
 | Queda longa do banco principal (horas ou dias) | Não testada; o teste em massa usou uma queda de 8 segundos |
 | Queda de energia no meio de uma gravação | Não testada |
 
-## 13. Histórico do documento
+## 13. Como entrar na API (porta e endereços)
+
+**A porta é a 3000.** Com a API ligada (`npm start`), os endereços são:
+
+| Para quê | Endereço |
+| --- | --- |
+| Ver se a API está no ar (responde "API ESP32 Online") | http://localhost:3000 |
+| Documentação interativa (Swagger), para testar as rotas pelo navegador | http://localhost:3000/api-docs |
+| Situação da API, da fila e do Worker | http://localhost:3000/health |
+| Rotas do lacre | `http://localhost:3000/api/v1/iot/...` |
+
+- **De outro aparelho** (o lacre ou outro computador na mesma rede): troque `localhost` pelo IP do computador onde a API está ligada, por exemplo `http://192.168.0.10:3000`. No Windows, o IP aparece com o comando `ipconfig`, na linha "Endereço IPv4".
+- **Para mudar a porta:** defina `PORT` no arquivo `.env` (por exemplo `PORT=8080`) e ligue a API de novo.
+- **`banco_principal: "NAO_CONFIGURADO"` no `/health`:** é o esperado enquanto `SUPABASE_IOT_URL` e `SUPABASE_SERVICE_KEY` não estiverem no `.env`. A API continua recebendo, e as mensagens ficam guardadas na fila até o banco principal ser configurado.
+- **Rotas `/api/v1/app/...` não existem.** Elas são da proposta antiga [Contrato-API-Frontend.md](Contrato-API-Frontend.md), que não foi seguida: a API não atende o frontend.
+
+## 14. Histórico do documento
 
 | Versão | Data | Mudança |
 | --- | --- | --- |
 | 1.0 | 10/10/2026 | Primeira versão, a pedido de Natã da Silva Baracho |
 | 1.1 | 10/10/2026 | Ativação do lacre, identificador gerado pela API e vínculo com o cilindro e o cliente (seção 5 reescrita). **Aprovado por Natã da Silva Baracho em 10/10/2026** |
+| 1.2 | 10/10/2026 | Nova seção 13: a porta da API (3000) e os endereços para entrar |

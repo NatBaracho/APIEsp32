@@ -20,6 +20,22 @@ npm start        # ou npm run dev (recarrega ao salvar)
 
 O servidor inicia na porta `3000`. As tabelas são criadas sozinhas.
 
+### Porta e endereços
+
+**A porta é a 3000.** Com a API ligada (`npm start`), os endereços são:
+
+| Para quê | Endereço |
+| --- | --- |
+| Ver se a API está no ar (responde "API ESP32 Online") | http://localhost:3000 |
+| Documentação interativa (Swagger), para testar as rotas pelo navegador | http://localhost:3000/api-docs |
+| Situação da API, da fila e do Worker | http://localhost:3000/health |
+| Rotas do lacre | `http://localhost:3000/api/v1/iot/...` |
+
+- **De outro aparelho** (o lacre ou outro computador na mesma rede): troque `localhost` pelo IP do computador onde a API está ligada, por exemplo `http://192.168.0.10:3000`. No Windows, o IP aparece com o comando `ipconfig`, na linha "Endereço IPv4".
+- **Para mudar a porta:** defina `PORT` no arquivo `.env` (por exemplo `PORT=8080`) e ligue a API de novo.
+- **`banco_principal: "NAO_CONFIGURADO"` no `/health`:** é o esperado enquanto `SUPABASE_IOT_URL` e `SUPABASE_SERVICE_KEY` não estiverem no `.env`. A API continua recebendo, e as mensagens ficam guardadas na fila até o banco principal ser configurado.
+- **Rotas `/api/v1/app/...` não existem.** Elas são da proposta antiga [Contrato-API-Frontend.md](Doc/Contrato-API-Frontend.md), que não foi seguida: a API não atende o frontend.
+
 Se a `oxide.db` for de uma versão anterior, a API faz uma cópia de segurança ao lado do arquivo (`oxide.db.bak-antes-da-fila-unica-<data>`), passa as mensagens antigas para a fila nova (as que têm posição e bateria seguem para o banco principal; as outras ficam arquivadas) refaz `devices` e `commands` no formato atual e remove as tabelas que saíram. Detalhes: [Oxidedb.md](Doc/Oxidedb.md).
 
 O npm 11 avisa que os scripts de instalação do `better-sqlite3` ainda não estão autorizados (`allowScripts`); hoje é só um aviso e o módulo instala normalmente. Se uma versão futura do npm bloquear o script e a API não conseguir abrir o banco, rode `npm install-scripts approve better-sqlite3` e depois `npm install`.

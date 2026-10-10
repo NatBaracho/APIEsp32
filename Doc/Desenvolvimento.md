@@ -676,7 +676,7 @@ A suíte anterior (96 casos, modelo com filas separadas e envio ao FluxID) está
 
 # Parte 3 — Histórico de PRs por funcionalidade
 
-Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validação **aprovada por Natã da Silva Baracho**. O #20 (Oxide enxuta) foi **aprovado por Natã da Silva Baracho** em 10/10/2026 e mesclado no mesmo dia. O #21 (teste do banco, teste em massa, modo WAL e, depois, ativação e vínculo) foi **aprovado por Natã da Silva Baracho** em 10/10/2026. O #22 levou à `main` o primeiro commit do #21, que tinha ficado na branch antiga; o conteúdo é o mesmo. Esta parte e a seção "Quem faz o quê" (1.1) foram conferidas por questionário (6/6 sim) e **aprovadas por Natã da Silva Baracho** em 06/10/2026. O PR que mexeu em mais de uma parte aparece em cada grupo, só com o que mudou naquela parte. A cada novo PR, esta parte é atualizada.
+Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validação **aprovada por Natã da Silva Baracho**. O #20 (Oxide enxuta) foi **aprovado por Natã da Silva Baracho** em 10/10/2026 e mesclado no mesmo dia. O #21 (teste do banco, teste em massa, modo WAL e, depois, ativação e vínculo) foi **aprovado por Natã da Silva Baracho** em 10/10/2026. O #22 levou à `main` o primeiro commit do #21, que tinha ficado na branch antiga; o conteúdo é o mesmo. O #21 foi mesclado em 10/10/2026. O #23 só mexe em documentos (porta e endereços da API), a pedido de Natã. Esta parte e a seção "Quem faz o quê" (1.1) foram conferidas por questionário (6/6 sim) e **aprovadas por Natã da Silva Baracho** em 06/10/2026. O PR que mexeu em mais de uma parte aparece em cada grupo, só com o que mudou naquela parte. A cada novo PR, esta parte é atualizada.
 
 ## 3.1 API
 
@@ -693,6 +693,7 @@ Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validaç�
 | #17 | Simulador e série do cilindro | Cadastro provisório de cilindro aceita série repetida (o código continua único); simulador `npm run simular` |
 | #20 | Oxide enxuta e envio ao Supabase | Posição e bateria obrigatórias em toda mensagem; `gps_ok`; alertas automáticos da própria mensagem; `GET /iot/messages` e `GET /health`; saem as rotas de lacres, cilindros, vínculos e de análise de alertas e a página da proposta do frontend |
 | #21 | Teste do banco, teste em massa e modo WAL | As operações que gravam pedem a vez no início e esperam a do Worker, em vez de responder `500`; novo `npm run simular:massa`; **ativação e vínculo:** rota `POST /iot/activations`, identificador do lacre gerado pela API, mensagem `ATIVACAO`, cilindro e cliente em toda mensagem e alerta automático `LACRE_SEM_CILINDRO` |
+| #23 | Porta e endereços nos documentos | Sem mudança no código. A porta (3000) e os endereços para entrar na API ficaram explícitos no README, no `Como-o-Sistema-se-Comporta.md` (seção 13) e no `ESP32-envio-de-dados.md`; `PORT` documentada no `.env.example`; aviso no `Contrato-API-Frontend.md` de que as rotas `/api/v1/app` não existem |
 
 ## 3.2 Oxide (`oxide.db`)
 
