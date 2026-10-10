@@ -1,6 +1,6 @@
 # Contrato de entrega: API do lacre → Supabase
 
-**Versão:** 1.0 — 10/10/2026 — proposta do backend; implementação **aprovado por Natã da Silva Baracho em 10/10/2026**; aguardando a revisão do professor Alisson
+**Versão:** 1.0 — 10/10/2026 — proposta do backend. A implementação na API foi **aprovada por Natã da Silva Baracho em 10/10/2026**. Falta a revisão do professor Alisson
 **Para:** quem mantém o Supabase (projeto `fluxid_integra2026`).
 **De:** a API do lacre (este repositório).
 

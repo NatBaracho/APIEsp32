@@ -569,6 +569,7 @@ O que foi feito:
 - **Removido:** rotas de lacres, cilindros e vínculos; análise e encerramento de alertas; envio ao FluxID; a página da proposta da API do frontend; a dependência `pg`.
 - **Manutenção:** `npm run backup` e `npm run retencao`.
 - **Documentos:** novo `Contrato-Entrega-Supabase.md`; guia do firmware 2.0, feito a partir do repositório `fluxid-firmware`; `Oxidedb.md` 2.0; regras 2.0.
+- **Documentação final do evento:** novo registro 20 em `DocumentacaoFinal/` (Oxide enxuta e envio ao Supabase) e registro 19 atualizado com as respostas do professor Alisson. A pasta passa a ter 20 registros.
 
 Achado: a suíte antiga precisava de uma cópia da `oxide.db` real para rodar. A nova roda numa pasta temporária, com banco novo, e não toca no banco do projeto.
 

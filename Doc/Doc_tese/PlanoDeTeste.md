@@ -85,16 +85,16 @@ A suíte e o simulador não tocam no `oxide.db` do projeto nem no banco principa
 
 ## 1. Objetivo
 
-Garantir que a cadeia ESP32 → API Oxide → SQLite (→ Worker → PostgreSQL FluxID) atenda às regras de negócio de segurança, rastreabilidade e controle operacional, com integridade de dados, idempotência e tratamento correto de erros.
+Garantir que a cadeia **lacre → API → Oxide (fila) → Worker → Supabase** atenda às regras de segurança e de integridade dos dados: nada se perde, nada se duplica e só o dispositivo certo consegue enviar.
 
 Objetivos específicos:
 
-- Confirmar os contratos HTTP (status e mensagens) de todos os endpoints.
-- Validar autenticação por API Key e ownership do dispositivo.
-- Garantir idempotência por `message_id`, `alert_id`, `command_id` e `device_id`.
-- Verificar integridade do schema SQLite (constraints, FKs, migrações).
-- Preparar a verificação das próximas entregas: associação dispositivo/lacre/cilindro, histórico, geofence, comandos automáticos e Worker SQLite → PostgreSQL.
-- Registrar riscos de segurança conhecidos e seus testes de regressão.
+- Confirmar os contratos HTTP (status e mensagens) de todas as rotas.
+- Validar a autenticação pela chave do dispositivo.
+- Garantir que posição e bateria são exigidas em toda mensagem do lacre.
+- Garantir a idempotência por `message_id`, `alert_id` e `command_id`.
+- Verificar o banco local (três tabelas, regras e migração do modelo antigo).
+- Verificar o envio ao banco principal, inclusive com falhas.
 
 ---
 
@@ -104,20 +104,19 @@ Objetivos específicos:
 
 | Área | Itens |
 | --- | --- |
-| API Oxide | `/`, `/api-docs`, `/api/v1/devices`, `/api/v1/iot/telemetries`, `/events`, `/commands`, `/alerts` |
-| Segurança | Middleware `X-API-Key`, ownership, dispositivo inativo |
-| Banco SQLite | Tabelas `devices`, `status`, `telemetry_queue`, `events`, `commands`, `alerts`; constraints; migrações |
-| Regras de telemetria | Duplicidade, mesma posição GPS, ausência de GPS, `last_seen_at` |
-| Firmware | Contrato de payload do ESP32 |
-| Entregas futuras | Associação, histórico, geofence, comandos automáticos, Worker |
-| API FluxID (planejada) | CRUD NestJS, RBAC, multiempresa, transações |
+| API do lacre | `/`, `/api-docs`, `/health`, `/api/v1/devices`, `/api/v1/iot/telemetries`, `/events`, `/alerts`, `/commands`, `/messages` e `/api/v1/sync` |
+| Segurança | Cabeçalho `X-API-Key`, chave do próprio dispositivo, dispositivo inativo, chave por hash |
+| Banco local | Tabelas `devices`, `mensagens` e `commands`; regras; migração do modelo antigo |
+| Regras das mensagens | Campos obrigatórios, duplicidade, posição repetida, `gps_ok` e alertas automáticos |
+| Worker | Envio em lotes, tentativas, banco principal fora do ar, cadastro e comandos |
+| Manutenção | Backup e retenção |
 
 ### 2.2 Fora do escopo (neste momento)
 
-- Financeiro, portal do cliente final, contratos avançados, IA e ERP (fora do MVP).
+- Regras de rota, de geocerca e de tempo sem comunicar, e o tratamento dos alertas: são do sistema principal.
+- Telas e banco do frontend (repositório `fluxid_integra2026`).
 - Testes de hardware do lacre (mecânica e NFC).
-- Testes de carga em produção (apenas planejados na seção 10).
-- Backup, retenção e observabilidade (fase de operação; ver seção 11).
+- Testes de carga.
 
 ---
 
@@ -126,18 +125,17 @@ Objetivos específicos:
 | Nível | Descrição | Ferramenta |
 | --- | --- | --- |
 | Compilação | Verificação de tipos | `npx tsc --noEmit` |
-| Integração (E2E HTTP) | Chamadas reais à API contra SQLite | `npm test` (`tests/api.test.ts`, `fetch`) |
-| Banco de dados | Verificação de schema, constraints e FKs | `PRAGMA table_info`, `PRAGMA foreign_key_list`, consultas SQL |
-| Manual exploratório | Swagger UI e Postman | `http://localhost:3000/api-docs` |
-| Segurança | Casos de acesso indevido e exposição de dados | Postman / scripts |
-| Sincronização | SQLite → PostgreSQL com falhas simuladas | Banco local de análise, `pg_restore` do dump |
-| Desempenho (futuro) | Ingestão de telemetria em volume | A definir (k6 ou autocannon) |
+| Integração | Chamadas reais à API, com banco novo e recebedor de teste no lugar do Supabase | `npm test` |
+| Ponta a ponta simulado | Percurso completo de um lacre | `npm run simular` |
+| Migração | Banco do modelo antigo convertido para o novo | Suíte (banco montado no teste) e roteiro (cópia do banco real) |
+| Manual exploratório | Swagger | `http://localhost:3000/api-docs` |
+| Ponta a ponta real | Lacre → API → Supabase | Quando a função de recebimento e o firmware estiverem prontos |
 
 Princípios:
 
-1. Testes não devem alterar a base real: usar cópia ou banco dedicado (ver risco R1).
-2. Cada caso é repetível; dados de teste usam prefixo `DSP-TEST`.
-3. Cada nova entrega reexecuta compilação e suíte completa (item pendente do checklist).
+1. Os testes automáticos **não tocam no `oxide.db` do projeto nem no banco principal**: rodam numa pasta temporária.
+2. Cada caso é repetível.
+3. Cada nova entrega reexecuta a compilação, a suíte e o simulador.
 
 ---
 
@@ -145,15 +143,12 @@ Princípios:
 
 | Item | Definição |
 | --- | --- |
-| Servidor | `npm start`, porta 3000 (`PORT` configurável) |
-| Banco | `oxide.db` em `process.cwd()`, com `PRAGMA foreign_keys = ON` |
-| Dispositivo semente | `DSP-000001`, chave `auto-DSP-000001` |
-| Dispositivos de teste | `DSP-TEST-AUTORUN`, `DSP-TEST-INACTIVE` (`active = 0`); `DSP-TEST-AUTOCREATE` é usado só para confirmar que **não** há criação automática |
-| Catálogo `status` | `ACTIVE`, `INACTIVE`, `LOCKED`, `UNLOCKED`, `BROKEN` (IDs não devem ser assumidos) |
-| PostgreSQL | Dump `sql/fluxid/FluxID.sql` (formato custom, `PGDMP`) restaurado em banco separado via `pg_restore`: servidor temporário ou container Docker `fluxid-analise` (`postgis/postgis:18-3.6`, só `127.0.0.1:54329`) |
-| Massa FluxID | 3 organizações, 3 usuários, 20 destinatários, 50 cilindros/lacres/dispositivos, 200 telemetrias, 10 eventos, 10 alertas (sintética) |
-
-Pré-condição para toda execução: banco com schema criado pelo script do `Oxidedb.md` ou pela inicialização da aplicação; backup antes de alterações estruturais.
+| Suíte | Porta 3197, pasta temporária `oxide-teste-*`, banco criado pela própria API |
+| Simulador | Porta 3199, pasta temporária `oxide-simulacao-*` |
+| Banco principal nos testes | Recebedor de teste (`src/simulador/recebedor.ts`), que segue o `Contrato-Entrega-Supabase.md` e guarda tudo em memória |
+| Dispositivos de teste | `DSP-TEST-1`, `DSP-TEST-2`, `DSP-TEST-OFF` (inativo), `DSP-TEST-R` (alertas automáticos) e `DSP-TEST-H` (chave por hash) |
+| Banco do modelo antigo | Montado pelo próprio teste, numa terceira pasta temporária |
+| Credenciais | Nenhuma de verdade: a chave do recebedor de teste é fixa e só vale nele |
 
 ---
 
@@ -161,21 +156,20 @@ Pré-condição para toda execução: banco com schema criado pelo script do `Ox
 
 **Entrada**
 - Compilação sem erros.
-- Servidor iniciado e `GET /` respondendo `200`.
-- Banco acessível e com permissão de escrita.
 
 **Saída (aprovação)**
-- 100% dos casos de severidade Alta aprovados.
-- Nenhum defeito crítico ou alto aberto.
-- Suíte automatizada sem falhas (hoje 96/96).
-- Banco limpo após o teardown (zero registros `DSP-TEST%`).
+- Suíte sem falhas (hoje 71/71).
+- Simulador sem falhas (hoje 23/23).
+- `oxide.db` do projeto com o mesmo checksum antes e depois.
 
 **Suspensão**
 - Falha de compilação.
-- Corrupção ou perda de dados no `oxide.db`.
-- Servidor não inicia.
+- A suíte ou o simulador não terminam.
+- O checksum do `oxide.db` do projeto muda.
 
 ---
+
+> **Daqui até a seção 13: histórico do modelo anterior** (até 09/10/2026). Os casos abaixo testavam as filas separadas, a cópia do cadastro de lacres e cilindros e o envio ao FluxID. Os casos que valem hoje estão na seção 0.
 
 ## 6. Casos de teste — API Oxide
 
@@ -579,11 +573,11 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | --- | --- |
 | Suíte automatizada (`npm test`) | **Modelo enxuto:** 71 casos, 71 aprovados em 10/10/2026 (aprovado por Natã da Silva Baracho). Modelo anterior: 96 casos aprovados em 07/10/2026 |
 | Simulador (`npm run simular`) | 23 de 23 verificações em 10/10/2026 |
-| Compilação (`npx tsc --noEmit`) | Aprovada em 06/10/2026 |
-| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas); [Relatorio-de-Teste-2026-10-06-20h00.md](Relatorio-de-Teste-2026-10-06-20h00.md): entrega E (banco FluxID); [Relatorio-de-Teste-2026-10-06-20h35.md](Relatorio-de-Teste-2026-10-06-20h35.md): entrega D (catálogo de comandos e tipos de erro); [Relatorio-de-Teste-2026-10-06-21h31.md](Relatorio-de-Teste-2026-10-06-21h31.md): entrega B (associação); [Relatorio-de-Teste-2026-10-06-23h40.md](Relatorio-de-Teste-2026-10-06-23h40.md): alertas em português, análise e encerramento; [Relatorio-de-Teste-2026-10-07-00h15.md](Relatorio-de-Teste-2026-10-07-00h15.md): FluxID, alerta com cilindro e lacre obrigatórios; [Relatorio-de-Teste-2026-10-07-00h45.md](Relatorio-de-Teste-2026-10-07-00h45.md): grupos do Swagger e FluxID no Docker; [Relatorio-de-Teste-2026-10-07-01h30.md](Relatorio-de-Teste-2026-10-07-01h30.md): integração Oxide ⇄ FluxID; [Relatorio-de-Teste-2026-10-07-18h45.md](Relatorio-de-Teste-2026-10-07-18h45.md): simulador do lacre e série do cilindro. Todos **aprovados por Natã da Silva Baracho** |
-| Cobertura da suíte | Dispositivos, autenticação, telemetria, eventos, comandos, alertas (criação, listagem, análise e encerramento) e associação |
-| Lacunas prioritárias | SEG-05, TEL-19, ALT-07/08/12, EVT-05, BD-04/06/11/16 (fora da suíte; cobertos pelo Roteiro) |
-| Entregas futuras | Todos os casos da seção 10 pendentes (funcionalidades ainda não implementadas) |
+| Compilação (`npx tsc --noEmit`) | Sem erros em 10/10/2026 |
+| Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas); [Relatorio-de-Teste-2026-10-06-20h00.md](Relatorio-de-Teste-2026-10-06-20h00.md): entrega E (banco FluxID); [Relatorio-de-Teste-2026-10-06-20h35.md](Relatorio-de-Teste-2026-10-06-20h35.md): entrega D (catálogo de comandos e tipos de erro); [Relatorio-de-Teste-2026-10-06-21h31.md](Relatorio-de-Teste-2026-10-06-21h31.md): entrega B (associação); [Relatorio-de-Teste-2026-10-06-23h40.md](Relatorio-de-Teste-2026-10-06-23h40.md): alertas em português, análise e encerramento; [Relatorio-de-Teste-2026-10-07-00h15.md](Relatorio-de-Teste-2026-10-07-00h15.md): FluxID, alerta com cilindro e lacre obrigatórios; [Relatorio-de-Teste-2026-10-07-00h45.md](Relatorio-de-Teste-2026-10-07-00h45.md): grupos do Swagger e FluxID no Docker; [Relatorio-de-Teste-2026-10-07-01h30.md](Relatorio-de-Teste-2026-10-07-01h30.md): integração Oxide ⇄ FluxID; [Relatorio-de-Teste-2026-10-07-18h45.md](Relatorio-de-Teste-2026-10-07-18h45.md): simulador do lacre e série do cilindro; [Relatorio-de-Teste-2026-10-10-12h40.md](Relatorio-de-Teste-2026-10-10-12h40.md): Oxide enxuta, fila única e envio ao Supabase. Todos **aprovados por Natã da Silva Baracho** |
+| Cobertura da suíte | Dispositivos, autenticação, telemetria, eventos, alertas do lacre, alertas automáticos, Worker, cadastro e comandos do banco principal, saúde, migração e manutenção (seção 0.2) |
+| Lacunas prioritárias | Envio ao Supabase de verdade e lacre real (seção 0.3). Requisições simultâneas com o mesmo `message_id` não têm caso automático |
+| Entregas futuras | `V2-INT-01` a `V2-INT-03`: dependem da função de recebimento no Supabase e do envio ligado no firmware |
 
 ---
 
@@ -591,15 +585,17 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 
 | ID | Risco | Mitigação |
 | --- | --- | --- |
-| R1 | A suíte atual grava na `oxide.db` real (limpa por `DELETE ... LIKE 'DSP-TEST%'` no início e no fim); falha no meio pode deixar resíduos ou afetar dados | Usar banco de teste dedicado (`DB_PATH` por variável de ambiente) ou cópia temporária |
-| R2 | Testes dependem do dispositivo semente `DSP-000001` e da chave `auto-DSP-000001` | Criar a semente no setup da suíte |
+| R1 | A suíte gravava na `oxide.db` real | **Resolvido** em 10/10/2026: a suíte e o simulador rodam numa pasta temporária, com banco novo |
+| R2 | Testes dependiam do dispositivo semente `DSP-000001` | **Resolvido** em 10/10/2026: a suíte cria os próprios dispositivos |
 | R3 | Testes assumiam `status_id = 1` e `severity_id = 2` | **Resolvido** na entrega C: alertas não usam mais IDs do catálogo |
 | R4 | Exposição de `api_key` nos `GET /devices` | **Mitigado** na entrega A: respostas sem `api_key` (SEG-01) |
 | R5 | Ownership não validado em telemetria e eventos | **Mitigado** na entrega A: `403` para chave de outro dispositivo (AUT-08/09) |
 | R6 | Severidade sem semântica | **Resolvido** na entrega C: severidade em texto com os valores do FluxID (ALT-12) |
-| R7 | Divergência de modelos (Oxide × FluxID) pode causar rejeição em massa no Worker | Casos SYN-06 a SYN-13 antes de implementar a sincronização |
+| R7 | O contrato de entrega foi definido pelo lado da API, sem conhecer as tabelas do lacre no Supabase: o formato pode não servir | Revisão do professor Alisson e primeiro envio de verdade (`V2-INT-01`) antes de usar em produção |
 | R8 | Testes concorrentes não cobertos (SQLite com `better-sqlite3` é síncrono, mas há risco entre processos). Telemetria e alertas convertem violação `UNIQUE` em `409`; eventos e dispositivos ainda responderiam `500` | TEL-19 |
-| R9 | Ausência de `CHECK` para `alert_type` e `seal_status` no SQLite (validação só na aplicação) | Testes de API compensam; avaliar constraint |
+| R9 | `alert_type` e `seal_status` são validados só na aplicação (a mensagem fica em JSON na fila) | Casos V2-TEL-03 e V2-ALT-01 |
+| R10 | Enquanto o lacre não tiver a leitura da bateria, todas as mensagens dele são recusadas (`400`) | Decisão aceita em 10/10/2026; registrada no guia do firmware |
+| R11 | Os testes usam um recebedor de teste, e não o Supabase | `V2-INT-01` quando a função de recebimento existir |
 
 ---
 
@@ -615,14 +611,13 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 
 ## 17. Procedimento de execução
 
-1. Fazer backup de `oxide.db` (ou apontar para um banco de teste).
-2. Executar `npx tsc --noEmit`.
-3. Com a porta 3000 livre, executar `npm test` e registrar o resultado final. A suíte sobe a própria instância da API; se houver outra rodando, ela é testada no lugar do código atual.
-4. Iniciar a API (`npm start`) em uma instância nova para os casos manuais.
-5. Executar os casos manuais pendentes no Swagger, no Postman ou pelo `RoteiroDeTeste.md`.
-6. Conferir o banco com as consultas da seção de verificação do `Oxidedb.md` ou da seção 6 do `RoteiroDeTeste.md`.
-7. Registrar defeitos com ID do caso, passos, resultado obtido e esperado.
-8. Repetir a suíte completa a cada nova entrega do roadmap e atualizar este plano.
+1. Executar `npx tsc --noEmit`.
+2. Executar `npm test` e registrar o resultado. A suíte usa a porta 3197 e uma pasta temporária; a API do projeto pode ficar ligada.
+3. Executar `npm run simular` e registrar o resultado.
+4. Conferir que o checksum do `oxide.db` do projeto não mudou.
+5. Quando houver mudança no banco local, testar a migração numa cópia (`RoteiroDeTeste.md`, seção 4).
+6. Registrar defeitos com o ID do caso, os passos, o resultado obtido e o esperado.
+7. Repetir tudo a cada nova entrega e atualizar este plano.
 
 ---
 
