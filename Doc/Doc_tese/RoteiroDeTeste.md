@@ -40,11 +40,15 @@ sha256sum oxide.db
 # [compilação] Esperado: nenhuma saída
 npx tsc --noEmit
 
-# [V2-GER-01 a V2-OPE-02] Esperado: "Total de Testes: 71", "Passaram: 71", "Falharam: 0"
+# [V2-GER-01 a V2-OPE-02] Esperado: "Total de Testes: 92", "Passaram: 92", "Falharam: 0"
 npm test 2>&1 | grep -E "❌|Total de Testes|Passaram|Falharam"
 
 # [simulador] Esperado: "Resultado: 23 de 23 verificações conforme; 0 falha(s)."
 npm run simular 2>&1 | grep -E "^❌|^===|Resultado:"
+
+# [teste em massa] 500 lacres, com quedas da API, do Worker e do banco principal.
+# Esperado: "Resultado: 24 de 24 verificações conforme; 0 falha(s)."
+npm run simular:massa 2>&1 | grep -E "^❌|^===|Duração|Tempo de resposta|Resultado:"
 
 # Esperado: o mesmo checksum do começo
 sha256sum oxide.db
@@ -148,3 +152,4 @@ Não registre chaves nem senhas. Ao final, entregue o relatório no formato da s
 | --- | --- | --- |
 | 1.0 a 1.10 | 05 a 07/10/2026 | Roteiro do modelo anterior: casos manuais por rota no `oxide.db` real (com backup e restauração) e seção do Worker contra o FluxID de análise no Docker. Última execução em 07/10/2026, sem falhas |
 | 2.0 | 10/10/2026 | Modelo enxuto: suíte e simulador em pasta temporária com recebedor de teste; migração numa cópia do banco real; passo do Supabase de verdade para quando a função existir |
+| 2.1 | 10/10/2026 | Suíte com 92 casos (grupo 12: banco direto no SQLite, volume e gravação ao mesmo tempo) e novo teste em massa (`npm run simular:massa`) |

@@ -45,8 +45,11 @@ Os itens com ✅ foram feitos e testados pela IA e **aprovados por Natã da Silv
 
 ### Testes e documentos
 
-- ✅ Suíte nova com 71 casos e simulador novo com 23 verificações, em pasta temporária e com recebedor de teste.
-- ✅ Documentação final para o evento INTEGRA 2026 (`DocumentacaoFinal/`): 19 registros no PR #19 e o registro 20, desta entrega, no PR #20.
+- ✅ Suíte com 92 casos e simulador com 23 verificações, em pasta temporária e com recebedor de teste.
+- ✅ Teste do banco direto no SQLite (64 casos) e 21 casos de banco dentro da suíte: regras, volume com 100.000 mensagens e gravação ao mesmo tempo.
+- ✅ Teste em massa (`npm run simular:massa`): 500 lacres num cenário como o do sistema principal, com quedas da API, do Worker e do banco principal; 24 de 24.
+- ✅ Correções achadas pelos testes: banco migrado igual ao banco novo; cópia de segurança antes de qualquer mudança; API espera o Worker em vez de responder `500`; modo WAL (de 40 para 588 pedidos por segundo).
+- ✅ Documentação final para o evento INTEGRA 2026 (`DocumentacaoFinal/`): 19 registros no PR #19 e os registros 20 e 21, desta entrega, no PR #20.
 - ✅ Documentos atualizados para o modelo enxuto; documentos do FluxID marcados como referência histórica.
 
 ### Ainda a fazer, fora desta entrega

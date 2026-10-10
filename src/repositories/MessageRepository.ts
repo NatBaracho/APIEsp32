@@ -55,7 +55,7 @@ export class MessageRepository {
 
   markProcessing(ids: number[]): void {
     const mark = db.prepare("UPDATE mensagens SET status = 'PROCESSING' WHERE id = ? AND status IN ('PENDING', 'ERROR')");
-    db.transaction(() => ids.forEach(id => mark.run(id)))();
+    db.transaction(() => ids.forEach(id => mark.run(id))).immediate();
   }
 
   markSynced(id: number): void {
