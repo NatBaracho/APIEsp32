@@ -1,28 +1,44 @@
-# API ESP32
+# API do lacre (ESP32)
 
-API REST em Node.js, TypeScript, Express e SQLite que recebe os dados dos lacres (ESP32) e os entrega ao banco principal do FluxID.
+API REST em Node.js, TypeScript, Express e SQLite que recebe os dados dos lacres (ESP32) e os entrega ao banco principal do sistema FluxID (Supabase).
 
 ```text
 Lacre (ESP32) ──► API (valida) ──► Oxide (fila local) ──► Worker ──► Supabase (banco principal)
+                                                             ▲                │
+                                                             └── dispositivos, vínculos e comandos ──┘
 ```
 
-- **API:** recebe leituras, eventos e alertas do lacre, confere a chave de cada dispositivo e não grava a mesma mensagem duas vezes.
-- **Oxide (`oxide.db`):** fila local em SQLite, com três tabelas. Se o banco principal cair, nada se perde.
-- **Worker:** envia a fila ao Supabase e traz de lá o cadastro dos dispositivos e os comandos da válvula.
-- **Supabase:** banco principal, mantido no projeto do frontend (`fluxid_integra2026`). Lacre, cilindro, cliente, rota e geocerca ficam lá.
+| Parte | O que é | O que faz |
+| --- | --- | --- |
+| Lacre | O equipamento (ESP32) preso ao cilindro | Avisa que está ativo; envia leituras, eventos e alertas; busca e confirma comandos |
+| API | O programa em `src/` | Confere a chave do dispositivo, valida a mensagem e guarda na fila. Não grava a mesma mensagem duas vezes |
+| Oxide | O arquivo `oxide.db` (SQLite) | Fila local, com três tabelas. Se o banco principal cair, nada se perde |
+| Worker | Outro programa (`npm run worker`) | Envia a fila ao Supabase e traz de lá os dispositivos, os vínculos e os comandos da válvula |
+| Supabase | O banco principal, no projeto do frontend (`fluxid_integra2026`) | Guarda tudo de forma definitiva. Lacre, cilindro, cliente, rota e geocerca ficam lá |
 
-## Executar localmente
+A API **não atende o frontend**: as telas falam direto com o Supabase.
+
+Para entender o comportamento em linguagem simples, comece por [Como o sistema se comporta](Doc/Como-o-Sistema-se-Comporta.md).
+
+## Situação atual (10/10/2026)
+
+| Item | Situação |
+| --- | --- |
+| API, fila (Oxide) e Worker | Prontos e testados: suíte 110/110, simulador 26/26 e teste em massa 32/32 |
+| Envio ao Supabase de verdade | **Ainda não testado.** A função de recebimento não existe no repositório do frontend; os testes usam um recebedor de teste |
+| Ativação do lacre e vínculo com o cilindro e o cliente | Pronto na API. Falta o sistema tratar a mensagem de ativação e devolver o vínculo |
+| Lacre de verdade | O envio está desligado no firmware; faltam o aviso de ativação e a leitura da bateria |
+
+## Como ligar
+
+É preciso ter o Node.js instalado (o projeto usa a versão 24).
 
 ```bash
 npm install
-npm start        # ou npm run dev (recarrega ao salvar)
+npm start        # ou npm run dev (reinicia ao salvar)
 ```
 
-O servidor inicia na porta `3000`. As tabelas são criadas sozinhas.
-
-### Porta e endereços
-
-**A porta é a 3000.** Com a API ligada (`npm start`), os endereços são:
+A API sobe na **porta 3000** e cria as tabelas sozinha.
 
 | Para quê | Endereço |
 | --- | --- |
@@ -33,52 +49,55 @@ O servidor inicia na porta `3000`. As tabelas são criadas sozinhas.
 
 - **De outro aparelho** (o lacre ou outro computador na mesma rede): troque `localhost` pelo IP do computador onde a API está ligada, por exemplo `http://192.168.0.10:3000`. No Windows, o IP aparece com o comando `ipconfig`, na linha "Endereço IPv4".
 - **Para mudar a porta:** defina `PORT` no arquivo `.env` (por exemplo `PORT=8080`) e ligue a API de novo.
-- **`banco_principal: "NAO_CONFIGURADO"` no `/health`:** é o esperado enquanto `SUPABASE_IOT_URL` e `SUPABASE_SERVICE_KEY` não estiverem no `.env`. A API continua recebendo, e as mensagens ficam guardadas na fila até o banco principal ser configurado.
-- **Rotas `/api/v1/app/...` não existem.** Elas são da proposta antiga [Contrato-API-Frontend.md](Doc/Contrato-API-Frontend.md), que não foi seguida: a API não atende o frontend.
+- **No Swagger:** use **Try it out** para executar. Nas rotas do lacre, clique em **Authorize** e informe a chave do dispositivo (`X-API-Key`).
+- **`banco_principal: "NAO_CONFIGURADO"` no `/health`:** é o esperado enquanto o endereço e a chave do Supabase não estiverem no `.env`. A API continua recebendo, e as mensagens ficam guardadas na fila.
+- **Rotas `/api/v1/app/...` não existem.** Elas são da proposta antiga [Contrato-API-Frontend.md](Doc/Contrato-API-Frontend.md), que não foi seguida.
 
-Se a `oxide.db` for de uma versão anterior, a API faz uma cópia de segurança ao lado do arquivo (`oxide.db.bak-antes-da-fila-unica-<data>`), passa as mensagens antigas para a fila nova (as que têm posição e bateria seguem para o banco principal; as outras ficam arquivadas) refaz `devices` e `commands` no formato atual e remove as tabelas que saíram. Detalhes: [Oxidedb.md](Doc/Oxidedb.md).
+**Banco de versão anterior.** Se a `oxide.db` for de uma versão anterior, a API faz uma cópia de segurança ao lado do arquivo antes de mudar qualquer coisa e converte o banco sozinha:
 
-O npm 11 avisa que os scripts de instalação do `better-sqlite3` ainda não estão autorizados (`allowScripts`); hoje é só um aviso e o módulo instala normalmente. Se uma versão futura do npm bloquear o script e a API não conseguir abrir o banco, rode `npm install-scripts approve better-sqlite3` e depois `npm install`.
+- do modelo antigo (filas separadas): cópia `oxide.db.bak-antes-da-fila-unica-<data>`; as leituras antigas com posição e bateria seguem para o banco principal e as outras ficam arquivadas;
+- do modelo atual, mas sem as colunas mais novas: cópia `oxide.db.bak-antes-da-atualizacao-<data>`.
 
-### Worker (envio ao banco principal)
+Detalhes em [Oxidedb.md](Doc/Oxidedb.md).
 
-Copie `.env.example` para `.env` e preencha `SUPABASE_IOT_URL` e `SUPABASE_SERVICE_KEY`. A chave fica só no `.env`, que não vai para o Git. Depois, em outro terminal:
+**Aviso do npm.** O npm 11 avisa que os scripts de instalação do `better-sqlite3` ainda não estão autorizados (`allowScripts`); hoje é só um aviso e o módulo instala normalmente. Se uma versão futura do npm bloquear o script e a API não conseguir abrir o banco, rode `npm install-scripts approve better-sqlite3` e depois `npm install`.
 
-```bash
-npm run worker            # roda sem parar; Ctrl+C encerra ao fim da rodada
-npm run worker -- --once  # uma rodada e sai
-```
+## Configuração (`.env`)
+
+Copie `.env.example` para `.env`. O `.env` não vai para o Git. **Nunca coloque a chave do Supabase em documento, conversa ou no `.env.example`.**
+
+| Variável | Para quê | Padrão |
+| --- | --- | --- |
+| `PORT` | Porta da API | `3000` |
+| `SUPABASE_IOT_URL` | Endereço da função de recebimento do Supabase | — |
+| `SUPABASE_SERVICE_KEY` | Chave `service_role` do Supabase | — |
+| `WORKER_INTERVAL_SECONDS` | De quanto em quanto tempo o Worker envia a fila | `10` |
+| `WORKER_CADASTRO_INTERVAL_SECONDS` | De quanto em quanto tempo o Worker busca os dispositivos e os vínculos | `300` |
+| `WORKER_BATCH_SIZE` | Mensagens por lote | `100` |
+| `REGRA_BATERIA_MINIMA` | Abaixo disso, abre o alerta de bateria baixa (%) | `15` |
+| `REGRA_SINAL_MINIMO_DBM` | Abaixo disso, abre o alerta de sinal fraco (dBm) | `-105` |
+| `REGRA_MINUTOS_SEM_VINCULO` | Tempo para o sistema vincular o cilindro depois da ativação; passado ele, abre o alerta de lacre sem cilindro | `10` |
+| `BACKUP_PASTA` e `BACKUP_MANTER` | Pasta das cópias e quantas manter | `backups` e `14` |
+| `RETENCAO_DIAS` | Depois de quantos dias o que já foi enviado pode ser apagado | `30` |
+
+## Comandos
+
+| Comando | Para quê |
+| --- | --- |
+| `npm start` | Liga a API |
+| `npm run dev` | Liga a API e reinicia ao salvar um arquivo |
+| `npm run worker` | Liga o Worker, em outro terminal. `Ctrl+C` encerra ao fim da rodada |
+| `npm run worker -- --once` | Faz uma rodada do Worker e sai |
+| `npm test` | Suíte automática (110 casos) |
+| `npm run simular` | Percurso completo de um lacre (26 verificações) |
+| `npm run simular:massa` | Teste em massa com 500 lacres (32 verificações) |
+| `npm run backup` | Cópia consistente da `oxide.db` em `backups/`; pode rodar com a API ligada |
+| `npm run retencao` | Mostra o que sairia: só o que já foi enviado há mais de 30 dias |
+| `npm run retencao -- --confirmar` | Apaga de fato. Faça o backup antes |
 
 O que o Worker envia e o que espera do Supabase está em [Contrato-Entrega-Supabase.md](Doc/Contrato-Entrega-Supabase.md).
 
-### Simular um lacre (`npm run simular`)
-
-Faz o percurso completo de um lacre, sem o equipamento e sem o Supabase:
-- cadastro vindo do banco principal;
-- leituras com posição e bateria;
-- posição repetida e mensagem duplicada;
-- GPS sem sinal;
-- alertas automáticos;
-- banco principal fora do ar e reenvio;
-- comando da válvula e confirmação.
-
-Roda numa pasta temporária, com uma `oxide.db` nova e um recebedor de teste no lugar do Supabase. O `oxide.db` do projeto não é tocado.
-
-### Teste em massa (`npm run simular:massa`)
-
-Põe 500 lacres (um por cilindro) enviando ao mesmo tempo, num cenário como o do sistema principal: organizações, clientes, unidades com geocerca, veículos e motoristas. A API e o Worker rodam em processos separados e são derrubados no meio do teste, junto com o banco principal. No fim, o teste confere que nada se perdeu e nada duplicou.
-
-Roda numa pasta temporária, com o recebedor de teste no lugar do Supabase. Ajustes: `MASSA_LACRES`, `MASSA_PONTOS`, `MASSA_PARALELO`, `MASSA_PORTA` e `MASSA_SEMENTE`.
-
-### Manutenção
-
-```bash
-npm run backup                    # cópia consistente em backups/ (pode rodar com a API ligada)
-npm run retencao                  # mostra o que sairia (só o já enviado, há mais de 30 dias)
-npm run retencao -- --confirmar   # apaga de fato; faça o backup antes
-```
-
-O banco grava em modo WAL: ao lado do `oxide.db` ficam os arquivos `oxide.db-wal` e `oxide.db-shm`. **Com a API ligada, não copie o `oxide.db` à mão:** a cópia pode sair incompleta. Use sempre `npm run backup`, que gera um arquivo só.
+**Cuidado com a cópia do banco.** O banco grava em modo WAL: ao lado do `oxide.db` ficam os arquivos `oxide.db-wal` e `oxide.db-shm`. Com a API ligada, não copie o `oxide.db` à mão, porque a cópia pode sair incompleta. Use sempre `npm run backup`, que gera um arquivo só.
 
 ## Testes
 
@@ -89,21 +108,17 @@ npm run simular
 npm run simular:massa
 ```
 
-A suíte roda numa pasta temporária, com uma `oxide.db` nova e um recebedor de teste no lugar do Supabase. Ela não toca no `oxide.db` do projeto nem no banco principal, e pode rodar com a sua API ligada. Resultado atual: suíte 110/110, simulador 26/26 e teste em massa 32/32.
+Os três testes rodam numa pasta temporária, com uma `oxide.db` nova e um **recebedor de teste** no lugar do Supabase. Eles não tocam no `oxide.db` do projeto nem no banco principal, e podem rodar com a sua API ligada.
+
+| Teste | O que faz | Resultado atual |
+| --- | --- | --- |
+| `npm test` | Chama cada rota e confere as regras, o banco, o Worker e a migração | 110 de 110 |
+| `npm run simular` | Um lacre do começo ao fim: cadastro, ativação e vínculo, leituras, posição repetida, GPS sem sinal, alertas automáticos, banco principal fora do ar e comando da válvula | 26 de 26 |
+| `npm run simular:massa` | 500 lacres (um por cilindro) num cenário como o do sistema principal, com a API, o Worker e o banco principal derrubados no meio. Confere que nada se perdeu nem duplicou | 32 de 32 |
+
+Ajustes do teste em massa: `MASSA_LACRES`, `MASSA_PONTOS`, `MASSA_PARALELO`, `MASSA_PORTA` e `MASSA_SEMENTE`.
 
 O registro de cada entrega (validação da IA e do responsável) fica em `Doc/Doc_tese/Relatorio-de-Teste-*.md`.
-
-## Documentação interativa
-
-Com o servidor ativo, acesse o Swagger UI em:
-
-```text
-http://localhost:3000/api-docs
-```
-
-Use **Try it out** para executar as requisições. Para as rotas do lacre, clique em **Authorize** e informe a chave do dispositivo no header `X-API-Key`.
-
-**Quem programa o lacre (ESP32)** deve começar pelo [Guia do firmware do lacre IoT](Doc/Guia-Firmware-Lacre-IoT.md).
 
 ## Endpoints
 
@@ -158,25 +173,51 @@ Para olhar as tabelas, o `oxide.db` abre em qualquer programa de SQLite (por exe
 
 ## Regras principais
 
-- **Chave:** as rotas do lacre exigem `X-API-Key` do próprio `device_id` enviado (`403` se for de outro). O dispositivo precisa estar cadastrado: não há criação automática (`404`). A chave nunca aparece nas respostas.
-- **Posição e bateria obrigatórias:** toda leitura, evento e alerta leva `latitude`, `longitude` e `battery_percent` (`400` sem eles). Sem sinal de GPS, o lacre manda a última posição conhecida com `gps_ok: false`.
+- **Chave:** as rotas do lacre exigem `X-API-Key` do próprio `device_id` enviado (`403` se for de outro). O dispositivo precisa estar cadastrado: não há criação automática (`404`). A chave nunca aparece nas respostas, e a Oxide guarda só o hash dela.
+- **Posição e bateria obrigatórias:** toda mensagem do lacre leva `latitude`, `longitude` e `battery_percent` (`400` sem eles). Sem sinal de GPS, o lacre manda a última posição conhecida com `gps_ok: false`.
 - **Sem duplicar:** `message_id` (ou `alert_id`) repetido responde `409` e não cria outro registro.
 - **Posição repetida:** leitura com a mesma posição e o mesmo estado do lacre da anterior responde `200` e só atualiza a data e a hora da leitura anterior.
-- **Alertas automáticos:** a API abre sozinha, uma vez a cada mudança: `BATERIA_BAIXA` (abaixo de 15%), `GSM_SINAL_FRACO` (abaixo de -105 dBm), `LACRE_VIOLADO` (lacre `BROKEN`) e `LACRE_ABERTO_SEM_AUTORIZACAO` (lacre `UNLOCKED`). Os limites mudam no `.env`.
-- **O que a API não faz:** regras de rota, de geocerca e de tempo sem comunicar, e o tratamento dos alertas. Ficam no sistema principal.
+- **Ativação:** o lacre avisa que está ativo e a API gera o identificador dele (`seal_code`, como `LCR-JKFL6VBR`), uma vez só. O aviso segue ao sistema, que assim sabe quais lacres estão ativos.
+- **Vínculo:** o sistema vincula o cilindro e o cliente pelo identificador do lacre, e o Worker salva o vínculo na Oxide. A partir daí, toda mensagem sai com o identificador, o cilindro e o cliente. O vínculo termina quando o sistema mandar ou quando o lacre avisar que desativou.
+- **Alertas automáticos:** a API abre sozinha, uma vez a cada mudança:
+  - `BATERIA_BAIXA` (abaixo de 15%);
+  - `GSM_SINAL_FRACO` (abaixo de -105 dBm);
+  - `LACRE_VIOLADO` (lacre `BROKEN`);
+  - `LACRE_ABERTO_SEM_AUTORIZACAO` (lacre `UNLOCKED`);
+  - `LACRE_SEM_CILINDRO` (lacre ativo enviando sem cilindro, 10 minutos depois da ativação).
 - **Comandos:** vêm do banco principal (`TRAVAR_VALVULA`, `DESTRAVAR_VALVULA`). O lacre busca e confirma `EXECUTADO` ou `ERRO`, e a confirmação volta ao banco principal.
 - **Fila:** envio inicial e mais 5 tentativas (1 min, 5 min, 15 min, 1 h e 6 h). Banco principal fora do ar não gasta tentativa.
+- **O que a API não faz:** regras de rota, de geocerca e de tempo sem comunicar, e o tratamento dos alertas. Ficam no sistema principal.
+
+## Pastas do projeto
+
+| Pasta ou arquivo | O que tem |
+| --- | --- |
+| `src/` | O código da API, do Worker (`src/worker`), dos simuladores (`src/simulador`) e da manutenção (`src/manutencao`) |
+| `tests/` | A suíte automática |
+| `Doc/` | Os documentos do projeto; em `Doc/Doc_tese/`, o plano, o roteiro e os relatórios de teste |
+| `DocumentacaoFinal/` | Registros de uso de IA para o evento INTEGRA 2026 |
+| `oxide.db` | O banco local (Oxide) |
+| `.env.example` | Modelo da configuração |
+| `sql/fluxid/` | Scripts do banco FluxID em PostgreSQL (referência histórica) |
 
 ## Documentos
 
+**Para entender e usar:**
 - [Como o sistema se comporta](Doc/Como-o-Sistema-se-Comporta.md): explicação simples do que acontece em cada situação (comece por aqui)
-- [Guia do firmware do lacre IoT](Doc/Guia-Firmware-Lacre-IoT.md): o contrato entre o lacre e a API
-- [ESP32: como enviar dados](Doc/ESP32-envio-de-dados.md): o exemplo de cada mensagem e de cada resposta, campo por campo
-- [Contrato de entrega ao Supabase](Doc/Contrato-Entrega-Supabase.md): o que a API envia ao banco principal
-- [Banco local Oxide](Doc/Oxidedb.md)
 - [Desenvolvimento: como a API funciona e histórico](Doc/Desenvolvimento.md)
 - [Regras de negócio da API](Doc/Regras-de-Negocio-e-Banco-Oxide.md)
+- [Banco local Oxide](Doc/Oxidedb.md)
 - [Catálogo de tipos de erro e ocorrências](Doc/Tipos-de-Erro.md)
+
+**Para quem programa o lacre (ESP32):**
+- [Guia do firmware do lacre IoT](Doc/Guia-Firmware-Lacre-IoT.md): o contrato entre o lacre e a API (comece por este)
+- [ESP32: como enviar dados](Doc/ESP32-envio-de-dados.md): o exemplo de cada mensagem e de cada resposta, campo por campo
+
+**Para quem mantém o Supabase:**
+- [Contrato de entrega ao Supabase](Doc/Contrato-Entrega-Supabase.md): o que a API envia ao banco principal e o que espera de volta
+
+**Acompanhamento e testes:**
 - [Checklist do projeto](Doc/Checklist-Projeto.md)
 - [Plano de Teste](Doc/Doc_tese/PlanoDeTeste.md) e [Roteiro de Teste](Doc/Doc_tese/RoteiroDeTeste.md)
 - [Documentação final para o evento INTEGRA 2026](DocumentacaoFinal): registros de uso de IA e validação humana (Template 7)
@@ -185,4 +226,3 @@ Para olhar as tabelas, o `oxide.db` abre em qualquer programa de SQLite (por exe
 - [Banco PostgreSQL FluxID](Doc/Banco_FluxID.md) e scripts em [`sql/fluxid/`](sql/fluxid)
 - [Integração Oxide ⇄ FluxID](Doc/Integracao-Oxide-FluxID.md)
 - [Contrato da API para o frontend](Doc/Contrato-API-Frontend.md) (proposta não seguida)
-
