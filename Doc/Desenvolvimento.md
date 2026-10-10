@@ -610,6 +610,10 @@ Resultados finais:
 
 **O que não foi testado:** o Supabase de verdade (foi usado o recebedor de teste) e queda de energia no meio de uma gravação.
 
+Depois da aprovação, a pedido de Natã:
+- **`oxide.db` do projeto convertido para o modelo atual** em 10/10/2026, com a cópia de segurança automática: 3 dispositivos mantidos, 1 leitura antiga na fila e 17 mensagens arquivadas. O arquivo convertido foi enviado ao GitHub; a cópia de segurança fica só no computador.
+- **Novo documento** [Como-o-Sistema-se-Comporta.md](Como-o-Sistema-se-Comporta.md): explica em linguagem simples o caminho da mensagem, como o cilindro é identificado, onde ficam os eventos e os alertas e o que acontece quando o banco principal, o Worker ou a API caem.
+
 Relatórios: [Relatorio-de-Teste-2026-10-10-13h45.md](Doc_tese/Relatorio-de-Teste-2026-10-10-13h45.md) e [Relatorio-de-Teste-2026-10-10-14h00.md](Doc_tese/Relatorio-de-Teste-2026-10-10-14h00.md). Questionários respondidos: **aprovado por Natã da Silva Baracho em 10/10/2026**. Como o PR #20 já estava mesclado, esta entrega foi no PR #21.
 
 ## 9. Suíte de testes automatizados (`npm test`)

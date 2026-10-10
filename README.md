@@ -119,6 +119,7 @@ Use **Try it out** para executar as requisições. Para as rotas do lacre, cliqu
 
 ## Documentos
 
+- [Como o sistema se comporta](Doc/Como-o-Sistema-se-Comporta.md): explicação simples do que acontece em cada situação (comece por aqui)
 - [Guia do firmware do lacre IoT](Doc/Guia-Firmware-Lacre-IoT.md): o contrato entre o lacre e a API
 - [Contrato de entrega ao Supabase](Doc/Contrato-Entrega-Supabase.md): o que a API envia ao banco principal
 - [Banco local Oxide](Doc/Oxidedb.md)

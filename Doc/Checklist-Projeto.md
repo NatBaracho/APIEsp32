@@ -51,6 +51,8 @@ Os itens com ✅ foram feitos e testados pela IA e **aprovados por Natã da Silv
 - ✅ Correções achadas pelos testes: banco migrado igual ao banco novo; cópia de segurança antes de qualquer mudança; API espera o Worker em vez de responder `500`; modo WAL (de 40 para 588 pedidos por segundo).
 - ✅ Documentação final para o evento INTEGRA 2026 (`DocumentacaoFinal/`): 19 registros no PR #19, o registro 20 no PR #20 e o registro 21 (teste do banco e teste em massa) no PR #21.
 - ✅ Documentos atualizados para o modelo enxuto; documentos do FluxID marcados como referência histórica.
+- ✅ Novo documento `Como-o-Sistema-se-Comporta.md`: o comportamento do sistema em linguagem simples.
+- ✅ `oxide.db` do projeto convertido para o modelo atual (3 tabelas) em 10/10/2026 e enviado ao GitHub.
 
 ### Ainda a fazer, fora desta entrega
 
