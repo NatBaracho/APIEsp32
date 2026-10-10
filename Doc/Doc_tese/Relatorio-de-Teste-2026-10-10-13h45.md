@@ -2,7 +2,7 @@
 
 **Data:** 10/10/2026, 13:45 (primeira rodada às 13:30; rodada final às 13:39)
 **Executado por:** IA (Claude Code, modelo Claude Opus 5.5), a pedido de Natã da Silva Baracho
-**Branch:** `feat/oxide-enxuta` (PR #20), enviada ao GitHub depois da aprovação
+**Branch:** os testes rodaram na `feat/oxide-enxuta`; a entrega foi na `fix/teste-banco-e-massa` (PR #21), enviada ao GitHub depois da aprovação
 **Base:** `Oxidedb.md` 2.0 e `PlanoDeTeste.md` 2.0
 **Situação:** ✅ **aprovado por Natã da Silva Baracho em 10/10/2026** (seção 8)
 
@@ -197,6 +197,6 @@ O grupo 12 apaga no fim tudo o que criou.
 
 ## 8. Validação (10/10/2026)
 
-Natã da Silva Baracho respondeu **sim** às cinco perguntas: **aprovado por Natã da Silva Baracho em 10/10/2026**.
+Natã da Silva Baracho respondeu **sim** às cinco perguntas: **aprovado por Natã da Silva Baracho em 10/10/2026**. O PR #20 já tinha sido mesclado na `main`, então as mudanças foram enviadas no PR #21.
 
 Depois desta rodada, o teste em massa (`Relatorio-de-Teste-2026-10-10-14h00.md`) levou à adoção do modo WAL. Com ele, a espera registrada na seção 6 (de 2,1 a 3,4 segundos no teste de gravação ao mesmo tempo) caiu para 42 ms, e a suíte passou a ter 92 casos (um a mais, que confere o modo WAL).

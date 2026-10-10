@@ -610,7 +610,7 @@ Resultados finais:
 
 **O que não foi testado:** o Supabase de verdade (foi usado o recebedor de teste) e queda de energia no meio de uma gravação.
 
-Relatórios: [Relatorio-de-Teste-2026-10-10-13h45.md](Doc_tese/Relatorio-de-Teste-2026-10-10-13h45.md) e [Relatorio-de-Teste-2026-10-10-14h00.md](Doc_tese/Relatorio-de-Teste-2026-10-10-14h00.md). Questionários respondidos: **aprovado por Natã da Silva Baracho em 10/10/2026**.
+Relatórios: [Relatorio-de-Teste-2026-10-10-13h45.md](Doc_tese/Relatorio-de-Teste-2026-10-10-13h45.md) e [Relatorio-de-Teste-2026-10-10-14h00.md](Doc_tese/Relatorio-de-Teste-2026-10-10-14h00.md). Questionários respondidos: **aprovado por Natã da Silva Baracho em 10/10/2026**. Como o PR #20 já estava mesclado, esta entrega foi no PR #21.
 
 ## 9. Suíte de testes automatizados (`npm test`)
 
@@ -638,7 +638,7 @@ A suíte anterior (96 casos, modelo com filas separadas e envio ao FluxID) está
 
 # Parte 3 — Histórico de PRs por funcionalidade
 
-Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validação **aprovada por Natã da Silva Baracho**. O #20 (Oxide enxuta) foi **aprovado por Natã da Silva Baracho** em 10/10/2026. Esta parte e a seção "Quem faz o quê" (1.1) foram conferidas por questionário (6/6 sim) e **aprovadas por Natã da Silva Baracho** em 06/10/2026. O PR que mexeu em mais de uma parte aparece em cada grupo, só com o que mudou naquela parte. A cada novo PR, esta parte é atualizada.
+Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validação **aprovada por Natã da Silva Baracho**. O #20 (Oxide enxuta) foi **aprovado por Natã da Silva Baracho** em 10/10/2026 e mesclado no mesmo dia. O #21 (teste do banco, teste em massa e modo WAL) foi **aprovado por Natã da Silva Baracho** em 10/10/2026. Esta parte e a seção "Quem faz o quê" (1.1) foram conferidas por questionário (6/6 sim) e **aprovadas por Natã da Silva Baracho** em 06/10/2026. O PR que mexeu em mais de uma parte aparece em cada grupo, só com o que mudou naquela parte. A cada novo PR, esta parte é atualizada.
 
 ## 3.1 API
 
@@ -653,7 +653,8 @@ Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validaç�
 | #14 | Swagger em grupos | 8 grupos com explicação (Dispositivos, Telemetria, Eventos, Comandos, Alertas, Lacres, Cilindros, Vínculos), sem grupo "default"; teste que barra rota sem grupo |
 | #15 | Integração Oxide ⇄ FluxID | Chave por hash; alerta volta à fila ao mudar de status; rotas `/sync/*` e grupo "Sincronização" |
 | #17 | Simulador e série do cilindro | Cadastro provisório de cilindro aceita série repetida (o código continua único); simulador `npm run simular` |
-| #20 | Oxide enxuta e envio ao Supabase | Posição e bateria obrigatórias em toda mensagem; `gps_ok`; alertas automáticos da própria mensagem; `GET /iot/messages` e `GET /health`; saem as rotas de lacres, cilindros, vínculos e de análise de alertas e a página da proposta do frontend; depois do teste em massa, as operações que gravam esperam a vez do Worker em vez de responder `500` |
+| #20 | Oxide enxuta e envio ao Supabase | Posição e bateria obrigatórias em toda mensagem; `gps_ok`; alertas automáticos da própria mensagem; `GET /iot/messages` e `GET /health`; saem as rotas de lacres, cilindros, vínculos e de análise de alertas e a página da proposta do frontend |
+| #21 | Teste do banco, teste em massa e modo WAL | As operações que gravam pedem a vez no início e esperam a do Worker, em vez de responder `500`; novo `npm run simular:massa` |
 
 ## 3.2 Oxide (`oxide.db`)
 
@@ -666,7 +667,8 @@ Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validaç�
 | #12 | Alertas em português | `alerts` com `CHECK` do catálogo em `alert_type`, colunas `resolved_by` e `resolution_note` e `CHECK` de `ENCERRADO` com data; migração automática dos tipos em inglês; `Oxidedb.md` v1.6 validado |
 | #15 | Integração Oxide ⇄ FluxID | `next_attempt_at` na telemetria e nos eventos; `sync_*` nos alertas; `devices.api_key_hash`; `fluxid_id` nos vínculos; tabela `sync_logs`; `Oxidedb.md` v1.7 |
 | #17 | Simulador e série do cilindro | `cylinders.serial_number` sem `UNIQUE` (série única só por empresa, no FluxID); migração preservando os dados; `Oxidedb.md` v1.8 |
-| #20 | Oxide enxuta e envio ao Supabase | De 11 para 3 tabelas (`devices`, `mensagens`, `commands`); migração com cópia de segurança (leituras antigas completas seguem para o banco principal; as demais ficam arquivadas); backup e retenção; `Oxidedb.md` v2.0; depois do teste do banco: migração refaz `devices` e `commands` no formato atual, cópia de segurança antes de qualquer mudança e modo WAL |
+| #20 | Oxide enxuta e envio ao Supabase | De 11 para 3 tabelas (`devices`, `mensagens`, `commands`); migração com cópia de segurança (leituras antigas completas seguem para o banco principal; as demais ficam arquivadas); backup e retenção; `Oxidedb.md` v2.0 |
+| #21 | Teste do banco, teste em massa e modo WAL | A migração refaz `devices` e `commands` no formato atual; cópia de segurança antes de qualquer mudança; modo WAL (de 40 para 588 pedidos por segundo no teste com 500 lacres); backup num arquivo só; `Oxidedb.md` 2.1 |
 
 ## 3.3 FluxID
 
@@ -700,4 +702,5 @@ Implementado e aprovado em 07/10/2026 (PR #15). O que levou até ele:
 | #13 | Alerta com cilindro e lacre | O Worker busca o lacre e o cilindro do vínculo válido na data do alerta; sem vínculo, o alerta fica em erro na Oxide para o gestor |
 | #15 | Integração Oxide ⇄ FluxID | Worker completo (`src/worker/`, `npm run worker`): envio da fila, tentativas, espera do P3, cadastro de volta com o hash da chave |
 | #17 | Simulador | O simulador exercita o Worker de ponta a ponta: cadastro sem conflitos, fila, FluxID fora do ar, espera do vínculo e reenvio |
-| #20 | Oxide enxuta e envio ao Supabase | Worker reescrito: envia a fila única por HTTP à função de recebimento do Supabase, com resultado por mensagem, e traz os dispositivos e os comandos; simulador novo com recebedor de teste; teste em massa (`npm run simular:massa`) com o Worker derrubado e religado no meio |
+| #20 | Oxide enxuta e envio ao Supabase | Worker reescrito: envia a fila única por HTTP à função de recebimento do Supabase, com resultado por mensagem, e traz os dispositivos e os comandos; simulador novo com recebedor de teste |
+| #21 | Teste do banco, teste em massa e modo WAL | Marcação do lote pede a vez de gravar no início; teste em massa com o Worker derrubado e religado no meio, sem perda e sem duplicidade |
