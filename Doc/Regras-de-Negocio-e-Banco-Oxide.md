@@ -22,11 +22,14 @@ Este documento descreve as regras que a API aplica hoje. O banco local está em 
 | `POST /api/v1/iot/activations` | O lacre avisa que foi ativado ou desativado | `202`; `400`; `401`; `403`; `404`; `409` |
 | `GET /api/v1/iot/commands/:deviceId` | Comandos pendentes do dispositivo | `200`; `401`; `403`; `404` |
 | `POST /api/v1/iot/commands/confirm` | Confirma execução ou erro de comando | `200`; `400`; `404`; `409` |
-| `GET /api/v1/iot/messages` | Últimas mensagens recebidas (aberta e provisória) | `200`; `400` |
-| `GET /api/v1/devices`, `GET /api/v1/devices/:deviceId` | Consulta de dispositivos, sem a chave | `200`; `404` |
-| `POST /api/v1/devices` | Cadastro provisório, para testes | `201`; `400`; `409` |
-| `GET /api/v1/sync/status`, `GET /api/v1/sync/problems`, `POST /api/v1/sync/retry` | Acompanhamento da fila (abertas e provisórias) | `200`; `400`; `404` |
+| `GET /api/v1/iot/messages` | Últimas mensagens recebidas (exige a chave de administrador) | `200`; `400`; `401`; `503` |
+| `GET /api/v1/devices`, `GET /api/v1/devices/:deviceId` | Consulta de dispositivos, sem a chave deles (exige a chave de administrador) | `200`; `401`; `404`; `503` |
+| `POST /api/v1/devices` | Cadastro de bancada, para testes (exige a chave de administrador). Só o hash da chave é guardado | `201`; `400`; `401`; `409`; `503` |
+| `GET /api/v1/sync/status`, `GET /api/v1/sync/problems`, `POST /api/v1/sync/retry` | Acompanhamento da fila (exigem a chave de administrador) | `200`; `400`; `401`; `404`; `503` |
 | `GET /health` | Saúde da API, da fila e do Worker | `200`; `503` |
+| `GET /metrics` | Números de funcionamento (exige a chave de administrador) | `200`; `401`; `503` |
+
+Toda rota do lacre também pode responder `429` (limite por minuto) e `413` (corpo acima de 32 KB).
 
 Não existem mais rotas de lacres, cilindros, vínculos, nem de análise e encerramento de alertas: isso é do sistema principal.
 
@@ -36,9 +39,12 @@ Não existem mais rotas de lacres, cilindros, vínculos, nem de análise e encer
 - Sem chave ou com chave desconhecida: `401`.
 - Dispositivo desativado: `403`.
 - A chave precisa ser do **próprio** `device_id` da mensagem: chave de outro dispositivo responde `403`, e `device_id` não cadastrado responde `404`.
-- Dispositivo vindo do banco principal é conferido pelo **hash** (SHA-256 da chave). A chave em texto guardada para ele não autentica.
+- Todo dispositivo é conferido pelo **hash** (SHA-256 da chave). A Oxide não guarda a chave em texto, nem a do cadastro de bancada.
 - A chave e o hash nunca aparecem nas respostas.
-- As rotas de dispositivos e de acompanhamento são abertas, por decisão do responsável, enquanto a equipe testa.
+- As rotas da equipe (dispositivos, mensagens, fila e métricas) exigem a **chave de administrador** no cabeçalho `X-Admin-Key`. Ela fica no `.env` (`ADMIN_API_KEY`) e precisa ter pelo menos 16 caracteres.
+- Sem chave de administrador configurada, as rotas da equipe respondem `503`. Com `ROTAS_DA_EQUIPE_ABERTAS=true`, ficam abertas, só para teste de bancada.
+- A chave do lacre não abre as rotas da equipe, e a de administrador não envia como lacre.
+- **Limites:** 120 mensagens por minuto por lacre; 60 chaves erradas por minuto por endereço (o endereço fica bloqueado até a janela acabar). Acima disso: `429`, com o tempo de espera em `Retry-After`.
 
 ## 4. Regras por tipo de mensagem
 
@@ -140,8 +146,7 @@ A API abre sozinha os alertas que saem da própria mensagem. Eles entram na fila
 ## 6. Fora do escopo implementado
 
 - Teste contra o Supabase de verdade: depende da função de recebimento e das tabelas do lacre, que ainda não estão no repositório do frontend.
-- Controle por perfil nas rotas abertas da equipe.
-- HTTPS e limite de requisições.
+- Usuários e perfis nas rotas da equipe: hoje há uma chave de administrador só. O controle por pessoa fica no sistema principal.
 - Aviso ativo ao motorista e ao gestor.
 
 ## 7. Histórico do documento
@@ -151,3 +156,4 @@ A API abre sozinha os alertas que saem da própria mensagem. Eles entram na fila
 | 1.x | até 07/10/2026 | Regras do modelo com filas separadas, cópia do cadastro de lacres e cilindros e envio ao FluxID |
 | 2.0 | 10/10/2026 | Modelo enxuto: fila única, posição e bateria obrigatórias, alertas automáticos só da própria mensagem e envio ao Supabase |
 | 2.1 | 10/10/2026 | Ativação do lacre, identificador gerado pela API e vínculo com o cilindro e o cliente (seção 4.8); alerta automático `LACRE_SEM_CILINDRO`. **Aprovado por Natã da Silva Baracho em 10/10/2026** |
+| 2.2 | 11/10/2026 | Chave de administrador nas rotas da equipe; chave do lacre só em hash; limites de requisições; rota `/metrics`. **Aprovado por Natã da Silva Baracho em 11/10/2026** |

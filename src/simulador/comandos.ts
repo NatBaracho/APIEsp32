@@ -99,7 +99,9 @@ async function main(): Promise<number> {
   const recebedor = await iniciarRecebedor();
   const ambiente = {
     PORT: String(PORTA), SUPABASE_IOT_URL: recebedor.url, SUPABASE_SERVICE_KEY: recebedor.chave,
-    WORKER_INTERVAL_SECONDS: "1", WORKER_CADASTRO_INTERVAL_SECONDS: "5", WORKER_BATCH_SIZE: "200"
+    WORKER_INTERVAL_SECONDS: "1", WORKER_CADASTRO_INTERVAL_SECONDS: "5", WORKER_BATCH_SIZE: "200",
+    // Todos os lacres do teste saem do mesmo endereço: o limite por endereço fica alto
+    LIMITE_FALHAS_DE_CHAVE_POR_MINUTO: "1000000"
   };
   const arquivo = path.join(pasta, "oxide.db");
   let api: ChildProcess | undefined;

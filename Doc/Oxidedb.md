@@ -30,9 +30,21 @@ Lacre ──► API (valida) ──► mensagens (fila) ──► Worker ──�
 
 | Tabela | Para quê |
 | --- | --- |
-| `devices` | Quem pode enviar: código, chave (ou o hash vindo do banco principal), ativo ou não, o **último estado recebido** (contato, posição, GPS, lacre, bateria e sinal), a **ativação** (identificador do lacre, ativo ou não) e o **vínculo atual** (cilindro e cliente) |
+| `devices` | Quem pode enviar: código, **hash** da chave (o texto da chave não é guardado), ativo ou não, o **último estado recebido** (contato, posição, GPS, lacre, bateria e sinal), a **ativação** (identificador do lacre, ativo ou não) e o **vínculo atual** (cilindro e cliente) |
 | `mensagens` | Fila única: leitura, evento, alerta, confirmação de comando e aviso de ativação, com a mensagem validada em JSON, a hora de chegada e a situação do envio |
 | `commands` | Comandos da válvula vindos do banco principal, que o lacre busca e confirma |
+
+### Por que três tabelas
+
+Em 11/10/2026 a quantidade de tabelas foi reavaliada. Ficam as três: é o mínimo para a API funcionar com o banco principal fora do ar.
+
+| Tabela | Por que não dá para tirar | Por que não dá para juntar |
+| --- | --- | --- |
+| `devices` | Sem ela, a API teria de perguntar ao banco principal a cada mensagem se a chave vale, e pararia quando ele caísse | Tem uma linha por lacre, atualizada a cada mensagem; a fila tem uma linha por mensagem, que não muda depois de enviada |
+| `mensagens` | É a fila: o que garante que nada se perde | Já junta leitura, evento, alerta, confirmação e ativação numa tabela só |
+| `commands` | Sem ela, o lacre não teria de onde buscar o comando com o banco principal fora do ar | O comando vem do sistema para o lacre, com outro ciclo (pendente, executado ou erro); na fila, tudo vai do lacre para o sistema |
+
+**Menos que três** obrigaria a misturar coisas de sentidos e ciclos diferentes numa tabela, com colunas vazias na maior parte das linhas. **Mais que três** traria de volta o que já foi tirado: cadastro e histórico, que são do banco principal. As métricas, os limites e os avisos do vigia ficam na memória e em arquivos, sem tabela.
 
 ### Ativação e vínculo (`devices`)
 
@@ -84,10 +96,19 @@ A API e o Worker são processos diferentes e gravam no mesmo arquivo.
 
 - **Modo WAL.** O banco anota as mudanças no arquivo `oxide.db-wal` e as passa depois para o `oxide.db`. Quem lê não trava quem grava. Ao lado do banco ficam `oxide.db-wal` e `oxide.db-shm` (os dois fora do Git).
 - **Vez de gravar.** Toda operação que grava pede a vez logo no início e espera a do outro processo (até 5 segundos), em vez de falhar.
+- **Gravação garantida.** A API só responde ao lacre depois que a mensagem está no disco (`synchronous = FULL`). Um corte de energia não leva o que já foi confirmado. `GRAVACAO_GARANTIDA=false` no `.env` troca para o modo rápido, em que um corte de energia pode levar as mensagens do último instante; o banco não corrompe em nenhum dos dois.
 - **Cópia do banco.** Com a API ligada, copiar só o `oxide.db` à mão pode levar uma cópia incompleta. Use sempre `npm run backup`: ele gera um arquivo só, completo.
 - **Pasta sincronizada (OneDrive e parecidos).** O sincronizador pode copiar o `oxide.db` sem os dois arquivos ao lado. Para o banco em uso, prefira uma pasta que não seja sincronizada.
 
-Medida no teste em massa de 10/10/2026 (500 lacres, 15.010 pedidos): 40 pedidos por segundo antes do modo WAL e 588 depois; a resposta mais lenta caiu de 7.258 ms para 220 ms.
+Medida no teste em massa (500 lacres, 40 enviando ao mesmo tempo, sem pausa):
+
+| Modo | Pedidos por segundo | Resposta mais lenta |
+| --- | --- | --- |
+| Antes do modo WAL (até 10/10/2026) | 40 | 7.258 ms |
+| WAL com gravação rápida | cerca de 600 | 220 a 328 ms |
+| WAL com gravação garantida (padrão desde 11/10/2026) | 226 | 3.046 ms |
+
+Os números de velocidade publicados em 10/10/2026 foram medidos no modo rápido, que era o padrão do componente de banco. Para comparar: 600 lacres enviando uma leitura por minuto são 10 pedidos por segundo.
 
 # 5. Script SQL de referência
 
@@ -193,8 +214,8 @@ Medido em 10/10/2026, com 600 lacres enviando uma leitura a cada 10 segundos e o
 | Leituras guardadas na fila em 1 hora | 215.869, sem nenhuma recusa |
 | Tamanho do banco no fim | 137 MB (cerca de 2,3 MB por minuto; 0,64 KB por leitura) |
 | Resposta mais lenta da API em toda a hora | 479 ms |
-| Tempo para a fila esvaziar na volta, com o Worker padrão | 37,5 minutos (96 mensagens por segundo) |
-| Com `WORKER_BATCH_SIZE=500` | cerca de 400 mensagens por segundo |
+| Tempo para a fila esvaziar na volta, com o Worker de 10/10/2026 | 37,5 minutos (96 mensagens por segundo; ele esperava 10 segundos a cada 1.000 mensagens) |
+| Com o Worker de 11/10/2026, que não espera quando há fila acumulada | de 500 a 700 mensagens por segundo, com lotes de 100 (medido numa queda de 10 minutos) |
 
 O arquivo só cresce enquanto o banco principal está fora: a limpeza nunca apaga o que ainda não foi enviado.
 
@@ -237,3 +258,4 @@ A lista completa dos endpoints está em [Como-o-Sistema-se-Comporta.md](Como-o-S
 | 2.2 | 10/10/2026 | Ativação e vínculo: colunas novas em `devices` (identificador do lacre, ativação, cilindro e cliente); tipo `ATIVACAO` em `mensagens`; cópia de segurança `bak-antes-da-atualizacao` para banco de versão anterior. **Aprovado por Natã da Silva Baracho em 10/10/2026** |
 | 2.3 | 10/10/2026 | Nova seção 8: como ver o que está na Oxide, pela API e direto no arquivo |
 | 2.4 | 10/10/2026 | Nova seção 6.1: crescimento do banco e tempo para a fila esvaziar, medidos no teste da queda de 1 hora |
+| 2.5 | 11/10/2026 | Chave do lacre só em hash; gravação garantida em disco; Worker sem pausa na volta; seção "Por que três tabelas". **Aprovado por Natã da Silva Baracho em 11/10/2026** |

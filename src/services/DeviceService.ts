@@ -1,6 +1,6 @@
 import { Device } from "../models/Device";
 import { DeviceRepository } from "../repositories/DeviceRepository";
-import { hashApiKey } from "../utils/apiKeyHash";
+import { hashApiKey, marcaSemChave } from "../utils/apiKeyHash";
 
 export type CreateDeviceResult =
   | "created"
@@ -57,10 +57,10 @@ export class DeviceService {
 
     }
 
-    if (
-      this.repository.findByApiKey(device.api_key) ||
-      this.repository.findByApiKeyHash(hashApiKey(device.api_key))
-    ) {
+    // Só o hash da chave é guardado; a chave em texto não fica na Oxide
+    const apiKeyHash = hashApiKey(device.api_key);
+
+    if (this.repository.findByApiKeyHash(apiKeyHash)) {
 
       console.log(
         "⚠️ API Key já usada por outro dispositivo"
@@ -70,9 +70,7 @@ export class DeviceService {
 
     }
 
-    this.repository.create(
-      device
-    );
+    this.repository.create({ ...device, api_key: marcaSemChave(), api_key_hash: apiKeyHash });
 
     console.log(
       "✅ Dispositivo criado:",

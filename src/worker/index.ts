@@ -1,5 +1,5 @@
 import { loadWorkerConfig } from "./config";
-import { resetInterrupted, runCycle } from "./runner";
+import { MAX_LOTES_POR_RODADA, resetInterrupted, runCycle } from "./runner";
 
 // Worker Oxide → banco principal (Supabase).
 //   npm run worker            roda sem parar (Ctrl+C encerra)
@@ -45,7 +45,12 @@ async function main(): Promise<void> {
       break;
     }
 
-    await new Promise(resolve => setTimeout(resolve, config.intervalSeconds * 1000));
+    // Fila acumulada (por exemplo, depois de uma queda do banco principal):
+    // a rodada enviou tudo o que podia, então a próxima começa em seguida
+    const filaAcumulada = result.status === "OK" && result.enviadas >= config.batchSize * MAX_LOTES_POR_RODADA;
+    if (!filaAcumulada) {
+      await new Promise(resolve => setTimeout(resolve, config.intervalSeconds * 1000));
+    }
   } while (!stopping);
 }
 

@@ -5,6 +5,9 @@
 import { execFileSync, spawn } from "child_process";
 import { createHash } from "crypto";
 import fs from "fs";
+import http from "http";
+import https from "https";
+import { AddressInfo } from "net";
 import os from "os";
 import path from "path";
 import Database from "better-sqlite3";
@@ -16,6 +19,11 @@ const BASE = `http://127.0.0.1:${PORTA}`;
 const pasta = fs.mkdtempSync(path.join(os.tmpdir(), "oxide-teste-"));
 process.chdir(pasta);
 process.env.PORT = String(PORTA);
+// Chave de administrador só desta suíte; os limites ficam altos para não atrapalhar os outros grupos
+const ADMIN = "chave-de-administrador-da-suite";
+process.env.ADMIN_API_KEY = ADMIN;
+process.env.LIMITE_MENSAGENS_POR_MINUTO = "1000000";
+process.env.LIMITE_FALHAS_DE_CHAVE_POR_MINUTO = "1000000";
 
 const resultados: Array<{ nome: string; passou: boolean }> = [];
 
@@ -50,11 +58,12 @@ async function main(): Promise<void> {
   const db = (require("../src/database/connection") as typeof import("../src/database/connection")).default;
   const { runCycle } = require("../src/worker/runner") as typeof import("../src/worker/runner");
   const { loadWorkerConfig } = require("../src/worker/config") as typeof import("../src/worker/config");
+  const { zerarLimites } = require("../src/middlewares/limite") as typeof import("../src/middlewares/limite");
   const openApiSpec = (require("../src/docs/openapi") as typeof import("../src/docs/openapi")).default as any;
   /* eslint-enable @typescript-eslint/no-require-imports */
 
   const api = async (metodo: string, rota: string, corpo?: unknown, chave?: string, cabecalho = "X-API-Key") => {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const headers: Record<string, string> = { "Content-Type": "application/json", "X-Admin-Key": ADMIN };
     if (chave) headers[cabecalho] = chave;
     const init: RequestInit = { method: metodo, headers };
     if (corpo !== undefined) init.body = typeof corpo === "string" ? corpo : JSON.stringify(corpo);
@@ -569,7 +578,7 @@ async function main(): Promise<void> {
       passou: tabelas === "commands,devices,mensagens" && arquivadas === 4 && completa.status === "PENDING" && semBateria === "ARQUIVADA" &&
         antigaMsg.type === "TELEMETRIA" && antigaMsg.latitude === -7.1 && antigaMsg.battery_percent === 57 && antigaMsg.gps_ok === true &&
         antigaMsg.seal_status === "LOCKED" && antigaMsg.legacy === true && !("gsm_signal" in antigaMsg) &&
-        dispositivo.api_key === "auto-DSP-000001" && comando === 1 &&
+        dispositivo.api_key.startsWith("sem-chave-em-texto:") && comando === 1 &&
         !colunas.includes("device_status_id") && colunas.includes("last_contact_at") && copias.length === 1 && naCopia === 3 &&
         saida.includes("Cópia de segurança") && !segundaVez.includes("Cópia de segurança"),
       detalhe: `1 leitura completa na fila; ${arquivadas} arquivadas; cópia com ${naCopia} telemetrias; segunda execução não repete`
@@ -1008,6 +1017,352 @@ async function main(): Promise<void> {
     await worker();
     const destino = recebedor.mensagens.get("M-CORRIDA-1") as any;
     return { passou: repetida.status === 200 && linha.status === "PENDING" && depois === "PENDING" && typeof destino?.last_seen_at === "string" };
+  });
+
+  // -------------------------------------------------------- [14] segurança
+  console.log("\n--- [14] Segurança: chave de administrador, chave só em hash, limites e HTTPS ---");
+  // Pedido sem nenhum cabeçalho além dos informados
+  const cru = async (metodo: string, rota: string, cabecalhos: Record<string, string> = {}, corpo?: unknown) => {
+    const init: RequestInit = { method: metodo, headers: { "Content-Type": "application/json", ...cabecalhos } };
+    if (corpo !== undefined) init.body = typeof corpo === "string" ? corpo : JSON.stringify(corpo);
+    const res = await fetch(`${BASE}${rota}`, init);
+    return { status: res.status, json: (await res.clone().json().catch(() => null)) as any, texto: await res.text(), headers: res.headers };
+  };
+  let passoS = 0;
+  const telS = (id: string) => tel(id, { latitude: -8 - (++passoS) / 1000 });
+  const rotasDaEquipe: Array<[string, string, unknown?]> = [
+    ["GET", "/api/v1/devices"], ["GET", `/api/v1/devices/${DEV}`], ["POST", "/api/v1/devices", { device_id: "DSP-TEST-INVASOR", api_key: "chave-do-invasor" }],
+    ["GET", "/api/v1/iot/messages"], ["GET", "/api/v1/sync/status"], ["GET", "/api/v1/sync/problems"],
+    ["POST", "/api/v1/sync/retry", { message_id: "M-T1" }], ["GET", "/metrics"]
+  ];
+
+  await teste("Rotas da equipe sem a chave de administrador -> 401, e nada é gravado", async () => {
+    const respostas = [];
+    for (const [metodo, rota, corpo] of rotasDaEquipe) respostas.push((await cru(metodo, rota, {}, corpo)).status);
+    const criado = umaLinha<any>("SELECT count(*) AS n FROM devices WHERE device_id = 'DSP-TEST-INVASOR'").n;
+    return { passou: respostas.every(s => s === 401) && criado === 0, detalhe: `${respostas.length} rotas: ${respostas.join(", ")}` };
+  });
+  await teste("Chave de administrador errada -> 401; certa -> a rota responde", async () => {
+    const errada = await cru("GET", "/api/v1/devices", { "X-Admin-Key": "chave-errada-de-administrador" });
+    const certa = await cru("GET", "/api/v1/devices", { "X-Admin-Key": ADMIN });
+    const metricas = await cru("GET", "/metrics", { "X-Admin-Key": ADMIN });
+    return { passou: errada.status === 401 && certa.status === 200 && Array.isArray(certa.json) && metricas.status === 200 };
+  });
+  await teste("A chave do lacre não abre as rotas da equipe, e a de administrador não envia como lacre", async () => {
+    const lacreNaEquipe = await cru("GET", "/api/v1/devices", { "X-API-Key": KEY });
+    const lacreComoAdmin = await cru("GET", "/api/v1/devices", { "X-Admin-Key": KEY });
+    const adminComoLacre = await cru("POST", "/api/v1/iot/telemetries", { "X-API-Key": ADMIN }, { message_id: "M-SEG-ADM", device_id: DEV, ...POS });
+    return { passou: lacreNaEquipe.status === 401 && lacreComoAdmin.status === 401 && adminComoLacre.status === 401 && total("message_id = 'M-SEG-ADM'") === 0 };
+  });
+  await teste("Sem chave de administrador configurada (ou curta demais), as rotas da equipe ficam fechadas -> 503", async () => {
+    delete process.env.ADMIN_API_KEY;
+    const semChave = await cru("GET", "/api/v1/devices", { "X-Admin-Key": ADMIN });
+    const saudeFechada = (await cru("GET", "/health")).json.rotas_da_equipe;
+    process.env.ADMIN_API_KEY = "curta";
+    const curta = await cru("GET", "/api/v1/devices", { "X-Admin-Key": "curta" });
+    process.env.ADMIN_API_KEY = ADMIN;
+    const lacre = await telS("M-SEG-503");
+    return { passou: semChave.status === 503 && curta.status === 503 && saudeFechada === "FECHADAS_SEM_CHAVE_CONFIGURADA" && lacre.status === 202, detalhe: "as rotas do lacre continuam funcionando" };
+  });
+  await teste("ROTAS_DA_EQUIPE_ABERTAS=true abre as rotas sem chave (teste de bancada), e o /health avisa", async () => {
+    process.env.ROTAS_DA_EQUIPE_ABERTAS = "true";
+    const aberta = await cru("GET", "/api/v1/devices");
+    const aviso = (await cru("GET", "/health")).json.rotas_da_equipe;
+    delete process.env.ROTAS_DA_EQUIPE_ABERTAS;
+    const fechada = await cru("GET", "/api/v1/devices");
+    const normal = (await cru("GET", "/health")).json.rotas_da_equipe;
+    return { passou: aberta.status === 200 && aviso === "ABERTAS_SEM_CHAVE" && fechada.status === 401 && normal === "PROTEGIDAS" };
+  });
+  await teste("Cadastro de bancada guarda só o hash da chave: o texto da chave não fica em lugar nenhum do banco", async () => {
+    const chave = "chave-de-bancada-para-o-teste";
+    const criado = await api("POST", "/api/v1/devices", { device_id: "DSP-TEST-SEG", api_key: chave });
+    const repetida = await api("POST", "/api/v1/devices", { device_id: "DSP-TEST-SEG-2", api_key: chave });
+    const d = umaLinha<any>("SELECT api_key, api_key_hash FROM devices WHERE device_id = 'DSP-TEST-SEG'");
+    const emTexto = umaLinha<any>("SELECT count(*) AS n FROM devices WHERE api_key = ?", chave).n;
+    const entra = await api("POST", "/api/v1/iot/telemetries", { message_id: "M-SEG-1", device_id: "DSP-TEST-SEG", ...POS }, chave);
+    const comAMarca = await api("POST", "/api/v1/iot/telemetries", { message_id: "M-SEG-2", device_id: "DSP-TEST-SEG", ...POS }, d.api_key);
+    return {
+      passou: criado.status === 201 && repetida.status === 409 && d.api_key.startsWith("sem-chave-em-texto:") && d.api_key_hash === sha(chave) &&
+        emTexto === 0 && entra.status === 202 && comAMarca.status === 401
+    };
+  });
+  await teste("Nenhum dispositivo do banco tem chave em texto", () => {
+    const comTexto = umaLinha<any>("SELECT count(*) AS n FROM devices WHERE api_key_hash IS NOT NULL AND api_key NOT LIKE 'sem-chave-em-texto:%'").n;
+    return { passou: comTexto === 0, detalhe: `${comTexto} com chave em texto` };
+  });
+  await teste("Banco de versão anterior: a chave em texto vira hash e o lacre continua entrando com a mesma chave", () => {
+    const migrado = new Database(path.join(pastaAntiga, "oxide.db"), { readonly: true });
+    const d = migrado.prepare("SELECT * FROM devices WHERE device_id = 'DSP-000001'").get() as any;
+    migrado.close();
+    /* eslint-disable-next-line @typescript-eslint/no-require-imports */
+    const { deviceAcceptsKey } = require("../src/utils/apiKeyHash") as typeof import("../src/utils/apiKeyHash");
+    return {
+      passou: d.api_key.startsWith("sem-chave-em-texto:") && d.api_key_hash === sha("auto-DSP-000001") &&
+        deviceAcceptsKey(d, "auto-DSP-000001") && !deviceAcceptsKey(d, d.api_key) && !deviceAcceptsKey(d, "")
+    };
+  });
+  await teste("Limite por dispositivo: passou do limite por minuto -> 429 com o tempo de espera; outro lacre não é afetado", async () => {
+    zerarLimites();
+    process.env.LIMITE_MENSAGENS_POR_MINUTO = "5";
+    const respostas = [];
+    for (let i = 0; i < 7; i++) respostas.push(await api("POST", "/api/v1/iot/events", { message_id: `M-LIM-${i}`, device_id: "DSP-TEST-SEG", event_type: "startup", ...POS }, "chave-de-bancada-para-o-teste"));
+    const outro = await telS("M-LIM-OUTRO");
+    const bloqueada = await fetch(`${BASE}/api/v1/iot/events`, { method: "POST", headers: { "Content-Type": "application/json", "X-API-Key": "chave-de-bancada-para-o-teste" }, body: JSON.stringify({ message_id: "M-LIM-9", device_id: "DSP-TEST-SEG", event_type: "startup", ...POS }) });
+    const espera = Number(bloqueada.headers.get("retry-after"));
+    process.env.LIMITE_MENSAGENS_POR_MINUTO = "1000000";
+    zerarLimites();
+    const depois = await api("POST", "/api/v1/iot/events", { message_id: "M-LIM-10", device_id: "DSP-TEST-SEG", event_type: "startup", ...POS }, "chave-de-bancada-para-o-teste");
+    const status = respostas.map(r => r.status).join(",");
+    return {
+      passou: status === "202,202,202,202,202,429,429" && outro.status === 202 && bloqueada.status === 429 && espera >= 1 && espera <= 60 &&
+        total("message_id IN ('M-LIM-5', 'M-LIM-6', 'M-LIM-9')") === 0 && depois.status === 202,
+      detalhe: `${status}; Retry-After: ${espera} s`
+    };
+  });
+  await teste("Limite de chave errada: endereço que erra demais fica bloqueado (429), inclusive com a chave certa, até a janela acabar", async () => {
+    zerarLimites();
+    process.env.LIMITE_FALHAS_DE_CHAVE_POR_MINUTO = "5";
+    const erros = [];
+    for (let i = 0; i < 5; i++) erros.push((await cru("POST", "/api/v1/iot/telemetries", { "X-API-Key": `tentativa-${i}` }, { message_id: `M-FORCA-${i}`, device_id: DEV, ...POS })).status);
+    const lacre = await cru("POST", "/api/v1/iot/telemetries", { "X-API-Key": KEY }, { message_id: "M-FORCA-OK", device_id: DEV, ...POS });
+    const equipe = await cru("GET", "/api/v1/devices", { "X-Admin-Key": ADMIN });
+    process.env.LIMITE_FALHAS_DE_CHAVE_POR_MINUTO = "1000000";
+    zerarLimites();
+    const liberado = await telS("M-FORCA-DEPOIS");
+    return {
+      passou: erros.every(s => s === 401) && lacre.status === 429 && equipe.status === 429 && Number(lacre.headers.get("retry-after")) >= 1 &&
+        total("message_id = 'M-FORCA-OK'") === 0 && liberado.status === 202,
+      detalhe: `5 erros -> ${lacre.status} para o lacre e ${equipe.status} para a equipe`
+    };
+  });
+  await teste("Cabeçalhos de proteção em toda resposta; a API não diz qual programa é", async () => {
+    const r = await cru("GET", "/api/v1/sync/status", { "X-Admin-Key": ADMIN });
+    const inicio = await cru("GET", "/");
+    return {
+      passou: r.headers.get("x-content-type-options") === "nosniff" && r.headers.get("x-frame-options") === "DENY" && r.headers.get("referrer-policy") === "no-referrer" &&
+        r.headers.get("cache-control") === "no-store" && r.headers.get("x-powered-by") === null && inicio.headers.get("x-powered-by") === null
+    };
+  });
+  await teste("Corpo maior que 32 KB -> 413, sem gravar", async () => {
+    const r = await cru("POST", "/api/v1/iot/events", { "X-API-Key": KEY }, { message_id: "M-GRANDE", device_id: DEV, event_type: "startup", ...POS, description: "x".repeat(40000) });
+    return { passou: r.status === 413 && total("message_id = 'M-GRANDE'") === 0 };
+  });
+  await teste("Nenhuma chave aparece nas respostas de /health e de /metrics", async () => {
+    const saude = await cru("GET", "/health");
+    const metricas = await cru("GET", "/metrics", { "X-Admin-Key": ADMIN });
+    const segredos = [ADMIN, recebedor.chave, KEY, sha(KEY)];
+    return { passou: segredos.every(s => !saude.texto.includes(s) && !metricas.texto.includes(s)) };
+  });
+  await teste("Swagger: as rotas da equipe declaram a chave de administrador, e as do lacre, a chave do dispositivo e o limite (429)", () => {
+    const erradas: string[] = [];
+    for (const [rota, ops] of Object.entries<any>(openApiSpec.paths)) {
+      for (const [metodo, op] of Object.entries<any>(ops)) {
+        const esquema = Object.keys(op.security?.[0] ?? {})[0];
+        const doLacre = op.tags.includes("Lacre") || op.tags.includes("Comandos");
+        const aberta = rota === "/health";
+        const certo = aberta ? esquema === undefined : doLacre ? esquema === "ApiKeyAuth" && "429" in op.responses : esquema === "AdminKeyAuth" && "401" in op.responses;
+        if (!certo) erradas.push(`${metodo} ${rota}`);
+      }
+    }
+    return { passou: erradas.length === 0 && "/metrics" in openApiSpec.paths, detalhe: erradas.join(", ") || `${Object.keys(openApiSpec.paths).length} rotas conferidas` };
+  });
+  await teste("HTTPS: com o certificado no .env, a API atende em HTTPS e não em HTTP", async () => {
+    const pastaHttps = fs.mkdtempSync(path.join(os.tmpdir(), "oxide-https-"));
+    const cert = path.join(pastaHttps, "cert.pem");
+    const key = path.join(pastaHttps, "key.pem");
+    // Certificado de teste, feito na hora e só para este caso
+    const configuracao = path.join(pastaHttps, "openssl.cnf");
+    fs.writeFileSync(configuracao, ["[req]", "distinguished_name = dn", "prompt = no", "[dn]", "CN = localhost", ""].join("\n"));
+    execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-config", configuracao, "-keyout", key, "-out", cert],
+      { stdio: "ignore", env: { ...process.env, OPENSSL_CONF: configuracao } });
+    const porta = PORTA - 4;
+    const filho = spawn(process.execPath, ["--require", path.join(PROJETO, "node_modules", "ts-node", "register"), path.join(PROJETO, "src/server.ts")], {
+      cwd: pastaHttps, stdio: "ignore",
+      env: { ...process.env, TS_NODE_PROJECT: path.join(PROJETO, "tsconfig.json"), PORT: String(porta), HTTPS_CERT_FILE: cert, HTTPS_KEY_FILE: key }
+    });
+    const pedir = (): Promise<{ status: number; corpo: string; hsts: string | undefined }> => new Promise((resolve, reject) => {
+      const req = https.request({ host: "127.0.0.1", port: porta, path: "/", method: "GET", rejectUnauthorized: false }, res => {
+        let corpo = "";
+        res.on("data", d => { corpo += String(d); });
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, corpo, hsts: res.headers["strict-transport-security"] as string | undefined }));
+      });
+      req.on("error", reject);
+      req.end();
+    });
+    try {
+      let resposta: { status: number; corpo: string; hsts: string | undefined } | undefined;
+      for (let i = 0; i < 100 && !resposta; i++) {
+        resposta = await pedir().catch(() => undefined);
+        if (!resposta) await new Promise(resolve => setTimeout(resolve, 300));
+      }
+      const emHttp = await fetch(`http://127.0.0.1:${porta}/`).then(r => r.status).catch(() => 0);
+      return {
+        passou: resposta?.status === 200 && resposta.corpo.includes("API ESP32 Online") && Boolean(resposta.hsts) && emHttp === 0,
+        detalhe: `HTTPS: ${resposta?.status}; HTTP na mesma porta: ${emHttp === 0 ? "recusado" : emHttp}`
+      };
+    } finally {
+      await new Promise<void>(resolve => { filho.once("exit", () => resolve()); filho.kill(); });
+    }
+  });
+
+  // --------------------------------------------------------- [15] operação
+  console.log("\n--- [15] Operação: métricas, vigia e serviço que religa sozinho ---");
+  await teste("GET /metrics: pedidos, respostas, tempos, fila e banco", async () => {
+    const m = (await cru("GET", "/metrics", { "X-Admin-Key": ADMIN })).json;
+    const rota = m.pedidos.por_rota.find((r: any) => r.rota === "POST /api/v1/iot/telemetries");
+    return {
+      passou: m.pedidos.total > 100 && m.pedidos.respostas_2xx > 0 && m.pedidos.respostas_4xx > 0 && m.pedidos.recusados_por_limite_429 >= 3 &&
+        rota?.total > 10 && rota.media_ms >= 0 && m.tempo_de_resposta_ms.p95 >= m.tempo_de_resposta_ms.metade_ate &&
+        typeof m.fila.pendentes === "number" && typeof m.fila.mais_antiga_esperando_segundos === "number" && m.banco.arquivo_bytes > 0 && m.memoria_mb > 0 &&
+        !m.pedidos.por_rota.some((r: any) => r.rota.includes(DEV)),
+      detalhe: `${m.pedidos.total} pedidos; ${m.pedidos.por_rota.length} rotas; 95% em até ${m.tempo_de_resposta_ms.p95} ms`
+    };
+  });
+  await teste("GET /metrics?formato=prometheus: o mesmo em texto", async () => {
+    const r = await cru("GET", "/metrics?formato=prometheus", { "X-Admin-Key": ADMIN });
+    return { passou: r.status === 200 && /^oxide_pedidos_total \d+$/m.test(r.texto) && r.texto.includes('oxide_fila{situacao="pendentes"}') && (r.headers.get("content-type") ?? "").startsWith("text/plain") };
+  });
+  await teste("Fila: a idade da mensagem mais antiga à espera aparece nas métricas", async () => {
+    await telS("M-IDADE-1");
+    db.prepare("UPDATE mensagens SET received_at = datetime('now', '-10 minutes') WHERE message_id = 'M-IDADE-1'").run();
+    const antes = (await cru("GET", "/metrics", { "X-Admin-Key": ADMIN })).json.fila.mais_antiga_esperando_segundos;
+    await worker();
+    const depois = (await cru("GET", "/metrics", { "X-Admin-Key": ADMIN })).json.fila;
+    return { passou: antes >= 590 && antes <= 700 && depois.pendentes === 0 && depois.mais_antiga_esperando_segundos <= 60, detalhe: `${antes} s antes do envio` };
+  });
+
+  // Recebe os avisos do vigia, no lugar de um chat ou de um celular
+  const avisos: any[] = [];
+  const caixa = http.createServer((req, res) => {
+    let bruto = "";
+    req.on("data", d => { bruto += String(d); });
+    req.on("end", () => { avisos.push(JSON.parse(bruto)); res.end("ok"); });
+  });
+  await new Promise<void>(resolve => caixa.listen(0, "127.0.0.1", resolve));
+  const enderecoDaCaixa = `http://127.0.0.1:${(caixa.address() as AddressInfo).port}/aviso`;
+  const vigia = (env: Record<string, string>): { codigo: number; saida: string } => {
+    try {
+      return { codigo: 0, saida: rodar("src/manutencao/vigia.ts", pasta, ["--once"], { VIGIA_API_URL: BASE, ...env }) };
+    } catch (erro: any) {
+      return { codigo: erro.status ?? -1, saida: String(erro.stdout ?? "") };
+    }
+  };
+  // O vigia é outro processo: precisa da resposta desta API enquanto roda
+  const vigiaEmParalelo = (env: Record<string, string>): Promise<{ codigo: number; saida: string }> => new Promise(resolve => {
+    const filho = spawn(process.execPath, ["--require", path.join(PROJETO, "node_modules", "ts-node", "register"), path.join(PROJETO, "src/manutencao/vigia.ts"), "--once"], {
+      cwd: pasta, env: { ...process.env, TS_NODE_PROJECT: path.join(PROJETO, "tsconfig.json"), VIGIA_API_URL: BASE, ...env }
+    });
+    let saida = "";
+    filho.stdout.on("data", d => { saida += String(d); });
+    filho.stderr.on("data", d => { saida += String(d); });
+    filho.on("close", codigo => resolve({ codigo: codigo ?? -1, saida }));
+  });
+  void vigia;
+
+  await teste("Vigia: com tudo normal, não avisa nada", async () => {
+    await worker();
+    const r = await vigiaEmParalelo({ VIGIA_WEBHOOK_URL: enderecoDaCaixa });
+    return { passou: r.codigo === 0 && r.saida.includes("tudo certo") && avisos.length === 0, detalhe: r.saida.trim().split("\n").pop() };
+  });
+  await teste("Vigia: fila grande, fila atrasada e mensagem parada viram aviso na tela, no arquivo e no endereço configurado", async () => {
+    await telS("M-VIGIA-1");
+    await telS("M-VIGIA-2");
+    db.prepare("UPDATE mensagens SET received_at = datetime('now', '-45 minutes') WHERE message_id = 'M-VIGIA-1'").run();
+    db.prepare("UPDATE mensagens SET status = 'ERROR', next_attempt_at = NULL, last_error = 'recusada no teste' WHERE message_id = 'M-VIGIA-2'").run();
+    const r = await vigiaEmParalelo({ VIGIA_WEBHOOK_URL: enderecoDaCaixa, VIGIA_FILA_MAXIMA: "0" });
+    const arquivo = fs.readFileSync(path.join(pasta, "oxide-alertas.log"), "utf8");
+    const nomes = avisos.map(a => a.problema).sort().join(",");
+    db.prepare("UPDATE mensagens SET status = 'PENDING', last_error = NULL WHERE message_id = 'M-VIGIA-2'").run();
+    await worker();
+    return {
+      passou: r.codigo === 1 && nomes === "FILA_ATRASADA,FILA_GRANDE,MENSAGENS_PARADAS" && avisos.every(a => a.situacao === "ABERTO" && typeof a.text === "string") &&
+        ["FILA_GRANDE", "FILA_ATRASADA", "MENSAGENS_PARADAS"].every(n => arquivo.includes(`ABERTO ${n}`) && r.saida.includes(n)),
+      detalhe: nomes
+    };
+  });
+  await teste("Vigia: API fora do ar, banco principal fora do ar e Worker parado viram aviso", async () => {
+    avisos.length = 0;
+    recebedor.foraDoAr = true;
+    await worker();
+    const fora = await vigiaEmParalelo({ VIGIA_WEBHOOK_URL: enderecoDaCaixa, VIGIA_API_URL: "http://127.0.0.1:9" });
+    recebedor.foraDoAr = false;
+    await worker();
+    const arquivoDaRodada = path.join(pasta, "oxide-worker.json");
+    const rodada = JSON.parse(fs.readFileSync(arquivoDaRodada, "utf8"));
+    fs.writeFileSync(arquivoDaRodada, JSON.stringify({ ...rodada, em: new Date(Date.now() - 20 * 60000).toISOString() }));
+    const parado = await vigiaEmParalelo({});
+    await worker();
+    const nomes = avisos.map(a => a.problema).sort().join(",");
+    return { passou: fora.codigo === 1 && nomes === "API_FORA_DO_AR,BANCO_PRINCIPAL_FORA_DO_AR" && parado.codigo === 1 && parado.saida.includes("WORKER_PARADO"), detalhe: `${nomes}; depois WORKER_PARADO` };
+  });
+  await new Promise<void>(resolve => caixa.close(() => resolve()));
+
+  await teste("Serviço (npm run servico): liga a API e o Worker, religa a API derrubada e para quando pedem", async () => {
+    const pastaServico = fs.mkdtempSync(path.join(os.tmpdir(), "oxide-servico-"));
+    const porta = PORTA - 5;
+    const env = { ...process.env, TS_NODE_PROJECT: path.join(PROJETO, "tsconfig.json"), PORT: String(porta), SUPABASE_IOT_URL: recebedor.url, SUPABASE_SERVICE_KEY: recebedor.chave, VIGIA_INTERVALO_S: "5" };
+    const comando = ["--require", path.join(PROJETO, "node_modules", "ts-node", "register"), path.join(PROJETO, "src/manutencao/servico.ts")];
+    const servico = spawn(process.execPath, comando, { cwd: pastaServico, stdio: "ignore", env });
+    const terminou = new Promise<void>(resolve => servico.once("exit", () => resolve()));
+    const noAr = async (): Promise<boolean> => fetch(`http://127.0.0.1:${porta}/`).then(r => r.ok).catch(() => false);
+    const esperar = async (condicao: () => Promise<boolean> | boolean, segundos: number): Promise<boolean> => {
+      for (let i = 0; i < segundos * 4; i++) {
+        if (await condicao()) return true;
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+      return false;
+    };
+    const estado = (): any => JSON.parse(fs.readFileSync(path.join(pastaServico, "oxide-servico.json"), "utf8"));
+    try {
+      const subiu = await esperar(noAr, 60);
+      const workerRodou = await esperar(() => fs.existsSync(path.join(pastaServico, "oxide-worker.json")), 60);
+      const antes = estado().partes.api.pid as number;
+      process.kill(antes);
+      const caiu = await esperar(async () => !(await noAr()), 10);
+      const voltou = await esperar(noAr, 60);
+      const depois = estado().partes.api.pid as number;
+      const logs = fs.readdirSync(path.join(pastaServico, "logs")).join(",");
+      execFileSync(process.execPath, [...comando, "--parar"], { cwd: pastaServico, env });
+      await Promise.race([terminou, new Promise(resolve => setTimeout(resolve, 15000))]);
+      const parou = await esperar(async () => !(await noAr()), 15);
+      return {
+        passou: subiu && workerRodou && caiu && voltou && depois !== antes && logs.includes("api-") && logs.includes("servico-") && servico.exitCode === 0 && parou,
+        detalhe: `API religada (processo ${antes} -> ${depois}); serviço parou a pedido`
+      };
+    } finally {
+      if (servico.exitCode === null) servico.kill();
+    }
+  });
+
+  // --------------------------------------------------- [16] mesmo instante
+  console.log("\n--- [16] Mesma mensagem no mesmo instante ---");
+  await teste("20 envios iguais ao mesmo tempo: um é aceito, os outros recebem 409, e fica uma linha só", async () => {
+    const corpo = { message_id: "M-JUNTAS-1", device_id: DEV, ...POS, latitude: -7.777, longitude: -39.777 };
+    const respostas = await Promise.all(Array.from({ length: 20 }, () => api("POST", "/api/v1/iot/telemetries", corpo, KEY)));
+    const aceitas = respostas.filter(r => r.status === 202).length;
+    const repetidas = respostas.filter(r => r.status === 409).length;
+    return { passou: aceitas === 1 && repetidas === 19 && total("message_id = 'M-JUNTAS-1'") === 1, detalhe: `${aceitas} aceita, ${repetidas} com 409` };
+  });
+  await teste("20 alertas iguais e 20 ativações iguais ao mesmo tempo: um de cada, e um identificador só", async () => {
+    const alerta = { alert_id: "A-JUNTOS-1", device_id: DEV, alert_type: "GPS_INATIVO", title: "GPS não responde", ...POS };
+    const ativacao = { message_id: "ATV-JUNTAS-1", device_id: V4.id, status: "ATIVO", ...POS };
+    const [alertas20, ativacoes20] = await Promise.all([
+      Promise.all(Array.from({ length: 20 }, () => api("POST", "/api/v1/iot/alerts", alerta, KEY))),
+      Promise.all(Array.from({ length: 20 }, () => api("POST", "/api/v1/iot/activations", ativacao, V4.key)))
+    ]);
+    const codigos = new Set(ativacoes20.filter(r => r.status === 202).map(r => r.json.seal_code));
+    return {
+      passou: alertas20.filter(r => r.status === 201).length === 1 && alertas20.filter(r => r.status === 409).length === 19 &&
+        ativacoes20.filter(r => r.status === 202).length === 1 && codigos.size === 1 && total("message_id IN ('A-JUNTOS-1', 'ATV-JUNTAS-1')") === 2
+    };
+  });
+  await teste("Dois lacres diferentes com o mesmo message_id ao mesmo tempo: só um grava (o código é único na fila toda)", async () => {
+    const [a, b] = await Promise.all([
+      api("POST", "/api/v1/iot/events", { message_id: "M-JUNTAS-2", device_id: DEV, event_type: "startup", ...POS }, KEY),
+      api("POST", "/api/v1/iot/events", { message_id: "M-JUNTAS-2", device_id: V4.id, event_type: "startup", ...POS }, V4.key)
+    ]);
+    const status = [a.status, b.status].sort().join(",");
+    return { passou: status === "202,409" && total("message_id = 'M-JUNTAS-2'") === 1, detalhe: status };
   });
 
   // ---------------------------------------------------------------- resumo

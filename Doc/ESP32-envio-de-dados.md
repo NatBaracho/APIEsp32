@@ -34,7 +34,7 @@ Todas começam com `http://<IP_DA_API>:3000/api/v1`.
 | `GET /iot/commands/{device_id}` | Buscar comandos de válvula pendentes | 6 |
 | `POST /iot/commands/confirm` | Confirmar o comando executado | 6 |
 
-Rotas para a equipe acompanhar os testes (abertas e provisórias, não são para o firmware): `GET /iot/messages`, `GET /devices` e `GET /devices/{device_id}`.
+Rotas para a equipe acompanhar os testes (exigem a chave de administrador, `X-Admin-Key`; não são para o firmware): `GET /iot/messages`, `GET /devices` e `GET /devices/{device_id}`.
 
 Deixaram de existir: `GET /iot/telemetries` (a consulta agora é `GET /iot/messages?type=TELEMETRIA`) e as rotas de lacres, cilindros e vínculos.
 
@@ -310,6 +310,8 @@ Os comandos são criados no sistema principal. Não existe rota para o lacre cri
 | `409` | A API já tinha a mensagem | Dá por entregue; não reenvia |
 | `400` | Mensagem incompleta ou com valor inválido | Não reenvia igual: é erro do firmware |
 | `401`, `403`, `404` | Chave ou cadastro | Não insiste; conferir a chave e o cadastro |
+| `413` | Corpo acima de 32 KB | Não reenvia igual; reduzir o conteúdo |
+| `429` | Passou de 120 mensagens por minuto, ou o endereço errou a chave vezes demais | Espera os segundos do cabeçalho `Retry-After` e envia de novo, com o mesmo `message_id` |
 | `500` ou sem resposta | Falha da API ou da rede | Guarda e tenta de novo, com o **mesmo** `message_id` e `attempt_count + 1` |
 
 ---
@@ -414,7 +416,8 @@ A API guarda as mensagens até o Worker entregá-las ao banco principal. O cadas
 4. Sem sinal de GPS, enviar a última posição com `gps_ok: false`.
 5. Informar o estado do lacre em `seal_status`; a API abre os alertas de lacre aberto ou rompido.
 6. Buscar os comandos com frequência e confirmar cada um.
-7. Tratar `200`, `201`, `202` e `409` como sucesso; não reenviar `400`, `401`, `403` e `404`; reenviar em `500` ou sem resposta.
+7. Tratar `200`, `201`, `202` e `409` como sucesso; não reenviar `400`, `401`, `403`, `404` e `413`; em `429`, esperar e reenviar; reenviar em `500` ou sem resposta.
+8. Não insistir quando a chave for recusada (`401` ou `403`): muitas tentativas seguidas bloqueiam o endereço por até 1 minuto.
 
 ---
 
@@ -425,3 +428,4 @@ A API guarda as mensagens até o Worker entregá-las ao banco principal. O cadas
 | 1.x | até 07/10/2026 | Contrato antigo: posição e bateria opcionais, tabelas `telemetry_queue`, `events` e `alerts`, rotas de lacres e cilindros na API, cadastro no FluxID |
 | 2.0 | 10/10/2026 | Reescrito para o contrato atual: posição e bateria obrigatórias, `gps_ok`, aviso de ativação com o identificador do lacre, fila única, alertas automáticos e Supabase como banco principal |
 | 2.1 | 10/10/2026 | Porta (3000) e endereço da API explícitos na seção de rotas |
+| 2.2 | 11/10/2026 | Respostas `429` e `413`; rotas da equipe com chave de administrador |

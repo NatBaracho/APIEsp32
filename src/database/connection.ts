@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import path from "path";
+import { PREFIXO_SEM_CHAVE, hashApiKey, marcaSemChave } from "../utils/apiKeyHash";
 
 // Oxide: fila local da API (oxide.db), com três tabelas.
 //   devices   - quem pode enviar (chave do lacre), o último estado conhecido
@@ -17,6 +18,11 @@ db.pragma("foreign_keys = ON");
 // Cria os arquivos oxide.db-wal e oxide.db-shm ao lado do banco; para copiar
 // o banco com a API ligada, usar sempre npm run backup
 db.pragma("journal_mode = WAL");
+// Gravação garantida (padrão): cada mensagem só é dada como recebida depois de
+// estar no disco, e um corte de energia não leva o que a API já confirmou ao
+// lacre. Com GRAVACAO_GARANTIDA=false a API fica mais rápida, mas um corte de
+// energia pode levar as mensagens do último instante (o banco não corrompe)
+db.pragma(`synchronous = ${process.env.GRAVACAO_GARANTIDA === "false" ? "NORMAL" : "FULL"}`);
 
 const tabelaExiste = (nome: string): boolean =>
   Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(nome));
@@ -205,6 +211,18 @@ if (chavesRepetidas.length === 0) {
 
 const soltas = db.pragma("foreign_key_check") as unknown[];
 if (soltas.length > 0) console.warn(`⚠️ ${soltas.length} linha(s) apontam para um dispositivo que não existe`);
+
+// Chave em texto de versão anterior: fica só o hash. O lacre continua
+// entrando com a mesma chave
+const comChaveEmTexto = db.prepare("SELECT device_id, api_key FROM devices WHERE api_key_hash IS NULL AND api_key NOT LIKE ?")
+  .all(`${PREFIXO_SEM_CHAVE}%`) as Array<{ device_id: string; api_key: string }>;
+if (comChaveEmTexto.length > 0) {
+  const trocar = db.prepare("UPDATE devices SET api_key_hash = ?, api_key = ? WHERE device_id = ?");
+  db.transaction(() => {
+    for (const d of comChaveEmTexto) trocar.run(hashApiKey(d.api_key), marcaSemChave(), d.device_id);
+  }).immediate();
+  console.log(`🔐 ${comChaveEmTexto.length} dispositivo(s): a chave em texto foi trocada pelo hash`);
+}
 
 console.log("✅ SQLite conectado:", databasePath);
 

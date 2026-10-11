@@ -1,7 +1,7 @@
 {
-  "name": "esp32-api",
-  "version": "1.0.0",
-  "description": "",
+  "name": "api-do-lacre",
+  "version": "2.1.0",
+  "description": "API que recebe os dados dos lacres (ESP32), guarda numa fila local (Oxide) e entrega ao banco principal",
   "main": "index.js",
   "scripts": {
     "start": "node --env-file-if-exists=.env --require ts-node/register src/server.ts",
@@ -13,7 +13,10 @@
     "simular:queda": "ts-node src/simulador/queda.ts",
     "simular:comandos": "ts-node src/simulador/comandos.ts",
     "backup": "node --env-file-if-exists=.env --require ts-node/register src/manutencao/backup.ts",
-    "retencao": "node --env-file-if-exists=.env --require ts-node/register src/manutencao/retencao.ts"
+    "retencao": "node --env-file-if-exists=.env --require ts-node/register src/manutencao/retencao.ts",
+    "vigia": "node --env-file-if-exists=.env --require ts-node/register src/manutencao/vigia.ts",
+    "servico": "node --env-file-if-exists=.env --require ts-node/register src/manutencao/servico.ts",
+    "simular:desligamento": "ts-node src/simulador/desligamento.ts"
   },
   "keywords": [],
   "author": "",

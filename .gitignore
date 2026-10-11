@@ -20,3 +20,8 @@ dist/
 # Cópias da oxide.db (npm run backup) e estado da última rodada do Worker
 backups/
 oxide-worker.json
+
+# Serviço e vigia (npm run servico, npm run vigia)
+logs/
+oxide-servico.json
+oxide-servico.parar

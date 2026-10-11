@@ -1,4 +1,5 @@
 import { CommandRepository } from "./repositories/CommandRepository";
+import { chaveDeAdministrador, rotasDaEquipeAbertas } from "./middlewares/adminMiddleware";
 import { MessageRepository } from "./repositories/MessageRepository";
 import { lerUltimaRodada } from "./worker/runner";
 
@@ -19,6 +20,7 @@ export function saude(): Record<string, unknown> {
     fila: new MessageRepository().counts(),
     comandos_pendentes: new CommandRepository().countPending(),
     banco_principal: configurado ? "CONFIGURADO" : "NAO_CONFIGURADO",
+    rotas_da_equipe: rotasDaEquipeAbertas() ? "ABERTAS_SEM_CHAVE" : chaveDeAdministrador() ? "PROTEGIDAS" : "FECHADAS_SEM_CHAVE_CONFIGURADA",
     worker: rodada
       ? { ultima_rodada: rodada.em, resultado: rodada.resultado.status, atrasado, erro: rodada.resultado.erro ?? null }
       : { ultima_rodada: null, resultado: null, atrasado: false, erro: null }

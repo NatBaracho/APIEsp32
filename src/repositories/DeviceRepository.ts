@@ -25,19 +25,6 @@ export class DeviceRepository {
       .get(deviceId) as Device | undefined;
   }
 
-  findByApiKey(
-    apiKey: string
-  ): Device | undefined {
-
-    return db
-      .prepare(`
-        SELECT *
-        FROM devices
-        WHERE api_key = ? AND api_key_hash IS NULL
-      `)
-      .get(apiKey) as Device | undefined;
-  }
-
   findByApiKeyHash(
     apiKeyHash: string
   ): Device | undefined {
@@ -92,11 +79,12 @@ export class DeviceRepository {
   create(device: Device): void {
 
     db.prepare(`
-      INSERT INTO devices (device_id, api_key, firmware_version, active)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO devices (device_id, api_key, api_key_hash, firmware_version, active)
+      VALUES (?, ?, ?, ?, ?)
     `).run(
       device.device_id,
       device.api_key,
+      device.api_key_hash ?? null,
       device.firmware_version ?? null,
       device.active ?? 1
     );

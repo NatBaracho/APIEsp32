@@ -1,19 +1,22 @@
-import { createHash, timingSafeEqual } from "crypto";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { Device } from "../models/Device";
 
-// Mesmo formato de dispositivos.api_key_hash no FluxID: SHA-256 em hexadecimal
+// A Oxide guarda só o hash da chave do dispositivo: SHA-256 em hexadecimal,
+// o mesmo formato do cadastro no sistema principal
 export function hashApiKey(apiKey: string): string {
   return createHash("sha256").update(apiKey, "utf8").digest("hex");
 }
 
-// Dispositivo com hash (vindo do FluxID) só aceita a chave que gera esse
-// hash; sem hash, vale a chave em texto do cadastro provisório
-export function deviceAcceptsKey(device: Device, apiKey: string): boolean {
-  if (device.api_key_hash) {
-    const expected = Buffer.from(device.api_key_hash, "hex");
-    const received = Buffer.from(hashApiKey(apiKey), "hex");
-    return expected.length === received.length && timingSafeEqual(expected, received);
-  }
+// O que fica na coluna api_key (obrigatória e única): um texto aleatório,
+// que não é a chave e não autentica ninguém
+export const PREFIXO_SEM_CHAVE = "sem-chave-em-texto:";
+export const marcaSemChave = (): string => `${PREFIXO_SEM_CHAVE}${randomBytes(12).toString("hex")}`;
 
-  return device.api_key === apiKey;
+// O dispositivo só aceita a chave que gera o hash guardado
+export function deviceAcceptsKey(device: Device, apiKey: string): boolean {
+  if (!device.api_key_hash || !apiKey) return false;
+
+  const expected = Buffer.from(device.api_key_hash, "hex");
+  const received = Buffer.from(hashApiKey(apiKey), "hex");
+  return expected.length === received.length && timingSafeEqual(expected, received);
 }

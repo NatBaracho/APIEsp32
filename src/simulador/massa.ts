@@ -341,7 +341,9 @@ async function main(): Promise<number> {
     PORT: String(PORTA), SUPABASE_IOT_URL: recebedor.url, SUPABASE_SERVICE_KEY: recebedor.chave,
     WORKER_INTERVAL_SECONDS: "1", WORKER_CADASTRO_INTERVAL_SECONDS: "5", WORKER_BATCH_SIZE: "200",
     // Sem prazo de espera: o alerta de lacre sem cilindro abre na primeira mensagem da viagem
-    REGRA_MINUTOS_SEM_VINCULO: "0"
+    REGRA_MINUTOS_SEM_VINCULO: "0",
+    // Todos os lacres do teste saem do mesmo endereço: o limite por endereço fica alto
+    LIMITE_FALHAS_DE_CHAVE_POR_MINUTO: "1000000"
   };
   let api: ChildProcess | undefined;
   let worker: ChildProcess | undefined;
