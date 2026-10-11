@@ -21,6 +21,8 @@ Em 10/10/2026 a API passou a ter uma fila única e a entregar os dados ao Supaba
 | Suíte (110 casos) | `npm test` | Pasta temporária, banco novo, recebedor de teste no lugar do Supabase |
 | Simulador (26 verificações) | `npm run simular` | Pasta temporária, banco novo, recebedor de teste |
 | Teste em massa (32 verificações) | `npm run simular:massa` | Pasta temporária; 500 lacres; API e Worker em processos separados, derrubados no meio; recebedor de teste |
+| Queda do banco principal (13 verificações) | `npm run simular:queda` | Pasta temporária; 600 lacres enviando com o banco principal fora do ar por 60 minutos; mede a fila e o tempo para esvaziar. Leva cerca de 1 hora e 40 minutos |
+| Tabela `commands` (24 verificações) | `npm run simular:comandos` | Pasta temporária; 3.000 comandos de válvula, do sistema principal ao lacre e de volta, com quedas no meio |
 | Migração do banco real | Roteiro, seção 4 | Numa **cópia** da `oxide.db` |
 
 A suíte e o simulador não tocam no `oxide.db` do projeto nem no banco principal, e podem rodar com a API ligada.
@@ -641,5 +643,6 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | 2.0 | 10/10/2026 | Modelo enxuto: nova seção 0 com o plano atual (casos V2-*), suíte reescrita com 71 casos e simulador com 23 verificações, os dois com recebedor de teste no lugar do Supabase. As seções 6 a 13 ficam como histórico |
 | 2.1 | 10/10/2026 | Teste do banco e teste em massa: suíte com 92 casos (novo grupo 12, com as regras do banco direto no SQLite, volume com 100.000 mensagens e gravação ao mesmo tempo); novo teste em massa com 500 lacres e quedas provocadas (`npm run simular:massa`); relatórios `Relatorio-de-Teste-2026-10-10-13h45.md` e `Relatorio-de-Teste-2026-10-10-14h00.md`. **Aprovado por Natã da Silva Baracho** |
 | 2.2 | 10/10/2026 | Ativação do lacre e vínculo com o cilindro e o cliente: suíte com 110 casos (novo grupo 13 e um caso da posição repetida no instante do envio); simulador com 26 verificações; teste em massa com 32, com a etapa de ativação e vinculação antes da viagem; relatório `Relatorio-de-Teste-2026-10-10-20h00.md`. **Aprovado por Natã da Silva Baracho** |
+| 2.3 | 10/10/2026 | Dois testes novos: queda do banco principal por 1 hora com 600 lacres (`npm run simular:queda`, 13 verificações) e tabela `commands` com 3.000 comandos (`npm run simular:comandos`, 24 verificações); relatório `Relatorio-de-Teste-2026-10-10-22h50.md`. **Aprovado por Natã da Silva Baracho** |
 | 1.12 | 07/10/2026 | Simulador do lacre (seção 10.7, SIM-01 a SIM-09); ASC-13 revisto (série repetida aceita; achado A3) |
 | 1.11 | 07/10/2026 | Integração Oxide ⇄ FluxID implementada: SYN-01 a SYN-16 revistos com as regras aprovadas, novos SYN-17 a SYN-24 e INT-01 a INT-07; BD-01 e BD-02 com `sync_logs`; página `/api-docs-fluxid` com a proposta da API do frontend (GER-07, GER-08); suíte com 96 casos. Teste formal da IA em 07/10/2026, sem falhas |

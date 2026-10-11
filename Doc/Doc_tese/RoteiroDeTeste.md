@@ -50,6 +50,15 @@ npm run simular 2>&1 | grep -E "^❌|^===|Resultado:"
 # Esperado: "Resultado: 32 de 32 verificações conforme; 0 falha(s)."
 npm run simular:massa 2>&1 | grep -E "^❌|^===|Duração|Tempo de resposta|Resultado:"
 
+# [tabela commands] 3.000 comandos de válvula, com quedas no meio.
+# Esperado: "Resultado: 24 de 24 verificações conforme; 0 falha(s)."
+npm run simular:comandos 2>&1 | grep -E "^❌|^===|Resultado:"
+
+# [queda do banco principal] 600 lacres, 1 hora fora do ar. Leva cerca de 1 hora e 40 minutos;
+# para um teste curto, use QUEDA_MINUTOS=5 na frente do comando.
+# Esperado: "Resultado: 13 de 13 verificações conforme; 0 falha(s)."
+npm run simular:queda 2>&1 | grep -E "^❌|^===|esvaziou|Resultado:"
+
 # Esperado: o mesmo checksum do começo
 sha256sum oxide.db
 ```
@@ -154,3 +163,4 @@ Não registre chaves nem senhas. Ao final, entregue o relatório no formato da s
 | 2.0 | 10/10/2026 | Modelo enxuto: suíte e simulador em pasta temporária com recebedor de teste; migração numa cópia do banco real; passo do Supabase de verdade para quando a função existir |
 | 2.1 | 10/10/2026 | Suíte com 92 casos (grupo 12: banco direto no SQLite, volume e gravação ao mesmo tempo) e novo teste em massa (`npm run simular:massa`) |
 | 2.2 | 10/10/2026 | Ativação e vínculo: suíte com 110 casos, simulador com 26 verificações e teste em massa com 32 |
+| 2.3 | 10/10/2026 | Testes da tabela `commands` (`npm run simular:comandos`) e da queda do banco principal (`npm run simular:queda`) |

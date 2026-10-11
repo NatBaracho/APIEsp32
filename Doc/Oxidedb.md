@@ -184,6 +184,20 @@ CREATE TABLE IF NOT EXISTS commands (
 
 Mensagem que ainda não chegou ao banco principal nunca é apagada.
 
+## 6.1 Quanto o banco cresce e quanto tempo a fila leva para esvaziar
+
+Medido em 10/10/2026, com 600 lacres enviando uma leitura a cada 10 segundos e o banco principal fora do ar por 1 hora:
+
+| Medida | Valor |
+| --- | --- |
+| Leituras guardadas na fila em 1 hora | 215.869, sem nenhuma recusa |
+| Tamanho do banco no fim | 137 MB (cerca de 2,3 MB por minuto; 0,64 KB por leitura) |
+| Resposta mais lenta da API em toda a hora | 479 ms |
+| Tempo para a fila esvaziar na volta, com o Worker padrão | 37,5 minutos (96 mensagens por segundo) |
+| Com `WORKER_BATCH_SIZE=500` | cerca de 400 mensagens por segundo |
+
+O arquivo só cresce enquanto o banco principal está fora: a limpeza nunca apaga o que ainda não foi enviado.
+
 # 7. Verificação
 
 ```sql
@@ -222,3 +236,4 @@ A lista completa dos endpoints está em [Como-o-Sistema-se-Comporta.md](Como-o-S
 | 2.1 | 10/10/2026 | Depois do teste do banco e do teste em massa: a migração refaz `devices` e `commands` no formato atual; cópia de segurança antes de qualquer mudança; modo WAL; operações de gravação pedem a vez no início (nova seção 4.1). **Aprovado por Natã da Silva Baracho em 10/10/2026** |
 | 2.2 | 10/10/2026 | Ativação e vínculo: colunas novas em `devices` (identificador do lacre, ativação, cilindro e cliente); tipo `ATIVACAO` em `mensagens`; cópia de segurança `bak-antes-da-atualizacao` para banco de versão anterior. **Aprovado por Natã da Silva Baracho em 10/10/2026** |
 | 2.3 | 10/10/2026 | Nova seção 8: como ver o que está na Oxide, pela API e direto no arquivo |
+| 2.4 | 10/10/2026 | Nova seção 6.1: crescimento do banco e tempo para a fila esvaziar, medidos no teste da queda de 1 hora |

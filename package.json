@@ -10,6 +10,8 @@
     "worker": "node --env-file-if-exists=.env --require ts-node/register src/worker/index.ts",
     "simular": "ts-node src/simulador/index.ts",
     "simular:massa": "ts-node src/simulador/massa.ts",
+    "simular:queda": "ts-node src/simulador/queda.ts",
+    "simular:comandos": "ts-node src/simulador/comandos.ts",
     "backup": "node --env-file-if-exists=.env --require ts-node/register src/manutencao/backup.ts",
     "retencao": "node --env-file-if-exists=.env --require ts-node/register src/manutencao/retencao.ts"
   },

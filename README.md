@@ -24,7 +24,7 @@ Para entender o comportamento em linguagem simples, comece por [Como o sistema s
 
 | Item | Situação |
 | --- | --- |
-| API, fila (Oxide) e Worker | Prontos e testados: suíte 110/110, simulador 26/26 e teste em massa 32/32 |
+| API, fila (Oxide) e Worker | Prontos e testados: suíte 110/110, simulador 26/26, teste em massa 32/32, queda de 1 hora do banco principal 13/13 e tabela `commands` 24/24 |
 | Envio ao Supabase de verdade | **Ainda não testado.** A função de recebimento não existe no repositório do frontend; os testes usam um recebedor de teste |
 | Ativação do lacre e vínculo com o cilindro e o cliente | Pronto na API. Falta o sistema tratar a mensagem de ativação e devolver o vínculo |
 | Lacre de verdade | O envio está desligado no firmware; faltam o aviso de ativação e a leitura da bateria |
@@ -91,6 +91,8 @@ Copie `.env.example` para `.env`. O `.env` não vai para o Git. **Nunca coloque 
 | `npm test` | Suíte automática (110 casos) |
 | `npm run simular` | Percurso completo de um lacre (26 verificações) |
 | `npm run simular:massa` | Teste em massa com 500 lacres (32 verificações) |
+| `npm run simular:queda` | Banco principal fora do ar por 1 hora, com 600 lacres enviando (13 verificações). Leva cerca de 1 hora e 40 minutos |
+| `npm run simular:comandos` | Teste da tabela `commands` com 3.000 comandos de válvula (24 verificações) |
 | `npm run backup` | Cópia consistente da `oxide.db` em `backups/`; pode rodar com a API ligada |
 | `npm run retencao` | Mostra o que sairia: só o que já foi enviado há mais de 30 dias |
 | `npm run retencao -- --confirmar` | Apaga de fato. Faça o backup antes |
@@ -108,15 +110,30 @@ npm run simular
 npm run simular:massa
 ```
 
-Os três testes rodam numa pasta temporária, com uma `oxide.db` nova e um **recebedor de teste** no lugar do Supabase. Eles não tocam no `oxide.db` do projeto nem no banco principal, e podem rodar com a sua API ligada.
+Todos os testes rodam numa pasta temporária, com uma `oxide.db` nova e um **recebedor de teste** no lugar do Supabase. Eles não tocam no `oxide.db` do projeto nem no banco principal, e podem rodar com a sua API ligada.
 
 | Teste | O que faz | Resultado atual |
 | --- | --- | --- |
 | `npm test` | Chama cada rota e confere as regras, o banco, o Worker e a migração | 110 de 110 |
 | `npm run simular` | Um lacre do começo ao fim: cadastro, ativação e vínculo, leituras, posição repetida, GPS sem sinal, alertas automáticos, banco principal fora do ar e comando da válvula | 26 de 26 |
 | `npm run simular:massa` | 500 lacres (um por cilindro) num cenário como o do sistema principal, com a API, o Worker e o banco principal derrubados no meio. Confere que nada se perdeu nem duplicou | 32 de 32 |
+| `npm run simular:queda` | 600 lacres enviando uma leitura a cada 10 segundos, com o banco principal fora do ar por 60 minutos. Confere que a Oxide guarda tudo e mede quanto tempo a fila leva para esvaziar na volta | 13 de 13 |
+| `npm run simular:comandos` | 3.000 comandos de válvula: o Worker traz, cada lacre busca e confirma, e a confirmação volta ao sistema, com quedas no meio | 24 de 24 |
 
-Ajustes do teste em massa: `MASSA_LACRES`, `MASSA_PONTOS`, `MASSA_PARALELO`, `MASSA_PORTA` e `MASSA_SEMENTE`.
+Ajustes:
+- teste em massa: `MASSA_LACRES`, `MASSA_PONTOS`, `MASSA_PARALELO`, `MASSA_PORTA` e `MASSA_SEMENTE`;
+- queda: `QUEDA_LACRES`, `QUEDA_MINUTOS`, `QUEDA_INTERVALO_S` e `QUEDA_PORTA` (por exemplo, `QUEDA_MINUTOS=5` para um teste curto);
+- comandos: `COMANDOS_LACRES`, `COMANDOS_POR_LACRE`, `COMANDOS_PARALELO` e `COMANDOS_PORTA`.
+
+**Depois de uma queda longa, a fila demora a esvaziar.** Com a configuração padrão, o Worker envia cerca de 96 mensagens por segundo: as 216.000 mensagens do teste de 1 hora levaram 37,5 minutos. Para acelerar, aumente `WORKER_BATCH_SIZE` no `.env` (com 500, cerca de 400 por segundo no teste). O valor certo depende de quanto a função do Supabase aguenta.
+
+### Testar na mão, pelo Thunder Client
+
+A pasta `thunder-client/` tem uma coleção com 25 requisições prontas (ativar, leituras, evento, alerta, comandos, consultas e os erros que a API recusa). No Thunder Client: **Collections → menu → Import** e escolha `thunder-client/thunder-collection_API-do-lacre.json`. Ligue a API antes (`npm start`).
+
+- As requisições gravam no `oxide.db` do projeto.
+- A coleção usa o dispositivo `DSP-000001` e a chave de teste dele. Não reutilize essa chave num lacre real.
+- O `oxide.db` do projeto tem 4 comandos de exemplo (`CMD-EXEMPLO-001` a `004`), para a tabela `commands` aparecer preenchida. Os dois pendentes são comandos de verdade para a API: apague-os antes de ligar um lacre real (`DELETE FROM commands WHERE command_id LIKE 'CMD-EXEMPLO-%';`).
 
 O registro de cada entrega (validação da IA e do responsável) fica em `Doc/Doc_tese/Relatorio-de-Teste-*.md`.
 
@@ -197,6 +214,7 @@ Para olhar as tabelas, o `oxide.db` abre em qualquer programa de SQLite (por exe
 | `tests/` | A suíte automática |
 | `Doc/` | Os documentos do projeto; em `Doc/Doc_tese/`, o plano, o roteiro e os relatórios de teste |
 | `DocumentacaoFinal/` | Registros de uso de IA para o evento INTEGRA 2026 |
+| `thunder-client/` | Coleção de requisições para testar a API na mão |
 | `oxide.db` | O banco local (Oxide) |
 | `.env.example` | Modelo da configuração |
 | `sql/fluxid/` | Scripts do banco FluxID em PostgreSQL (referência histórica) |

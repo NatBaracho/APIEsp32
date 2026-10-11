@@ -4,7 +4,7 @@ Explicação em linguagem simples do que a API do lacre faz em cada situação. 
 
 Para os detalhes técnicos, veja [Desenvolvimento.md](Desenvolvimento.md) (rotas e campos), [Oxidedb.md](Oxidedb.md) (banco local), [Contrato-Entrega-Supabase.md](Contrato-Entrega-Supabase.md) (envio ao banco principal) e [Guia-Firmware-Lacre-IoT.md](Guia-Firmware-Lacre-IoT.md) (lacre).
 
-**Versão:** 1.3, de 10/10/2026.
+**Versão:** 1.4, de 10/10/2026.
 
 ---
 
@@ -179,6 +179,10 @@ Um dispositivo desativado no sistema principal passa a receber `403` depois da p
 
 Quando ele volta, o Worker envia a fila em lotes, na ordem de chegada. Se uma mensagem já tinha sido gravada e a resposta se perdeu, o banco principal responde "repetida" e ela não duplica.
 
+**Quanto tempo a fila leva para esvaziar.** Com a configuração padrão, o Worker envia cerca de 96 mensagens por segundo. Depois de uma queda longa, isso demora: no teste de 10/10/2026 (600 lacres enviando a cada 10 segundos, 1 hora fora do ar), as 216.000 mensagens levaram 37,5 minutos. Nada se perde nesse tempo; o sistema principal só vê os dados com atraso. Para acelerar, aumente `WORKER_BATCH_SIZE` no `.env`.
+
+**Quanto o banco cresce.** No mesmo teste, a Oxide cresceu cerca de 2,3 MB por minuto e chegou a 137 MB em 1 hora, sem recusar nenhuma leitura.
+
 Enquanto ele está fora:
 
 - comandos novos não chegam ao lacre (os que já estavam na Oxide continuam disponíveis);
@@ -238,7 +242,7 @@ Para ver as tabelas preenchidas por um teste, abra a `oxide.db` da pasta que o s
 | Lista de lacres ativos e vínculo com o cilindro e o cliente | Pronto na API. Falta o sistema tratar a mensagem `ATIVACAO` e devolver o vínculo (seção 5) |
 | Aviso de ativação enviado pelo lacre | A rota existe; falta o firmware enviar ao ligar |
 | Lacre de verdade enviando | O envio está desligado no firmware, e a leitura da bateria ainda não entrou |
-| Queda longa do banco principal (horas ou dias) | Não testada; o teste em massa usou uma queda de 8 segundos |
+| Queda longa do banco principal | Testada por 1 hora, com 600 lacres (13 de 13). Mais que isso não foi testado |
 | Queda de energia no meio de uma gravação | Não testada |
 
 ## 13. Como entrar na API (porta e endereços)
@@ -316,3 +320,4 @@ Para olhar as tabelas, o `oxide.db` abre em qualquer programa de SQLite (por exe
 | 1.1 | 10/10/2026 | Ativação do lacre, identificador gerado pela API e vínculo com o cilindro e o cliente (seção 5 reescrita). **Aprovado por Natã da Silva Baracho em 10/10/2026** |
 | 1.2 | 10/10/2026 | Nova seção 13: a porta da API (3000) e os endereços para entrar |
 | 1.3 | 10/10/2026 | Nova seção 14: todos os endpoints da API e os que mostram o que está na Oxide |
+| 1.4 | 10/10/2026 | Queda do banco principal testada por 1 hora: quanto a fila cresce e quanto tempo leva para esvaziar (seção 8.1) |

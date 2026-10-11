@@ -48,8 +48,12 @@ Os itens com ✅ foram feitos e testados pela IA e **aprovados por Natã da Silv
 - ✅ Suíte com 92 casos e simulador com 23 verificações, em pasta temporária e com recebedor de teste.
 - ✅ Teste do banco direto no SQLite (64 casos) e 21 casos de banco dentro da suíte: regras, volume com 100.000 mensagens e gravação ao mesmo tempo.
 - ✅ Teste em massa (`npm run simular:massa`): 500 lacres num cenário como o do sistema principal, com quedas da API, do Worker e do banco principal; 24 de 24.
+- ✅ Queda do banco principal por 1 hora com 600 lacres (`npm run simular:queda`): 215.869 leituras guardadas sem recusa, fila esvaziada em 37,5 minutos, nada perdido; 13 de 13.
+- ✅ Tabela `commands` com 3.000 comandos (`npm run simular:comandos`): do sistema ao lacre e de volta, com quedas no meio; 24 de 24.
+- ✅ Coleção do Thunder Client para testar a API na mão (`thunder-client/`) e 4 comandos de exemplo no `oxide.db` do projeto.
+- [ ] Escolher o tamanho do lote do Worker (`WORKER_BATCH_SIZE`) no primeiro teste com o Supabase de verdade: o padrão (100) envia 96 mensagens por segundo; com 500, cerca de 400.
 - ✅ Correções achadas pelos testes: banco migrado igual ao banco novo; cópia de segurança antes de qualquer mudança; API espera o Worker em vez de responder `500`; modo WAL (de 40 para 588 pedidos por segundo).
-- ✅ Documentação final para o evento INTEGRA 2026 (`DocumentacaoFinal/`): 19 registros no PR #19, o registro 20 no PR #20 e os registros 21 (teste do banco e teste em massa) e 22 (ativação do lacre e vínculo) no PR #21.
+- ✅ Documentação final para o evento INTEGRA 2026 (`DocumentacaoFinal/`): 19 registros no PR #19, o registro 20 no PR #20 e os registros 21 (teste do banco e teste em massa) e 22 (ativação do lacre e vínculo) no PR #21, e o registro 23 (queda do banco principal e tabela de comandos) no PR #24.
 - ✅ Documentos atualizados para o modelo enxuto; documentos do FluxID marcados como referência histórica.
 - ✅ Novo documento `Como-o-Sistema-se-Comporta.md`: o comportamento do sistema em linguagem simples.
 - ✅ `oxide.db` do projeto convertido para o modelo atual (3 tabelas) em 10/10/2026 e enviado ao GitHub.

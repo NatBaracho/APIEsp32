@@ -650,6 +650,33 @@ Resultados:
 
 Relatório: [Relatorio-de-Teste-2026-10-10-20h00.md](Doc_tese/Relatorio-de-Teste-2026-10-10-20h00.md). Questionário respondido: **aprovado por Natã da Silva Baracho em 10/10/2026**.
 
+### 7.29 Queda do banco principal por 1 hora e tabela commands (10/10/2026)
+
+Pedidos de Natã: simular 600 lacres com o banco principal fora do ar por 1 hora, para ver se o banco aguenta; e testar a tabela `commands`.
+
+**Queda de 1 hora** (`npm run simular:queda`, arquivo `src/simulador/queda.ts`):
+- 600 lacres, ativados e vinculados, cada um enviando uma leitura a cada 10 segundos; banco principal fora do ar por 60 minutos; Worker com a configuração padrão.
+- A API aceitou as 215.869 leituras, sem recusar nenhuma. O banco chegou a 137 MB. A resposta mais lenta em toda a hora levou 479 ms.
+- Na volta, a fila esvaziou sozinha em 37,5 minutos (96 mensagens por segundo). As 216.469 mensagens ficaram iguais dos dois lados, e o banco terminou íntegro.
+- 13 de 13 verificações.
+
+**Velocidade da volta.** O Worker padrão envia até 1.000 mensagens a cada 10 segundos. Com lotes de 500, a velocidade medida foi de cerca de 400 mensagens por segundo; com 1.000, cerca de 720. O padrão continua em 100: o lote maior só foi testado com o recebedor de teste, e o valor certo deve ser escolhido no primeiro teste com o Supabase de verdade.
+
+**Tabela `commands`** (`npm run simular:comandos`, arquivo `src/simulador/comandos.ts`):
+- 3.000 comandos de válvula (300 lacres, 10 para cada) e 40 inválidos de propósito. O Worker trouxe, cada lacre buscou os seus na ordem de criação e confirmou (2.684 `EXECUTADO` e 316 `ERRO`), e a confirmação voltou ao sistema. Banco principal, Worker e API derrubados no meio.
+- Nenhum comando duplicado, perdido ou de volta a pendente; a limpeza apagou só os concluídos há mais de 30 dias.
+- 24 de 24 verificações.
+
+Os dois testes não acharam defeito. Nenhuma regra da API mudou.
+
+Também a pedido de Natã:
+- 4 comandos de exemplo (`CMD-EXEMPLO-001` a `004`) no `oxide.db` do projeto, para a tabela `commands` aparecer preenchida;
+- coleção do Thunder Client com 25 requisições (`thunder-client/`), para testar a API na mão.
+
+**O que não foi testado:** o Supabase de verdade, queda maior que 1 hora e queda de energia no meio de uma gravação.
+
+Relatório: [Relatorio-de-Teste-2026-10-10-22h50.md](Doc_tese/Relatorio-de-Teste-2026-10-10-22h50.md). Questionário respondido: **aprovado por Natã da Silva Baracho em 10/10/2026**.
+
 ## 9. Suíte de testes automatizados (`npm test`)
 
 A suíte `tests/api.test.ts` foi reescrita em 10/10/2026 para o modelo enxuto e cobre 110 casos: os grupos abaixo e, desde 10/10/2026, o grupo 12 (regras do banco direto no SQLite, volume com 100.000 mensagens e gravação ao mesmo tempo) e o grupo 13 (ativação do lacre e vínculo com o cilindro e o cliente). Ela roda numa pasta temporária, com uma `oxide.db` nova e um recebedor de teste no lugar do Supabase.
@@ -676,7 +703,7 @@ A suíte anterior (96 casos, modelo com filas separadas e envio ao FluxID) está
 
 # Parte 3 — Histórico de PRs por funcionalidade
 
-Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validação **aprovada por Natã da Silva Baracho**. O #20 (Oxide enxuta) foi **aprovado por Natã da Silva Baracho** em 10/10/2026 e mesclado no mesmo dia. O #21 (teste do banco, teste em massa, modo WAL e, depois, ativação e vínculo) foi **aprovado por Natã da Silva Baracho** em 10/10/2026. O #22 levou à `main` o primeiro commit do #21, que tinha ficado na branch antiga; o conteúdo é o mesmo. O #21 foi mesclado em 10/10/2026. O #23 só mexe em documentos (porta e endereços da API), a pedido de Natã. Esta parte e a seção "Quem faz o quê" (1.1) foram conferidas por questionário (6/6 sim) e **aprovadas por Natã da Silva Baracho** em 06/10/2026. O PR que mexeu em mais de uma parte aparece em cada grupo, só com o que mudou naquela parte. A cada novo PR, esta parte é atualizada.
+Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validação **aprovada por Natã da Silva Baracho**. O #20 (Oxide enxuta) foi **aprovado por Natã da Silva Baracho** em 10/10/2026 e mesclado no mesmo dia. O #21 (teste do banco, teste em massa, modo WAL e, depois, ativação e vínculo) foi **aprovado por Natã da Silva Baracho** em 10/10/2026. O #22 levou à `main` o primeiro commit do #21, que tinha ficado na branch antiga; o conteúdo é o mesmo. O #21 foi mesclado em 10/10/2026. O #23 só mexe em documentos (porta e endereços da API), a pedido de Natã, e foi mesclado em 10/10/2026. O #24 traz os testes da queda do banco principal e da tabela `commands`, **aprovado por Natã da Silva Baracho** em 10/10/2026. Esta parte e a seção "Quem faz o quê" (1.1) foram conferidas por questionário (6/6 sim) e **aprovadas por Natã da Silva Baracho** em 06/10/2026. O PR que mexeu em mais de uma parte aparece em cada grupo, só com o que mudou naquela parte. A cada novo PR, esta parte é atualizada.
 
 ## 3.1 API
 
@@ -694,6 +721,7 @@ Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validaç�
 | #20 | Oxide enxuta e envio ao Supabase | Posição e bateria obrigatórias em toda mensagem; `gps_ok`; alertas automáticos da própria mensagem; `GET /iot/messages` e `GET /health`; saem as rotas de lacres, cilindros, vínculos e de análise de alertas e a página da proposta do frontend |
 | #21 | Teste do banco, teste em massa e modo WAL | As operações que gravam pedem a vez no início e esperam a do Worker, em vez de responder `500`; novo `npm run simular:massa`; **ativação e vínculo:** rota `POST /iot/activations`, identificador do lacre gerado pela API, mensagem `ATIVACAO`, cilindro e cliente em toda mensagem e alerta automático `LACRE_SEM_CILINDRO` |
 | #23 | Porta e endereços nos documentos | Sem mudança no código. A porta (3000) e os endereços para entrar na API ficaram explícitos no README, no `Como-o-Sistema-se-Comporta.md` (seção 13) e no `ESP32-envio-de-dados.md`; lista completa dos endpoints, separando os que o lacre usa dos que mostram o que está na Oxide, no README, no `Como-o-Sistema-se-Comporta.md` (seção 14) e no `Oxidedb.md` (seção 8); `PORT` documentada no `.env.example`; aviso no `Contrato-API-Frontend.md` de que as rotas `/api/v1/app` não existem; README reorganizado (situação atual, configuração, comandos, testes, regras com a ativação e o vínculo, pastas e documentos por público) |
+| #24 | Queda do banco principal e tabela `commands` | Sem mudança nas regras. Dois testes novos: `npm run simular:queda` (600 lacres, 1 hora com o banco principal fora do ar) e `npm run simular:comandos` (3.000 comandos de válvula); coleção do Thunder Client para testar a API na mão |
 
 ## 3.2 Oxide (`oxide.db`)
 
@@ -708,6 +736,7 @@ Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validaç�
 | #17 | Simulador e série do cilindro | `cylinders.serial_number` sem `UNIQUE` (série única só por empresa, no FluxID); migração preservando os dados; `Oxidedb.md` v1.8 |
 | #20 | Oxide enxuta e envio ao Supabase | De 11 para 3 tabelas (`devices`, `mensagens`, `commands`); migração com cópia de segurança (leituras antigas completas seguem para o banco principal; as demais ficam arquivadas); backup e retenção; `Oxidedb.md` v2.0 |
 | #21 | Teste do banco, teste em massa e modo WAL | A migração refaz `devices` e `commands` no formato atual; cópia de segurança antes de qualquer mudança; modo WAL (de 40 para 588 pedidos por segundo no teste com 500 lacres); backup num arquivo só; `Oxidedb.md` 2.1; colunas da ativação e do vínculo em `devices` e tipo `ATIVACAO` em `mensagens`; `oxide.db` do projeto convertido; `Oxidedb.md` 2.2 |
+| #24 | Queda do banco principal e tabela `commands` | Oxide guardou 215.869 leituras em 1 hora (137 MB), sem recusa; 4 comandos de exemplo no `oxide.db` do projeto; `Oxidedb.md` 2.4 |
 
 ## 3.3 FluxID
 
@@ -743,3 +772,4 @@ Implementado e aprovado em 07/10/2026 (PR #15). O que levou até ele:
 | #17 | Simulador | O simulador exercita o Worker de ponta a ponta: cadastro sem conflitos, fila, FluxID fora do ar, espera do vínculo e reenvio |
 | #20 | Oxide enxuta e envio ao Supabase | Worker reescrito: envia a fila única por HTTP à função de recebimento do Supabase, com resultado por mensagem, e traz os dispositivos e os comandos; simulador novo com recebedor de teste |
 | #21 | Teste do banco, teste em massa e modo WAL | Marcação do lote pede a vez de gravar no início; teste em massa com o Worker derrubado e religado no meio, sem perda e sem duplicidade; o Worker traz o vínculo de cada lacre (`binding`); corrigida a posição repetida no instante do envio |
+| #24 | Queda do banco principal e tabela `commands` | Medida a velocidade da volta: 96 mensagens por segundo com o lote padrão (216.000 mensagens em 37,5 minutos); cerca de 400 com lotes de 500. `WORKER_BATCH_SIZE` documentada no `.env.example` |
