@@ -4,7 +4,7 @@ Explicação em linguagem simples do que a API do lacre faz em cada situação. 
 
 Para os detalhes técnicos, veja [Desenvolvimento.md](Desenvolvimento.md) (rotas e campos), [Oxidedb.md](Oxidedb.md) (banco local), [Contrato-Entrega-Supabase.md](Contrato-Entrega-Supabase.md) (envio ao banco principal) e [Guia-Firmware-Lacre-IoT.md](Guia-Firmware-Lacre-IoT.md) (lacre).
 
-**Versão:** 1.1, de 10/10/2026.
+**Versão:** 1.3, de 10/10/2026.
 
 ---
 
@@ -241,9 +241,78 @@ Para ver as tabelas preenchidas por um teste, abra a `oxide.db` da pasta que o s
 | Queda longa do banco principal (horas ou dias) | Não testada; o teste em massa usou uma queda de 8 segundos |
 | Queda de energia no meio de uma gravação | Não testada |
 
-## 13. Histórico do documento
+## 13. Como entrar na API (porta e endereços)
+
+**A porta é a 3000.** Com a API ligada (`npm start`), os endereços são:
+
+| Para quê | Endereço |
+| --- | --- |
+| Ver se a API está no ar (responde "API ESP32 Online") | http://localhost:3000 |
+| Documentação interativa (Swagger), para testar as rotas pelo navegador | http://localhost:3000/api-docs |
+| Situação da API, da fila e do Worker | http://localhost:3000/health |
+| Rotas do lacre | `http://localhost:3000/api/v1/iot/...` |
+
+- **De outro aparelho** (o lacre ou outro computador na mesma rede): troque `localhost` pelo IP do computador onde a API está ligada, por exemplo `http://192.168.0.10:3000`. No Windows, o IP aparece com o comando `ipconfig`, na linha "Endereço IPv4".
+- **Para mudar a porta:** defina `PORT` no arquivo `.env` (por exemplo `PORT=8080`) e ligue a API de novo.
+- **`banco_principal: "NAO_CONFIGURADO"` no `/health`:** é o esperado enquanto `SUPABASE_IOT_URL` e `SUPABASE_SERVICE_KEY` não estiverem no `.env`. A API continua recebendo, e as mensagens ficam guardadas na fila até o banco principal ser configurado.
+- **Rotas `/api/v1/app/...` não existem.** Elas são da proposta antiga [Contrato-API-Frontend.md](Contrato-API-Frontend.md), que não foi seguida: a API não atende o frontend.
+
+## 14. Endpoints da API e da Oxide
+
+Todos os endereços abaixo são com a API ligada na porta 3000. De outro aparelho, troque `localhost` pelo IP do computador.
+
+### 14.1 Endpoints da API usados pelo lacre
+
+Exigem o cabeçalho `X-API-Key`, com a chave do próprio dispositivo.
+
+| Método | Endereço | Para quê |
+| --- | --- | --- |
+| `POST` | `http://localhost:3000/api/v1/iot/activations` | O lacre avisa que foi ativado ou desativado; a API gera o identificador do lacre |
+| `POST` | `http://localhost:3000/api/v1/iot/telemetries` | Leitura periódica: posição, bateria, sinal e estado do lacre |
+| `POST` | `http://localhost:3000/api/v1/iot/events` | Evento: algo aconteceu (ligou, o lacre mudou de estado, falha) |
+| `POST` | `http://localhost:3000/api/v1/iot/alerts` | Alerta: problema identificado pelo lacre |
+| `GET` | `http://localhost:3000/api/v1/iot/commands/{device_id}` | Buscar os comandos de válvula pendentes |
+| `POST` | `http://localhost:3000/api/v1/iot/commands/confirm` | Confirmar o comando executado ou com erro |
+
+O exemplo de cada mensagem e de cada resposta está em [ESP32-envio-de-dados.md](ESP32-envio-de-dados.md).
+
+### 14.2 Endpoints para ver o que está na Oxide
+
+A Oxide é o arquivo `oxide.db`: ela **não tem porta nem endereço próprio**. Quem mostra o que está guardado nela é a API, pelos endpoints abaixo. São abertos (sem chave) e provisórios, para a equipe acompanhar os testes; abrem direto no navegador.
+
+| Método | Endereço | O que mostra | Tabela da Oxide |
+| --- | --- | --- | --- |
+| `GET` | `http://localhost:3000/api/v1/iot/messages` | As últimas mensagens recebidas (até 50), da mais nova para a mais antiga. Não mostra as arquivadas do modelo antigo | `mensagens` |
+| `GET` | `http://localhost:3000/api/v1/iot/messages?type=TELEMETRIA&device_id=DSP-000001&limit=20` | O mesmo, com filtro por tipo (`TELEMETRIA`, `EVENTO`, `ALERTA`, `CONFIRMACAO_COMANDO` ou `ATIVACAO`), por dispositivo e com limite (até 200) | `mensagens` |
+| `GET` | `http://localhost:3000/api/v1/devices` | Todos os dispositivos: ativo ou não, último estado, identificador do lacre e vínculo com o cilindro e o cliente. Nunca mostra a chave | `devices` |
+| `GET` | `http://localhost:3000/api/v1/devices/{device_id}` | Um dispositivo | `devices` |
+| `GET` | `http://localhost:3000/api/v1/sync/status` | A fila em números (pendentes, enviando, com nova tentativa, paradas, enviadas e arquivadas) e a última rodada do Worker | `mensagens` |
+| `GET` | `http://localhost:3000/api/v1/sync/problems` | As mensagens que não chegaram ao banco principal, com o motivo | `mensagens` |
+| `POST` | `http://localhost:3000/api/v1/sync/retry` | Devolve à fila uma mensagem com erro. Corpo: `{"message_id": "..."}` | `mensagens` |
+| `POST` | `http://localhost:3000/api/v1/devices` | Cadastra um dispositivo para teste de bancada. Corpo: `device_id` e `api_key` | `devices` |
+
+Os comandos (`commands`) aparecem para o lacre em `GET /api/v1/iot/commands/{device_id}` e, em quantidade, no `/health` (`comandos_pendentes`).
+
+### 14.3 Endpoints gerais
+
+| Método | Endereço | Para quê |
+| --- | --- | --- |
+| `GET` | `http://localhost:3000/` | Ver se a API está no ar (responde "API ESP32 Online") |
+| `GET` | `http://localhost:3000/health` | Situação da API, da fila e do Worker (`200` normal, `503` com problema) |
+| `GET` | `http://localhost:3000/api-docs` | Documentação interativa (Swagger): mostra e deixa testar todos os endpoints |
+
+### 14.4 Abrir a Oxide direto, sem a API
+
+Para olhar as tabelas, o `oxide.db` abre em qualquer programa de SQLite (por exemplo, o DB Browser for SQLite). Dois cuidados:
+
+- **Não abra o arquivo em uso para gravar.** Com a API ligada, faça uma cópia com `npm run backup` e abra a cópia, que fica na pasta `backups/`.
+- As tabelas são três: `devices`, `mensagens` e `commands`. O que cada uma guarda está em [Oxidedb.md](Oxidedb.md).
+
+## 15. Histórico do documento
 
 | Versão | Data | Mudança |
 | --- | --- | --- |
 | 1.0 | 10/10/2026 | Primeira versão, a pedido de Natã da Silva Baracho |
 | 1.1 | 10/10/2026 | Ativação do lacre, identificador gerado pela API e vínculo com o cilindro e o cliente (seção 5 reescrita). **Aprovado por Natã da Silva Baracho em 10/10/2026** |
+| 1.2 | 10/10/2026 | Nova seção 13: a porta da API (3000) e os endereços para entrar |
+| 1.3 | 10/10/2026 | Nova seção 14: todos os endpoints da API e os que mostram o que está na Oxide |

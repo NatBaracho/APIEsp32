@@ -20,6 +20,11 @@ O lacre **não envia** o cilindro nem o cliente. O sistema faz esse vínculo pel
 
 Todas começam com `http://<IP_DA_API>:3000/api/v1`.
 
+- **A porta é a 3000** (muda com `PORT` no arquivo `.env` do servidor).
+- `<IP_DA_API>` é o IP do computador onde a API está ligada, por exemplo `192.168.0.10`. No Windows, ele aparece com o comando `ipconfig`, na linha "Endereço IPv4". O lacre precisa estar na mesma rede.
+- `localhost` só funciona no próprio computador da API; no firmware, use o IP.
+- Para conferir antes de gravar o firmware: abrir `http://<IP_DA_API>:3000` no navegador deve mostrar "API ESP32 Online", e `http://<IP_DA_API>:3000/api-docs` abre a documentação interativa.
+
 | Rota | Para quê | Seção |
 | --- | --- | --- |
 | `POST /iot/activations` | Avisar que o lacre foi ativado ou desativado | 2 |
@@ -419,3 +424,4 @@ A API guarda as mensagens até o Worker entregá-las ao banco principal. O cadas
 | --- | --- | --- |
 | 1.x | até 07/10/2026 | Contrato antigo: posição e bateria opcionais, tabelas `telemetry_queue`, `events` e `alerts`, rotas de lacres e cilindros na API, cadastro no FluxID |
 | 2.0 | 10/10/2026 | Reescrito para o contrato atual: posição e bateria obrigatórias, `gps_ok`, aviso de ativação com o identificador do lacre, fila única, alertas automáticos e Supabase como banco principal |
+| 2.1 | 10/10/2026 | Porta (3000) e endereço da API explícitos na seção de rotas |

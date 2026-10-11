@@ -195,7 +195,25 @@ PRAGMA integrity_check;
 PRAGMA foreign_key_check;
 ```
 
-# 8. Histórico do documento
+# 8. Como ver o que está na Oxide
+
+A Oxide é um arquivo (`oxide.db`): não tem porta nem endereço próprio. Há dois jeitos de ver o que está nela.
+
+**Pela API** (porta 3000), no navegador:
+
+| Endereço | O que mostra | Tabela |
+| --- | --- | --- |
+| `http://localhost:3000/api/v1/iot/messages` | As últimas mensagens recebidas. Filtros: `type`, `device_id` e `limit` | `mensagens` |
+| `http://localhost:3000/api/v1/devices` | Os dispositivos, com o último estado, o identificador do lacre e o vínculo. Nunca mostra a chave | `devices` |
+| `http://localhost:3000/api/v1/sync/status` | A fila em números e a última rodada do Worker | `mensagens` |
+| `http://localhost:3000/api/v1/sync/problems` | As mensagens que não chegaram ao banco principal | `mensagens` |
+| `http://localhost:3000/health` | Resumo da fila e a quantidade de comandos pendentes | `mensagens` e `commands` |
+
+A lista completa dos endpoints está em [Como-o-Sistema-se-Comporta.md](Como-o-Sistema-se-Comporta.md), seção 14.
+
+**Direto no arquivo**, com um programa de SQLite (por exemplo, o DB Browser for SQLite). Com a API ligada, faça uma cópia com `npm run backup` e abra a cópia, que fica na pasta `backups/`; não abra o arquivo em uso para gravar.
+
+# 9. Histórico do documento
 
 | Versão | Data | Mudança |
 | --- | --- | --- |
@@ -203,3 +221,4 @@ PRAGMA foreign_key_check;
 | 2.0 | 10/10/2026 | Modelo enxuto: `devices`, `mensagens` e `commands`; migração automática com cópia de segurança |
 | 2.1 | 10/10/2026 | Depois do teste do banco e do teste em massa: a migração refaz `devices` e `commands` no formato atual; cópia de segurança antes de qualquer mudança; modo WAL; operações de gravação pedem a vez no início (nova seção 4.1). **Aprovado por Natã da Silva Baracho em 10/10/2026** |
 | 2.2 | 10/10/2026 | Ativação e vínculo: colunas novas em `devices` (identificador do lacre, ativação, cilindro e cliente); tipo `ATIVACAO` em `mensagens`; cópia de segurança `bak-antes-da-atualizacao` para banco de versão anterior. **Aprovado por Natã da Silva Baracho em 10/10/2026** |
+| 2.3 | 10/10/2026 | Nova seção 8: como ver o que está na Oxide, pela API e direto no arquivo |
