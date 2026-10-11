@@ -51,7 +51,14 @@ Os itens com ✅ foram feitos e testados pela IA e **aprovados por Natã da Silv
 - ✅ Queda do banco principal por 1 hora com 600 lacres (`npm run simular:queda`): 215.869 leituras guardadas sem recusa, fila esvaziada em 37,5 minutos, nada perdido; 13 de 13.
 - ✅ Tabela `commands` com 3.000 comandos (`npm run simular:comandos`): do sistema ao lacre e de volta, com quedas no meio; 24 de 24.
 - ✅ Coleção do Thunder Client para testar a API na mão (`thunder-client/`) e 4 comandos de exemplo no `oxide.db` do projeto.
-- [ ] Escolher o tamanho do lote do Worker (`WORKER_BATCH_SIZE`) no primeiro teste com o Supabase de verdade: o padrão (100) envia 96 mensagens por segundo; com 500, cerca de 400.
+- ✅ Worker sem pausa quando há fila acumulada: de 96 para 500 a 700 mensagens por segundo na volta de uma queda, com lotes de 100.
+- ✅ Segurança: chave de administrador nas rotas da equipe; chave do lacre só em hash; limite por lacre e por endereço (`429`); corpo até 32 KB; cabeçalhos de proteção; HTTPS direto na API ou por proxy.
+- ✅ Operação: `GET /metrics`; vigia que avisa na tela, em arquivo e num endereço configurado (`npm run vigia`); serviço que religa a API, o Worker e o vigia e faz o backup diário (`npm run servico`).
+- ✅ Gravação garantida em disco como padrão (`GRAVACAO_GARANTIDA`).
+- ✅ Testes novos: suíte com 135 casos (segurança, operação e mesma mensagem no mesmo instante) e desligamento forçado (`npm run simular:desligamento`, 10 de 10).
+- ✅ Tabelas da Oxide reavaliadas: ficam as três (`Oxidedb.md`, "Por que três tabelas").
+- [ ] Conferir a velocidade do Worker no primeiro teste com o Supabase de verdade (o limite passa a ser o que a função de lá aguenta).
+- [ ] Teste de corte de energia com o equipamento de verdade.
 - ✅ Correções achadas pelos testes: banco migrado igual ao banco novo; cópia de segurança antes de qualquer mudança; API espera o Worker em vez de responder `500`; modo WAL (de 40 para 588 pedidos por segundo).
 - ✅ Documentação final para o evento INTEGRA 2026 (`DocumentacaoFinal/`): 19 registros no PR #19, o registro 20 no PR #20 e os registros 21 (teste do banco e teste em massa) e 22 (ativação do lacre e vínculo) no PR #21, e o registro 23 (queda do banco principal e tabela de comandos) no PR #24.
 - ✅ Documentos atualizados para o modelo enxuto; documentos do FluxID marcados como referência histórica.
@@ -63,8 +70,8 @@ Os itens com ✅ foram feitos e testados pela IA e **aprovados por Natã da Silv
 
 ### Ainda a fazer, fora desta entrega
 
-- [ ] Controle por perfil nas rotas abertas da equipe (`/devices`, `/iot/messages`, `/sync`).
-- [ ] HTTPS e limite de requisições.
+- ✅ Rotas da equipe protegidas pela chave de administrador; HTTPS e limite de requisições implementados (11/10/2026).
+- [ ] Usuários e perfis nas rotas da equipe (hoje há uma chave de administrador só).
 - [ ] Atualizar o `nodemon` quando houver versão sem a vulnerabilidade do `braces` (só em desenvolvimento).
 
 ---

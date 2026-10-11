@@ -1,25 +1,15 @@
 import { Router } from "express";
 import { CommandController } from "../controllers/CommandController";
-import {
-  apiKeyDeviceMiddleware,
-  apiKeyMiddleware
-} from "../Middleware/apiKeyMiddleware";
+import { apiKeyDeviceMiddleware, apiKeyMiddleware } from "../middlewares/apiKeyMiddleware";
+import { limitePorDispositivo } from "../middlewares/limite";
 
 const router = Router();
 const controller = new CommandController();
 
-router.get(
-  "/commands/:deviceId",
-  apiKeyMiddleware,
-  apiKeyDeviceMiddleware,
-  controller.findPendingByDevice.bind(controller)
-);
+// O lacre só busca e confirma os próprios comandos
+const lacre = [apiKeyMiddleware, apiKeyDeviceMiddleware, limitePorDispositivo];
 
-router.post(
-  "/commands/confirm",
-  apiKeyMiddleware,
-  apiKeyDeviceMiddleware,
-  controller.confirm.bind(controller)
-);
+router.get("/commands/:deviceId", lacre, controller.findPendingByDevice.bind(controller));
+router.post("/commands/confirm", lacre, controller.confirm.bind(controller));
 
 export default router;

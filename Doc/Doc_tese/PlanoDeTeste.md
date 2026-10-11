@@ -18,11 +18,12 @@ Em 10/10/2026 a API passou a ter uma fila única e a entregar os dados ao Supaba
 | Teste | Comando | Onde roda |
 | --- | --- | --- |
 | Compilação | `npx tsc --noEmit` | Projeto |
-| Suíte (110 casos) | `npm test` | Pasta temporária, banco novo, recebedor de teste no lugar do Supabase |
+| Suíte (135 casos) | `npm test` | Pasta temporária, banco novo, recebedor de teste no lugar do Supabase |
 | Simulador (26 verificações) | `npm run simular` | Pasta temporária, banco novo, recebedor de teste |
 | Teste em massa (32 verificações) | `npm run simular:massa` | Pasta temporária; 500 lacres; API e Worker em processos separados, derrubados no meio; recebedor de teste |
 | Queda do banco principal (13 verificações) | `npm run simular:queda` | Pasta temporária; 600 lacres enviando com o banco principal fora do ar por 60 minutos; mede a fila e o tempo para esvaziar. Leva cerca de 1 hora e 40 minutos |
 | Tabela `commands` (24 verificações) | `npm run simular:comandos` | Pasta temporária; 3.000 comandos de válvula, do sistema principal ao lacre e de volta, com quedas no meio |
+| Desligamento forçado (10 verificações) | `npm run simular:desligamento` | Pasta temporária; 30 lacres enviando sem parar; API derrubada à força 20 vezes e Worker, 10 |
 | Migração do banco real | Roteiro, seção 4 | Numa **cópia** da `oxide.db` |
 
 A suíte e o simulador não tocam no `oxide.db` do projeto nem no banco principal, e podem rodar com a API ligada.
@@ -161,7 +162,7 @@ Princípios:
 - Compilação sem erros.
 
 **Saída (aprovação)**
-- Suíte sem falhas (hoje 110/110).
+- Suíte sem falhas (hoje 135/135).
 - Teste em massa sem falhas (hoje 32/32), quando a entrega mexe no banco, na fila ou no Worker.
 - Simulador sem falhas (hoje 26/26).
 - `oxide.db` do projeto com o mesmo checksum antes e depois.
@@ -575,7 +576,7 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 
 | Indicador | Valor |
 | --- | --- |
-| Suíte automatizada (`npm test`) | **Modelo enxuto:** 110 casos, 110 aprovados em 10/10/2026 (aprovado por Natã da Silva Baracho); eram 92 antes do grupo 13 (ativação e vínculo) e 71 antes do grupo 12 (banco direto no SQLite, volume e gravação ao mesmo tempo). Modelo anterior: 96 casos aprovados em 07/10/2026 |
+| Suíte automatizada (`npm test`) | **Modelo enxuto:** 135 casos, 135 aprovados em 11/10/2026 (aprovado por Natã da Silva Baracho); eram 110 antes dos grupos 14 (segurança), 15 (operação) e 16 (mesma mensagem no mesmo instante), 92 antes do grupo 13 (ativação e vínculo) e 71 antes do grupo 12 (banco direto no SQLite, volume e gravação ao mesmo tempo). Modelo anterior: 96 casos aprovados em 07/10/2026 |
 | Simulador (`npm run simular`) | 23 de 23 verificações em 10/10/2026 |
 | Compilação (`npx tsc --noEmit`) | Sem erros em 10/10/2026 |
 | Relatórios | [Relatorio-de-Teste-2026-10-06-15h14.md](Relatorio-de-Teste-2026-10-06-15h14.md): correções e ajustes da entrega; [Relatorio-de-Teste-2026-10-06-15h49.md](Relatorio-de-Teste-2026-10-06-15h49.md): teste completo da API e do banco no `oxide.db` real. [Relatorio-de-Teste-2026-10-06-17h35.md](Relatorio-de-Teste-2026-10-06-17h35.md): entrega A (segurança); [Relatorio-de-Teste-2026-10-06-19h28.md](Relatorio-de-Teste-2026-10-06-19h28.md): entrega C (severidade e coordenadas); [Relatorio-de-Teste-2026-10-06-20h00.md](Relatorio-de-Teste-2026-10-06-20h00.md): entrega E (banco FluxID); [Relatorio-de-Teste-2026-10-06-20h35.md](Relatorio-de-Teste-2026-10-06-20h35.md): entrega D (catálogo de comandos e tipos de erro); [Relatorio-de-Teste-2026-10-06-21h31.md](Relatorio-de-Teste-2026-10-06-21h31.md): entrega B (associação); [Relatorio-de-Teste-2026-10-06-23h40.md](Relatorio-de-Teste-2026-10-06-23h40.md): alertas em português, análise e encerramento; [Relatorio-de-Teste-2026-10-07-00h15.md](Relatorio-de-Teste-2026-10-07-00h15.md): FluxID, alerta com cilindro e lacre obrigatórios; [Relatorio-de-Teste-2026-10-07-00h45.md](Relatorio-de-Teste-2026-10-07-00h45.md): grupos do Swagger e FluxID no Docker; [Relatorio-de-Teste-2026-10-07-01h30.md](Relatorio-de-Teste-2026-10-07-01h30.md): integração Oxide ⇄ FluxID; [Relatorio-de-Teste-2026-10-07-18h45.md](Relatorio-de-Teste-2026-10-07-18h45.md): simulador do lacre e série do cilindro; [Relatorio-de-Teste-2026-10-10-12h40.md](Relatorio-de-Teste-2026-10-10-12h40.md): Oxide enxuta, fila única e envio ao Supabase. Todos **aprovados por Natã da Silva Baracho** |
@@ -644,5 +645,6 @@ Baseados nos critérios de aceite do `Banco_FluxID.md` (seção 15).
 | 2.1 | 10/10/2026 | Teste do banco e teste em massa: suíte com 92 casos (novo grupo 12, com as regras do banco direto no SQLite, volume com 100.000 mensagens e gravação ao mesmo tempo); novo teste em massa com 500 lacres e quedas provocadas (`npm run simular:massa`); relatórios `Relatorio-de-Teste-2026-10-10-13h45.md` e `Relatorio-de-Teste-2026-10-10-14h00.md`. **Aprovado por Natã da Silva Baracho** |
 | 2.2 | 10/10/2026 | Ativação do lacre e vínculo com o cilindro e o cliente: suíte com 110 casos (novo grupo 13 e um caso da posição repetida no instante do envio); simulador com 26 verificações; teste em massa com 32, com a etapa de ativação e vinculação antes da viagem; relatório `Relatorio-de-Teste-2026-10-10-20h00.md`. **Aprovado por Natã da Silva Baracho** |
 | 2.3 | 10/10/2026 | Dois testes novos: queda do banco principal por 1 hora com 600 lacres (`npm run simular:queda`, 13 verificações) e tabela `commands` com 3.000 comandos (`npm run simular:comandos`, 24 verificações); relatório `Relatorio-de-Teste-2026-10-10-22h50.md`. **Aprovado por Natã da Silva Baracho** |
+| 2.4 | 11/10/2026 | Segurança e operação: suíte com 135 casos (grupo 14: chave de administrador, chave só em hash, limites, cabeçalhos e HTTPS; grupo 15: métricas, vigia e serviço; grupo 16: mesma mensagem no mesmo instante); novo teste de desligamento forçado (`npm run simular:desligamento`, 10 verificações); relatório `Relatorio-de-Teste-2026-10-11-00h30.md`. **Aprovado por Natã da Silva Baracho** |
 | 1.12 | 07/10/2026 | Simulador do lacre (seção 10.7, SIM-01 a SIM-09); ASC-13 revisto (série repetida aceita; achado A3) |
 | 1.11 | 07/10/2026 | Integração Oxide ⇄ FluxID implementada: SYN-01 a SYN-16 revistos com as regras aprovadas, novos SYN-17 a SYN-24 e INT-01 a INT-07; BD-01 e BD-02 com `sync_logs`; página `/api-docs-fluxid` com a proposta da API do frontend (GER-07, GER-08); suíte com 96 casos. Teste formal da IA em 07/10/2026, sem falhas |

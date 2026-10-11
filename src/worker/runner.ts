@@ -1,10 +1,10 @@
-import { randomBytes } from "crypto";
 import fs from "fs";
 import path from "path";
 import { commandTypes } from "../models/Command";
 import { CommandRepository } from "../repositories/CommandRepository";
 import { DeviceRepository } from "../repositories/DeviceRepository";
 import { MessageRepository } from "../repositories/MessageRepository";
+import { marcaSemChave } from "../utils/apiKeyHash";
 import { WorkerConfig } from "./config";
 import {
   DestinoIndisponivel, PedidoRecusado, enviarMensagens, listarComandos, listarDispositivos
@@ -15,7 +15,7 @@ const messages = new MessageRepository();
 const devices = new DeviceRepository();
 const commands = new CommandRepository();
 
-const MAX_LOTES_POR_RODADA = 10;
+export const MAX_LOTES_POR_RODADA = 10;
 
 export interface CycleResult {
   status: "OK" | "PARCIAL" | "FALHOU";
@@ -48,7 +48,7 @@ async function trazerDispositivos(config: WorkerConfig, result: CycleResult): Pr
   for (const d of lista) {
     const feito = devices.upsertFromMain(
       d.device_id, d.api_key_hash, d.active ? 1 : 0, d.firmware_version ?? null,
-      `sem-chave-em-texto:${randomBytes(12).toString("hex")}`
+      marcaSemChave()
     );
     contagem[feito === "criado" ? "criados" : "atualizados"]++;
     if (d.binding === undefined) continue;

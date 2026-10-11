@@ -214,12 +214,12 @@ Roda numa pasta temporária, com uma `oxide.db` nova, a própria API na porta 31
 
 - Teste contra o Supabase de verdade: depende da função de recebimento e das tabelas do lacre no projeto do frontend.
 - Envio HTTP ligado no firmware (o contrato está no guia do firmware 2.0) e a leitura da bateria no lacre.
-- Controle por perfil nas rotas abertas da equipe (`/devices`, `/iot/messages` e `/sync`).
-- HTTPS e limite de requisições.
+- Usuários e perfis nas rotas da equipe: hoje há uma chave de administrador só.
+- Teste de corte de energia com o equipamento de verdade.
 
 ## 1.10 Estado atual
 
-- API, fila única e Worker implementados e testados pela IA em 10/10/2026: suíte com 110/110, simulador com 26/26 e teste em massa com 32/32, contra um recebedor de teste. **Aprovado por Natã da Silva Baracho em 10/10/2026** (seções 7.26 a 7.28).
+- API, fila única e Worker implementados e testados pela IA em 10/10/2026: suíte com 135/135, simulador com 26/26, teste em massa com 32/32, queda do banco principal com 13/13, tabela `commands` com 24/24 e desligamento forçado com 10/10, contra um recebedor de teste. **Aprovado por Natã da Silva Baracho** (seções 7.26 a 7.30).
 - O banco principal passou a ser o Supabase. O FluxID em PostgreSQL ficou como banco de teste.
 - Próximos passos:
   - o professor Alisson cria a função de recebimento e passa o endereço;
@@ -238,7 +238,9 @@ Registro em ordem cronológica. Descreve o estado da API **no momento de cada re
 | --- | --- |
 | `src/server.ts` | Inicializa o Express, registra rotas, Swagger e o tratamento de erros |
 | `src/database/connection.ts` | Conexão `better-sqlite3`, criação de tabelas e migrações automáticas |
-| `src/Middleware/` | `apiKeyMiddleware.ts` (chave válida, chave do próprio dispositivo) e `Errohandler.ts` |
+| `src/middlewares/` | `apiKeyMiddleware.ts` (chave do lacre), `adminMiddleware.ts` (chave de administrador), `limite.ts` (limites por minuto) e `errorHandler.ts`. Até 10/10/2026 a pasta era `src/Middleware/` |
+| `src/metricas.ts` | Contadores e a rota `GET /metrics` |
+| `src/manutencao/` | `backup.ts`, `retencao.ts`, `vigia.ts` (avisos) e `servico.ts` (mantém tudo ligado) |
 | `src/routes/` | Rotas de dispositivos, telemetria, eventos, comandos, alertas e associação (`assetRoutes.ts`: lacres, cilindros e vínculos) |
 | `src/controllers/` | Validação do payload e montagem das respostas HTTP |
 | `src/services/` | Regras de negócio (duplicidade, posição repetida, cadastro) |
@@ -677,9 +679,42 @@ Também a pedido de Natã:
 
 Relatório: [Relatorio-de-Teste-2026-10-10-22h50.md](Doc_tese/Relatorio-de-Teste-2026-10-10-22h50.md). Questionário respondido: **aprovado por Natã da Silva Baracho em 10/10/2026**.
 
+### 7.30 Segurança, operação e os testes que faltavam (11/10/2026)
+
+Pedido de Natã: levar cada área do projeto à nota máxima e reavaliar se o banco local precisa mesmo de três tabelas. A avaliação que serviu de base apontou a segurança (nota 6) e a operação (nota 7) como os pontos fracos.
+
+**Segurança**
+- **Chave de administrador** (`X-Admin-Key`) nas rotas da equipe: dispositivos, mensagens, fila e métricas. Antes, eram abertas: qualquer pessoa na rede podia cadastrar um dispositivo e enviar dados como se fosse um lacre. Sem chave configurada, as rotas ficam fechadas (`503`).
+- **Chave do lacre só em hash:** o cadastro de bancada deixou de guardar a chave em texto. Banco de versão anterior é convertido ao ligar, e o lacre continua entrando com a mesma chave.
+- **Limites:** 120 mensagens por minuto por lacre; 60 chaves erradas por minuto por endereço. Acima disso, `429` com `Retry-After`. Corpo até 32 KB (`413`).
+- **HTTPS** direto na API (certificado no `.env`) ou por proxy; cabeçalhos de proteção em toda resposta.
+- Código dos alertas automáticos com mais caracteres aleatórios, para não repetir sob carga.
+
+**Operação**
+- **`GET /metrics`:** pedidos, respostas, tempos, fila (com a idade da mensagem mais antiga), banco e memória; também no formato do Prometheus.
+- **Vigia** (`npm run vigia`): avisa, quando aparece e quando se resolve, API fora do ar, banco principal fora do ar, Worker parado, fila grande, fila atrasada, mensagem parada e banco grande. Na tela, em arquivo e num endereço configurado.
+- **Serviço** (`npm run servico`): liga a API, o Worker e o vigia, religa o que parar e faz o backup diário.
+- **Worker sem pausa na volta:** com fila acumulada, a rodada seguinte começa em seguida. De 96 para 718 mensagens por segundo, com o mesmo lote de 100.
+
+**Banco**
+- **Gravação garantida em disco** como padrão. Achado importante: o componente de banco usava, por padrão, um modo em que um corte de energia podia levar as mensagens do último instante. Os números de velocidade de 10/10/2026 (cerca de 600 pedidos por segundo) foram medidos nesse modo. Com a gravação garantida, o teste em massa atende 226 pedidos por segundo; o modo rápido continua disponível (`GRAVACAO_GARANTIDA=false`).
+- **Três tabelas, reavaliadas:** ficam as três. É o mínimo para a API funcionar com o banco principal fora do ar (`Oxidedb.md`, "Por que três tabelas").
+
+**Organização**
+- Pasta `src/Middleware/` renomeada para `src/middlewares/`, e `Errohandler.ts` para `errorHandler.ts`; nome e versão no `package.json` (`api-do-lacre` 2.1.0).
+
+**Testes**
+- suíte: 135 de 135 (25 casos novos: segurança, operação e mesma mensagem no mesmo instante);
+- desligamento forçado (`npm run simular:desligamento`, novo): API derrubada à força 20 vezes e Worker, 10; 9.042 mensagens confirmadas, nenhuma perdida, nenhuma duplicada; 10 de 10;
+- simulador 26 de 26; teste em massa 32 de 32; tabela `commands` 24 de 24; queda do banco principal por 10 minutos 13 de 13.
+
+**O que não foi testado:** corte de energia de verdade (o teste encerra os programas, com o sistema operacional de pé), o Supabase e o lacre de verdade.
+
+Novo documento: [Seguranca-e-Operacao.md](Seguranca-e-Operacao.md). Relatório: [Relatorio-de-Teste-2026-10-11-00h30.md](Doc_tese/Relatorio-de-Teste-2026-10-11-00h30.md).
+
 ## 9. Suíte de testes automatizados (`npm test`)
 
-A suíte `tests/api.test.ts` foi reescrita em 10/10/2026 para o modelo enxuto e cobre 110 casos: os grupos abaixo e, desde 10/10/2026, o grupo 12 (regras do banco direto no SQLite, volume com 100.000 mensagens e gravação ao mesmo tempo) e o grupo 13 (ativação do lacre e vínculo com o cilindro e o cliente). Ela roda numa pasta temporária, com uma `oxide.db` nova e um recebedor de teste no lugar do Supabase.
+A suíte `tests/api.test.ts` foi reescrita em 10/10/2026 para o modelo enxuto e cobre 135 casos: os grupos abaixo e, desde 10/10/2026, o grupo 12 (regras do banco direto no SQLite, volume com 100.000 mensagens e gravação ao mesmo tempo) e o grupo 13 (ativação do lacre e vínculo com o cilindro e o cliente); desde 11/10/2026, os grupos 14 (segurança), 15 (métricas, vigia e serviço) e 16 (mesma mensagem no mesmo instante). Ela roda numa pasta temporária, com uma `oxide.db` nova e um recebedor de teste no lugar do Supabase.
 
 1. **Geral, documentação e banco:** `/`, Swagger, regra de que toda rota tem um grupo, banco com só 3 tabelas e rota antiga removida.
 2. **Dispositivos:** cadastro provisório, duplicidades (`409`), validações (`400`) e respostas sem a chave.
@@ -703,7 +738,7 @@ A suíte anterior (96 casos, modelo com filas separadas e envio ao FluxID) está
 
 # Parte 3 — Histórico de PRs por funcionalidade
 
-Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validação **aprovada por Natã da Silva Baracho**. O #20 (Oxide enxuta) foi **aprovado por Natã da Silva Baracho** em 10/10/2026 e mesclado no mesmo dia. O #21 (teste do banco, teste em massa, modo WAL e, depois, ativação e vínculo) foi **aprovado por Natã da Silva Baracho** em 10/10/2026. O #22 levou à `main` o primeiro commit do #21, que tinha ficado na branch antiga; o conteúdo é o mesmo. O #21 foi mesclado em 10/10/2026. O #23 só mexe em documentos (porta e endereços da API), a pedido de Natã, e foi mesclado em 10/10/2026. O #24 traz os testes da queda do banco principal e da tabela `commands`, **aprovado por Natã da Silva Baracho** em 10/10/2026. Esta parte e a seção "Quem faz o quê" (1.1) foram conferidas por questionário (6/6 sim) e **aprovadas por Natã da Silva Baracho** em 06/10/2026. O PR que mexeu em mais de uma parte aparece em cada grupo, só com o que mudou naquela parte. A cada novo PR, esta parte é atualizada.
+Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validação **aprovada por Natã da Silva Baracho**. O #20 (Oxide enxuta) foi **aprovado por Natã da Silva Baracho** em 10/10/2026 e mesclado no mesmo dia. O #21 (teste do banco, teste em massa, modo WAL e, depois, ativação e vínculo) foi **aprovado por Natã da Silva Baracho** em 10/10/2026. O #22 levou à `main` o primeiro commit do #21, que tinha ficado na branch antiga; o conteúdo é o mesmo. O #21 foi mesclado em 10/10/2026. O #23 só mexe em documentos (porta e endereços da API), a pedido de Natã, e foi mesclado em 10/10/2026. O #24 traz os testes da queda do banco principal e da tabela `commands`, **aprovado por Natã da Silva Baracho** em 10/10/2026, e foi mesclado no mesmo dia. O #25 traz a segurança, a operação e os testes que faltavam. Esta parte e a seção "Quem faz o quê" (1.1) foram conferidas por questionário (6/6 sim) e **aprovadas por Natã da Silva Baracho** em 06/10/2026. O PR que mexeu em mais de uma parte aparece em cada grupo, só com o que mudou naquela parte. A cada novo PR, esta parte é atualizada.
 
 ## 3.1 API
 
@@ -722,6 +757,7 @@ Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validaç�
 | #21 | Teste do banco, teste em massa e modo WAL | As operações que gravam pedem a vez no início e esperam a do Worker, em vez de responder `500`; novo `npm run simular:massa`; **ativação e vínculo:** rota `POST /iot/activations`, identificador do lacre gerado pela API, mensagem `ATIVACAO`, cilindro e cliente em toda mensagem e alerta automático `LACRE_SEM_CILINDRO` |
 | #23 | Porta e endereços nos documentos | Sem mudança no código. A porta (3000) e os endereços para entrar na API ficaram explícitos no README, no `Como-o-Sistema-se-Comporta.md` (seção 13) e no `ESP32-envio-de-dados.md`; lista completa dos endpoints, separando os que o lacre usa dos que mostram o que está na Oxide, no README, no `Como-o-Sistema-se-Comporta.md` (seção 14) e no `Oxidedb.md` (seção 8); `PORT` documentada no `.env.example`; aviso no `Contrato-API-Frontend.md` de que as rotas `/api/v1/app` não existem; README reorganizado (situação atual, configuração, comandos, testes, regras com a ativação e o vínculo, pastas e documentos por público) |
 | #24 | Queda do banco principal e tabela `commands` | Sem mudança nas regras. Dois testes novos: `npm run simular:queda` (600 lacres, 1 hora com o banco principal fora do ar) e `npm run simular:comandos` (3.000 comandos de válvula); coleção do Thunder Client para testar a API na mão |
+| #25 | Segurança, operação e testes que faltavam | Chave de administrador nas rotas da equipe; limites por lacre e por endereço (`429`); corpo até 32 KB; HTTPS opcional; cabeçalhos de proteção; `GET /metrics`; vigia e serviço; pasta `middlewares` |
 
 ## 3.2 Oxide (`oxide.db`)
 
@@ -737,6 +773,7 @@ Os PRs até o #19 foram mesclados na `main` entre 06 e 09/10/2026, com validaç�
 | #20 | Oxide enxuta e envio ao Supabase | De 11 para 3 tabelas (`devices`, `mensagens`, `commands`); migração com cópia de segurança (leituras antigas completas seguem para o banco principal; as demais ficam arquivadas); backup e retenção; `Oxidedb.md` v2.0 |
 | #21 | Teste do banco, teste em massa e modo WAL | A migração refaz `devices` e `commands` no formato atual; cópia de segurança antes de qualquer mudança; modo WAL (de 40 para 588 pedidos por segundo no teste com 500 lacres); backup num arquivo só; `Oxidedb.md` 2.1; colunas da ativação e do vínculo em `devices` e tipo `ATIVACAO` em `mensagens`; `oxide.db` do projeto convertido; `Oxidedb.md` 2.2 |
 | #24 | Queda do banco principal e tabela `commands` | Oxide guardou 215.869 leituras em 1 hora (137 MB), sem recusa; 4 comandos de exemplo no `oxide.db` do projeto; `Oxidedb.md` 2.4 |
+| #25 | Segurança, operação e testes que faltavam | Chave do lacre só em hash; gravação garantida em disco como padrão; três tabelas reavaliadas e mantidas; teste de desligamento forçado; `Oxidedb.md` 2.5 |
 
 ## 3.3 FluxID
 
@@ -773,3 +810,4 @@ Implementado e aprovado em 07/10/2026 (PR #15). O que levou até ele:
 | #20 | Oxide enxuta e envio ao Supabase | Worker reescrito: envia a fila única por HTTP à função de recebimento do Supabase, com resultado por mensagem, e traz os dispositivos e os comandos; simulador novo com recebedor de teste |
 | #21 | Teste do banco, teste em massa e modo WAL | Marcação do lote pede a vez de gravar no início; teste em massa com o Worker derrubado e religado no meio, sem perda e sem duplicidade; o Worker traz o vínculo de cada lacre (`binding`); corrigida a posição repetida no instante do envio |
 | #24 | Queda do banco principal e tabela `commands` | Medida a velocidade da volta: 96 mensagens por segundo com o lote padrão (216.000 mensagens em 37,5 minutos); cerca de 400 com lotes de 500. `WORKER_BATCH_SIZE` documentada no `.env.example` |
+| #25 | Segurança, operação e testes que faltavam | Sem pausa entre as rodadas quando há fila acumulada: de 96 para 718 mensagens por segundo na volta de uma queda |

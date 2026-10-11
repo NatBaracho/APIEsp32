@@ -29,6 +29,9 @@ async function main(): Promise<number> {
   process.env.PORT = String(PORTA);
   process.env.SUPABASE_IOT_URL = recebedor.url;
   process.env.SUPABASE_SERVICE_KEY = recebedor.chave;
+  // Chave de administrador só desta simulação, para as rotas da equipe
+  const ADMIN = "chave-de-administrador-da-simulacao";
+  process.env.ADMIN_API_KEY = ADMIN;
 
   // Só depois do chdir: a Oxide aberta é a da pasta temporária
   /* eslint-disable @typescript-eslint/no-require-imports */
@@ -42,7 +45,7 @@ async function main(): Promise<number> {
   const config = loadWorkerConfig();
   const worker = (cadastro = false) => runCycle(config, { withCadastro: cadastro });
   const chamar = async (metodo: string, rota: string, corpo?: unknown, chave?: string) => {
-    const init: RequestInit = { method: metodo, headers: { "content-type": "application/json", ...(chave ? { "x-api-key": chave } : {}) } };
+    const init: RequestInit = { method: metodo, headers: { "content-type": "application/json", "x-admin-key": ADMIN, ...(chave ? { "x-api-key": chave } : {}) } };
     if (corpo !== undefined) init.body = JSON.stringify(corpo);
     const res = await fetch(`${base}${rota}`, init);
     return { status: res.status, json: (await res.json().catch(() => null)) as any };

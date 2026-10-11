@@ -40,34 +40,46 @@ const errosDoLacre = {
   "401": resposta("X-API-Key ausente ou inválida", { success: false, message: "API Key obrigatória" }),
   "403": resposta("Chave de outro dispositivo, ou dispositivo desativado", { success: false, message: "API Key não pertence ao dispositivo" }),
   "404": resposta("Dispositivo não cadastrado", { success: false, message: "Dispositivo não encontrado" }),
-  "409": resposta("Mensagem já recebida (não reenviar)", { success: false, message: "Mensagem duplicada" })
+  "409": resposta("Mensagem já recebida (não reenviar)", { success: false, message: "Mensagem duplicada" }),
+  "413": resposta("Corpo maior que 32 KB"),
+  "429": resposta("Limite de requisições por minuto atingido; o cabeçalho Retry-After diz quantos segundos esperar", { success: false, message: "Muitas requisições deste dispositivo; tente de novo em 42 s" })
 };
 
 const chave = [{ ApiKeyAuth: [] }];
+// Rotas da equipe: chave de administrador
+const admin = [{ AdminKeyAuth: [] }];
+const errosDaEquipe = {
+  "401": resposta("X-Admin-Key ausente ou inválida", { success: false, message: "Chave de administrador obrigatória (cabeçalho X-Admin-Key)" }),
+  "429": resposta("Muitas tentativas com chave inválida a partir deste endereço"),
+  "503": resposta("Chave de administrador não configurada no servidor (ADMIN_API_KEY)")
+};
 
 const openApiSpec = {
   openapi: "3.0.3",
   info: {
     title: "API ESP32",
-    version: "2.0.0",
+    version: "2.1.0",
     description: [
       "API que recebe os dados do lacre (ESP32), valida, guarda numa fila local (Oxide) e envia ao banco principal (Supabase) pelo Worker.",
       "",
       "Toda mensagem do lacre leva **posição e bateria**. Sem sinal de GPS, o lacre manda a última posição conhecida com `gps_ok: false`.",
       "",
-      "Para as rotas do lacre, clique em **Authorize** e informe a chave do dispositivo (`X-API-Key`)."
+      "Para as rotas do lacre, clique em **Authorize** e informe a chave do dispositivo (`X-API-Key`).",
+      "",
+      "As rotas de **Dispositivos** e de **Acompanhamento** são da equipe: exigem a chave de administrador (`X-Admin-Key`), definida no `.env` do servidor."
     ].join("\n")
   },
   servers: [{ url: "http://localhost:3000", description: "Servidor local" }],
   tags: [
     { name: "Lacre", description: "O que o lacre envia: telemetria, eventos e alertas (exige a X-API-Key do próprio dispositivo)" },
     { name: "Comandos", description: "O lacre busca os comandos pendentes (TRAVAR_VALVULA, DESTRAVAR_VALVULA) e confirma EXECUTADO ou ERRO" },
-    { name: "Dispositivos", description: "Consulta e cadastro provisório. O cadastro oficial vem do banco principal; a chave nunca aparece nas respostas" },
-    { name: "Acompanhamento", description: "Mensagens recebidas, situação da fila, erros de envio e saúde da API (rotas abertas e provisórias)" }
+    { name: "Dispositivos", description: "Consulta e cadastro de bancada (exige a X-Admin-Key). O cadastro oficial vem do banco principal; só o hash da chave é guardado, e ela nunca aparece nas respostas" },
+    { name: "Acompanhamento", description: "Mensagens recebidas, situação da fila, erros de envio e métricas (exigem a X-Admin-Key) e a saúde da API (aberta)" }
   ],
   components: {
     securitySchemes: {
-      ApiKeyAuth: { type: "apiKey", in: "header", name: "X-API-Key" }
+      ApiKeyAuth: { type: "apiKey", in: "header", name: "X-API-Key", description: "Chave do dispositivo (lacre)" },
+      AdminKeyAuth: { type: "apiKey", in: "header", name: "X-Admin-Key", description: "Chave de administrador, para as rotas da equipe" }
     }
   },
   paths: {
@@ -150,7 +162,7 @@ const openApiSpec = {
         parameters: [{ name: "deviceId", in: "path", required: true, schema: { type: "string" }, example: "DSP-000001" }],
         responses: {
           "200": resposta("Lista (vazia quando não há comando)", [{ command_id: "CMD-000007", device_id: "DSP-000001", command_type: "TRAVAR_VALVULA", status: "PENDENTE", created_at: "2026-10-10 12:00:00" }] as unknown as object),
-          "401": errosDoLacre["401"], "403": errosDoLacre["403"], "404": errosDoLacre["404"]
+          "401": errosDoLacre["401"], "403": errosDoLacre["403"], "429": errosDoLacre["429"], "404": errosDoLacre["404"]
         }
       }
     },
@@ -169,7 +181,7 @@ const openApiSpec = {
         ),
         responses: {
           "200": resposta("Comando confirmado", { success: true, message: "Comando confirmado" }),
-          "400": resposta("Dados inválidos"), "401": errosDoLacre["401"], "403": errosDoLacre["403"],
+          "400": resposta("Dados inválidos"), "401": errosDoLacre["401"], "403": errosDoLacre["403"], "429": errosDoLacre["429"],
           "404": resposta("Comando não encontrado para este dispositivo"),
           "409": resposta("Comando já confirmado")
         }
@@ -178,12 +190,14 @@ const openApiSpec = {
     "/api/v1/devices": {
       get: {
         tags: ["Dispositivos"],
-        summary: "Listar os dispositivos (sem a chave)",
-        responses: { "200": resposta("Lista de dispositivos, com o último estado recebido") }
+        summary: "Listar os dispositivos (sem a chave deles)",
+        security: admin,
+        responses: { "200": resposta("Lista de dispositivos, com o último estado, o identificador do lacre e o vínculo"), ...errosDaEquipe }
       },
       post: {
         tags: ["Dispositivos"],
-        summary: "Cadastrar um dispositivo (provisório, para testes)",
+        summary: "Cadastrar um dispositivo (de bancada, para testes). Só o hash da chave é guardado",
+        security: admin,
         requestBody: jsonBody(
           { device_id: { type: "string" }, api_key: { type: "string" }, firmware_version: { type: "string" }, active: { type: "integer", enum: [0, 1] } },
           ["device_id", "api_key"],
@@ -191,7 +205,7 @@ const openApiSpec = {
         ),
         responses: {
           "201": resposta("Dispositivo criado"), "400": resposta("Dados inválidos"),
-          "409": resposta("device_id ou api_key já cadastrados")
+          "409": resposta("device_id ou api_key já cadastrados"), ...errosDaEquipe
         }
       }
     },
@@ -199,48 +213,62 @@ const openApiSpec = {
       get: {
         tags: ["Dispositivos"],
         summary: "Buscar um dispositivo",
+        security: admin,
         parameters: [{ name: "deviceId", in: "path", required: true, schema: { type: "string" } }],
-        responses: { "200": resposta("Dispositivo"), "404": resposta("Dispositivo não encontrado") }
+        responses: { "200": resposta("Dispositivo"), "404": resposta("Dispositivo não encontrado"), ...errosDaEquipe }
       }
     },
     "/api/v1/iot/messages": {
       get: {
         tags: ["Acompanhamento"],
         summary: "Últimas mensagens recebidas",
+        security: admin,
         parameters: [
           { name: "type", in: "query", schema: { type: "string", enum: ["TELEMETRIA", "EVENTO", "ALERTA", "CONFIRMACAO_COMANDO", "ATIVACAO"] } },
           { name: "device_id", in: "query", schema: { type: "string" } },
           { name: "limit", in: "query", schema: { type: "integer", default: 50, maximum: 200 } }
         ],
-        responses: { "200": resposta("Mensagens, da mais recente para a mais antiga, com a situação do envio") }
+        responses: { "200": resposta("Mensagens, da mais recente para a mais antiga, com a situação do envio"), ...errosDaEquipe }
       }
     },
     "/api/v1/sync/status": {
       get: {
         tags: ["Acompanhamento"],
         summary: "Situação da fila e da última rodada do Worker",
-        responses: { "200": resposta("Contagem por situação", { fila: { pendentes: 2, enviando: 0, nova_tentativa: 0, paradas: 0, sincronizadas: 120, arquivadas: 0 }, ultima_rodada: null }) }
+        security: admin,
+        responses: { "200": resposta("Contagem por situação", { fila: { pendentes: 2, enviando: 0, nova_tentativa: 0, paradas: 0, sincronizadas: 120, arquivadas: 0 }, ultima_rodada: null }), ...errosDaEquipe }
       }
     },
     "/api/v1/sync/problems": {
       get: {
         tags: ["Acompanhamento"],
         summary: "Mensagens que não chegaram ao banco principal, com o motivo",
-        responses: { "200": resposta("Lista de mensagens com erro") }
+        security: admin,
+        responses: { "200": resposta("Lista de mensagens com erro"), ...errosDaEquipe }
       }
     },
     "/api/v1/sync/retry": {
       post: {
         tags: ["Acompanhamento"],
         summary: "Devolver à fila uma mensagem com erro (depois de corrigir a causa)",
+        security: admin,
         requestBody: jsonBody({ message_id: { type: "string" } }, ["message_id"], { message_id: "MSG-000123" }),
-        responses: { "200": resposta("Mensagem devolvida à fila"), "400": resposta("message_id ausente"), "404": resposta("Mensagem com erro não encontrada") }
+        responses: { "200": resposta("Mensagem devolvida à fila"), "400": resposta("message_id ausente"), "404": resposta("Mensagem com erro não encontrada"), ...errosDaEquipe }
+      }
+    },
+    "/metrics": {
+      get: {
+        tags: ["Acompanhamento"],
+        summary: "Números de funcionamento: pedidos, respostas, tempos, fila e banco",
+        security: admin,
+        parameters: [{ name: "formato", in: "query", schema: { type: "string", enum: ["prometheus"] }, description: "Com prometheus, responde em texto" }],
+        responses: { "200": resposta("Contadores desde que a API foi ligada e situação atual da fila"), ...errosDaEquipe }
       }
     },
     "/health": {
       get: {
         tags: ["Acompanhamento"],
-        summary: "Saúde da API, da fila e do Worker",
+        summary: "Saúde da API, da fila e do Worker (aberta, sem chave)",
         responses: { "200": resposta("Tudo em ordem"), "503": resposta("Worker parado, atrasado ou com falha") }
       }
     }

@@ -233,7 +233,7 @@ export class MessageService {
     const bateriaMinima = limite("REGRA_BATERIA_MINIMA", 15);
     const sinalMinimo = limite("REGRA_SINAL_MINIMO_DBM", -105);
     const abrir = (tipo: AlertType, descricao: string): void => {
-      const id = `AUT-${Date.now().toString(36).toUpperCase()}-${randomBytes(2).toString("hex").toUpperCase()}`;
+      const id = `AUT-${Date.now().toString(36).toUpperCase()}-${randomBytes(6).toString("hex").toUpperCase()}`;
       this.messages.enqueue(id, leitura.device_id, "ALERTA", {
         type: "ALERTA", origin: "servidor", received_at: agora, ...vinculoDe(device), message_id: id, device_id: leitura.device_id,
         alert_type: tipo, severity: defaultSeverityByType[tipo], title: titulos[tipo] ?? tipo, description: descricao,

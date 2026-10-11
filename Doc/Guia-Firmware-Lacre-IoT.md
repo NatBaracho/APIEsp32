@@ -250,7 +250,8 @@ Os demais códigos de alerta estão em [Tipos-de-Erro.md](Tipos-de-Erro.md).
 | `401` | Chave ausente ou errada, ou lacre ainda não cadastrado | Conferir a chave configurada; não insistir |
 | `403` | Chave de outro dispositivo, ou dispositivo desativado | Conferir `device_id` e chave; não insistir |
 | `404` | Dispositivo não cadastrado | Avisar a equipe; não insistir |
-| `413` | Corpo grande demais | Não reenviar; reduzir o conteúdo |
+| `413` | Corpo grande demais (acima de 32 KB) | Não reenviar; reduzir o conteúdo |
+| `429` | O lacre passou de 120 mensagens por minuto, ou o endereço errou a chave vezes demais | **Esperar** os segundos do cabeçalho `Retry-After` e reenviar a mesma mensagem, com o mesmo `message_id` |
 | `500` ou sem resposta | Problema no servidor ou na rede | **Reenviar** a mesma mensagem, com o mesmo `message_id` e `attempt_count + 1` |
 
 ## 7. Sem rede: fila local e reenvio
@@ -414,3 +415,4 @@ void VerificarComandos() {
 | 1.0 | 07/10/2026 | Primeira versão |
 | 2.0 | 10/10/2026 | Posição e bateria obrigatórias; `gps_ok`; `satelites`, `hdop` e `device_state`; exemplo no estilo do firmware `fluxid-firmware`; banco principal passa a ser o Supabase |
 | 2.1 | 10/10/2026 | Nova seção 4.6: aviso de ativação e de desativação (`POST /iot/activations`); o servidor gera o identificador do lacre. **Aprovado por Natã da Silva Baracho em 10/10/2026** |
+| 2.2 | 11/10/2026 | Resposta `429` (limite de 120 mensagens por minuto por lacre) e limite de 32 KB por mensagem |

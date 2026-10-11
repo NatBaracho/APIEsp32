@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { MessageRepository } from "../repositories/MessageRepository";
 import { lerUltimaRodada } from "../worker/runner";
 
-// Acompanhamento da fila (rotas abertas e provisórias, para a equipe)
+// Acompanhamento da fila, para a equipe (exige a chave de administrador)
 export class SyncController {
 
   private messages = new MessageRepository();

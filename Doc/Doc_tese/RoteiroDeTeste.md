@@ -40,7 +40,7 @@ sha256sum oxide.db
 # [compilação] Esperado: nenhuma saída
 npx tsc --noEmit
 
-# [V2-GER-01 a V2-OPE-02] Esperado: "Total de Testes: 110", "Passaram: 110", "Falharam: 0"
+# [V2-GER-01 a V2-OPE-02] Esperado: "Total de Testes: 135", "Passaram: 135", "Falharam: 0"
 npm test 2>&1 | grep -E "❌|Total de Testes|Passaram|Falharam"
 
 # [simulador] Esperado: "Resultado: 26 de 26 verificações conforme; 0 falha(s)."
@@ -53,6 +53,10 @@ npm run simular:massa 2>&1 | grep -E "^❌|^===|Duração|Tempo de resposta|Resu
 # [tabela commands] 3.000 comandos de válvula, com quedas no meio.
 # Esperado: "Resultado: 24 de 24 verificações conforme; 0 falha(s)."
 npm run simular:comandos 2>&1 | grep -E "^❌|^===|Resultado:"
+
+# [desligamento forçado] API derrubada à força 20 vezes e Worker, 10, com 30 lacres enviando.
+# Esperado: "Resultado: 10 de 10 verificações conforme; 0 falha(s)."
+npm run simular:desligamento 2>&1 | grep -E "^❌|^===|Resultado:"
 
 # [queda do banco principal] 600 lacres, 1 hora fora do ar. Leva cerca de 1 hora e 40 minutos;
 # para um teste curto, use QUEDA_MINUTOS=5 na frente do comando.
@@ -164,3 +168,4 @@ Não registre chaves nem senhas. Ao final, entregue o relatório no formato da s
 | 2.1 | 10/10/2026 | Suíte com 92 casos (grupo 12: banco direto no SQLite, volume e gravação ao mesmo tempo) e novo teste em massa (`npm run simular:massa`) |
 | 2.2 | 10/10/2026 | Ativação e vínculo: suíte com 110 casos, simulador com 26 verificações e teste em massa com 32 |
 | 2.3 | 10/10/2026 | Testes da tabela `commands` (`npm run simular:comandos`) e da queda do banco principal (`npm run simular:queda`) |
+| 2.4 | 11/10/2026 | Suíte com 135 casos (segurança, operação e mesma mensagem no mesmo instante) e teste de desligamento forçado (`npm run simular:desligamento`) |

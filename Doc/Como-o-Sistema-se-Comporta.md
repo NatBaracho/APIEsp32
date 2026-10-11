@@ -4,7 +4,7 @@ Explicação em linguagem simples do que a API do lacre faz em cada situação. 
 
 Para os detalhes técnicos, veja [Desenvolvimento.md](Desenvolvimento.md) (rotas e campos), [Oxidedb.md](Oxidedb.md) (banco local), [Contrato-Entrega-Supabase.md](Contrato-Entrega-Supabase.md) (envio ao banco principal) e [Guia-Firmware-Lacre-IoT.md](Guia-Firmware-Lacre-IoT.md) (lacre).
 
-**Versão:** 1.4, de 10/10/2026.
+**Versão:** 1.5, de 11/10/2026.
 
 ---
 
@@ -120,6 +120,7 @@ A API **nunca recusa** uma mensagem por falta de vínculo, para não perder a po
 | `409` | A API já tinha essa mensagem | Dá a mensagem por entregue; não reenvia |
 | `400` | Mensagem incompleta ou com valor inválido | Não reenvia igual; é erro do firmware |
 | `401` | Sem chave ou chave que não existe | Não reenvia; conferir a chave |
+| `429` | O lacre passou do limite de mensagens por minuto, ou o endereço errou a chave vezes demais | Espera o tempo do cabeçalho `Retry-After` e envia de novo, com o mesmo `message_id` |
 | `403` | Dispositivo desativado ou chave de outro dispositivo | Não reenvia |
 | `500` ou sem resposta | Falha da API ou da rede | Tenta de novo, com o **mesmo** `message_id` |
 
@@ -179,7 +180,7 @@ Um dispositivo desativado no sistema principal passa a receber `403` depois da p
 
 Quando ele volta, o Worker envia a fila em lotes, na ordem de chegada. Se uma mensagem já tinha sido gravada e a resposta se perdeu, o banco principal responde "repetida" e ela não duplica.
 
-**Quanto tempo a fila leva para esvaziar.** Com a configuração padrão, o Worker envia cerca de 96 mensagens por segundo. Depois de uma queda longa, isso demora: no teste de 10/10/2026 (600 lacres enviando a cada 10 segundos, 1 hora fora do ar), as 216.000 mensagens levaram 37,5 minutos. Nada se perde nesse tempo; o sistema principal só vê os dados com atraso. Para acelerar, aumente `WORKER_BATCH_SIZE` no `.env`.
+**Quanto tempo a fila leva para esvaziar.** Quando há fila acumulada, o Worker não espera entre as rodadas: no teste (600 lacres, 10 minutos com o banco principal fora do ar) ele enviou de 500 a 700 mensagens por segundo, com lotes de 100. Antes de 11/10/2026 ele esperava 10 segundos a cada 1.000 mensagens (96 por segundo), e as 216.000 mensagens do teste de 1 hora levaram 37,5 minutos. A velocidade real vai depender de quanto a função do Supabase aguenta. Nada se perde nesse tempo; o sistema principal só vê os dados com atraso.
 
 **Quanto o banco cresce.** No mesmo teste, a Oxide cresceu cerca de 2,3 MB por minuto e chegou a 137 MB em 1 hora, sem recusar nenhuma leitura.
 
@@ -209,6 +210,18 @@ Se a resposta do lote vem sem aquela mensagem, a API marca erro e tenta de novo 
 ### 8.6 API e Worker gravando ao mesmo tempo
 
 Os dois são programas diferentes e gravam no mesmo arquivo. O banco usa o modo WAL e cada gravação espera a sua vez (até 5 segundos). O lacre não recebe erro por causa disso.
+
+### 8.7 A API ou o Worker são encerrados à força
+
+Se o programa trava ou é fechado pelo sistema no meio de uma gravação, o banco não corrompe e nada do que a API confirmou ao lacre se perde. O lacre que ficou sem resposta envia de novo a mesma mensagem; se a API já tinha gravado, responde `409`.
+
+Testado em 11/10/2026: a API foi derrubada à força 20 vezes e o Worker, 10, com 30 lacres enviando sem parar. As 9.042 mensagens confirmadas estavam na Oxide e chegaram ao banco principal, sem duplicar, e o banco abriu íntegro depois de cada queda.
+
+### 8.8 A energia é cortada
+
+A API só responde ao lacre depois que a mensagem está gravada no disco (gravação garantida, o padrão). Assim, o que foi confirmado antes do corte continua lá quando o computador religa.
+
+Este caso **não foi testado de verdade**: o teste da seção 8.7 encerra os programas, mas o sistema operacional continua de pé. Só um corte de energia no equipamento prova.
 
 ## 9. Situações de uma mensagem na fila
 
@@ -282,7 +295,7 @@ O exemplo de cada mensagem e de cada resposta está em [ESP32-envio-de-dados.md]
 
 ### 14.2 Endpoints para ver o que está na Oxide
 
-A Oxide é o arquivo `oxide.db`: ela **não tem porta nem endereço próprio**. Quem mostra o que está guardado nela é a API, pelos endpoints abaixo. São abertos (sem chave) e provisórios, para a equipe acompanhar os testes; abrem direto no navegador.
+A Oxide é o arquivo `oxide.db`: ela **não tem porta nem endereço próprio**. Quem mostra o que está guardado nela é a API, pelos endpoints abaixo. Exigem a **chave de administrador** no cabeçalho `X-Admin-Key` (a chave fica no `.env`, em `ADMIN_API_KEY`). Por causa do cabeçalho, não abrem direto no navegador: use o Swagger (`/api-docs`, botão **Authorize**) ou o Thunder Client.
 
 | Método | Endereço | O que mostra | Tabela da Oxide |
 | --- | --- | --- | --- |
@@ -302,7 +315,8 @@ Os comandos (`commands`) aparecem para o lacre em `GET /api/v1/iot/commands/{dev
 | Método | Endereço | Para quê |
 | --- | --- | --- |
 | `GET` | `http://localhost:3000/` | Ver se a API está no ar (responde "API ESP32 Online") |
-| `GET` | `http://localhost:3000/health` | Situação da API, da fila e do Worker (`200` normal, `503` com problema) |
+| `GET` | `http://localhost:3000/health` | Situação da API, da fila e do Worker (`200` normal, `503` com problema). Aberta |
+| `GET` | `http://localhost:3000/metrics` | Números de funcionamento: pedidos, respostas, tempos, fila e banco. Exige a chave de administrador |
 | `GET` | `http://localhost:3000/api-docs` | Documentação interativa (Swagger): mostra e deixa testar todos os endpoints |
 
 ### 14.4 Abrir a Oxide direto, sem a API
@@ -312,7 +326,21 @@ Para olhar as tabelas, o `oxide.db` abre em qualquer programa de SQLite (por exe
 - **Não abra o arquivo em uso para gravar.** Com a API ligada, faça uma cópia com `npm run backup` e abra a cópia, que fica na pasta `backups/`.
 - As tabelas são três: `devices`, `mensagens` e `commands`. O que cada uma guarda está em [Oxidedb.md](Oxidedb.md).
 
-## 15. Histórico do documento
+## 15. Segurança e operação, em resumo
+
+| Assunto | Como funciona |
+| --- | --- |
+| Quem envia como lacre | Só quem tem a chave do próprio dispositivo. A Oxide guarda só o hash da chave |
+| Quem vê os dispositivos, as mensagens e a fila | Só quem tem a chave de administrador (`X-Admin-Key`). Sem chave configurada, essas rotas ficam fechadas |
+| Quem tenta adivinhar a chave | Depois de 60 erros por minuto, o endereço fica bloqueado até a janela acabar |
+| Lacre enviando demais | Acima de 120 mensagens por minuto, recebe `429` e espera |
+| Conexão | HTTPS direto na API ou por um proxy na frente |
+| Saber se está tudo bem | `/health`, `/metrics` e o vigia (`npm run vigia`), que avisa quando a fila cresce, o Worker para ou a API cai |
+| Manter ligado | `npm run servico` religa o que parar e faz o backup diário |
+
+Os detalhes estão em [Seguranca-e-Operacao.md](Seguranca-e-Operacao.md).
+
+## 16. Histórico do documento
 
 | Versão | Data | Mudança |
 | --- | --- | --- |
@@ -321,3 +349,4 @@ Para olhar as tabelas, o `oxide.db` abre em qualquer programa de SQLite (por exe
 | 1.2 | 10/10/2026 | Nova seção 13: a porta da API (3000) e os endereços para entrar |
 | 1.3 | 10/10/2026 | Nova seção 14: todos os endpoints da API e os que mostram o que está na Oxide |
 | 1.4 | 10/10/2026 | Queda do banco principal testada por 1 hora: quanto a fila cresce e quanto tempo leva para esvaziar (seção 8.1) |
+| 1.5 | 11/10/2026 | Chave de administrador nas rotas da equipe; limite de requisições (`429`); fila esvaziando sem pausa na volta; desligamento forçado e corte de energia (seções 8.7 e 8.8); resumo de segurança e operação (seção 15) |

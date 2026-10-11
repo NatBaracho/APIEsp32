@@ -100,6 +100,15 @@ export class MessageRepository {
     return row;
   }
 
+  // Há quantos segundos a mensagem mais antiga espera para ser enviada
+  oldestWaitingSeconds(): number {
+    const row = db.prepare(`
+      SELECT CAST((julianday('now') - julianday(min(received_at))) * 86400 AS INTEGER) AS segundos
+      FROM mensagens WHERE status IN ('PENDING', 'PROCESSING', 'ERROR')
+    `).get() as { segundos: number | null };
+    return Math.max(0, row.segundos ?? 0);
+  }
+
   problems(limit: number): QueuedMessage[] {
     return db.prepare("SELECT * FROM mensagens WHERE status = 'ERROR' ORDER BY id LIMIT ?").all(limit) as QueuedMessage[];
   }

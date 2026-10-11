@@ -65,7 +65,7 @@ O nome da função (`iot-ingest`) é só um exemplo. Vale o endereço que for co
 }
 ```
 
-Até 100 mensagens por chamada (`WORKER_BATCH_SIZE`).
+Até 100 mensagens por chamada (`WORKER_BATCH_SIZE`). Quando há fila acumulada (depois de uma queda), as chamadas vêm uma atrás da outra, sem pausa: no teste, de 500 a 700 mensagens por segundo.
 
 **Resposta (HTTP 200):** um resultado por mensagem.
 
@@ -288,7 +288,7 @@ O gestor acompanha pela API: `GET /api/v1/sync/status`, `GET /api/v1/sync/proble
 
 Ainda não houve teste contra o Supabase de verdade, porque a função de recebimento não existe no repositório. A API foi testada com um **recebedor de teste** (`src/simulador/recebedor.ts`), que segue exatamente este contrato:
 - `npm run simular:massa`: 500 lacres enviando ao mesmo tempo, com a função de recebimento fora do ar no meio do teste; nada se perde e nada duplica;
-- `npm test`: 110 casos, com a ativação do lacre e o vínculo, incluindo Supabase fora do ar, chave recusada, mensagem recusada, mensagem sem resposta, reenvio sem duplicar e lotes;
+- `npm test`: 135 casos, com a ativação do lacre e o vínculo, incluindo Supabase fora do ar, chave recusada, mensagem recusada, mensagem sem resposta, reenvio sem duplicar e lotes;
 - `npm run simular`: o percurso completo de um lacre, com 26 verificações.
 
 O primeiro teste de verdade será com a função do Supabase no ar.
