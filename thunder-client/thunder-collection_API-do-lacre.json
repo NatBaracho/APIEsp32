@@ -1,0 +1,558 @@
+{
+  "clientName": "Thunder Client",
+  "client": "Thunder Client",
+  "collectionName": "API do lacre (porta 3000)",
+  "collectionId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+  "dateExported": "2026-10-11T00:45:13.216Z",
+  "version": "1.2",
+  "folders": [
+    {
+      "_id": "da7e4ba9-c488-4001-ac32-94bab82cb37a",
+      "name": "1. Geral (sem chave)",
+      "containerId": "",
+      "created": "2026-10-11T00:45:13.216Z",
+      "sortNum": 10000
+    },
+    {
+      "_id": "e9afb4f3-821c-420f-be52-2a5884f12c7a",
+      "name": "2. Lacre envia (com a chave)",
+      "containerId": "",
+      "created": "2026-10-11T00:45:13.216Z",
+      "sortNum": 20000
+    },
+    {
+      "_id": "11b42694-a7f8-4882-a3c4-eb1cf5634a04",
+      "name": "3. Comandos da válvula (tabela commands)",
+      "containerId": "",
+      "created": "2026-10-11T00:45:13.216Z",
+      "sortNum": 30000
+    },
+    {
+      "_id": "20879f61-8c1e-4d70-aaab-297d194dab34",
+      "name": "4. Ver o que está na Oxide (sem chave)",
+      "containerId": "",
+      "created": "2026-10-11T00:45:13.216Z",
+      "sortNum": 40000
+    },
+    {
+      "_id": "9db25948-b567-48e7-ab97-53eaf3415c0a",
+      "name": "5. O que a API recusa",
+      "containerId": "",
+      "created": "2026-10-11T00:45:13.216Z",
+      "sortNum": 50000
+    }
+  ],
+  "requests": [
+    {
+      "_id": "e028ec5c-ed78-4084-b720-e7d7eccfa19f",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "da7e4ba9-c488-4001-ac32-94bab82cb37a",
+      "name": "1.1 API no ar",
+      "url": "http://localhost:3000/",
+      "method": "GET",
+      "sortNum": 10000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [],
+      "params": [],
+      "tests": []
+    },
+    {
+      "_id": "3a0c9407-7523-4d3c-b7aa-867b2c17a621",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "da7e4ba9-c488-4001-ac32-94bab82cb37a",
+      "name": "1.2 Saúde da API, da fila e do Worker",
+      "url": "http://localhost:3000/health",
+      "method": "GET",
+      "sortNum": 20000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [],
+      "params": [],
+      "tests": []
+    },
+    {
+      "_id": "7b9b0297-d306-4607-899c-8addb701bec3",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "e9afb4f3-821c-420f-be52-2a5884f12c7a",
+      "name": "2.1 Ativar o lacre -> 202 e o identificador (seal_code)",
+      "url": "http://localhost:3000/api/v1/iot/activations",
+      "method": "POST",
+      "sortNum": 30000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [
+        {
+          "name": "X-API-Key",
+          "value": "auto-DSP-000001"
+        }
+      ],
+      "params": [],
+      "tests": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"message_id\": \"ATV-{{#guid}}\",\n  \"device_id\": \"DSP-000001\",\n  \"status\": \"ATIVO\",\n  \"latitude\": -7.2091939,\n  \"longitude\": -39.3063666,\n  \"battery_percent\": 97\n}",
+        "form": []
+      }
+    },
+    {
+      "_id": "94197d52-47a4-45dc-8c88-6372274e8d2f",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "e9afb4f3-821c-420f-be52-2a5884f12c7a",
+      "name": "2.2 Leitura -> 202 (na 2a vez, mesma posição -> 200)",
+      "url": "http://localhost:3000/api/v1/iot/telemetries",
+      "method": "POST",
+      "sortNum": 40000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [
+        {
+          "name": "X-API-Key",
+          "value": "auto-DSP-000001"
+        }
+      ],
+      "params": [],
+      "tests": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"message_id\": \"MSG-{{#guid}}\",\n  \"device_id\": \"DSP-000001\",\n  \"latitude\": -7.2091939,\n  \"longitude\": -39.3063666,\n  \"gps_ok\": true,\n  \"battery_percent\": 87,\n  \"seal_status\": \"LOCKED\",\n  \"speed_kmh\": 0,\n  \"gsm_signal\": -70,\n  \"satelites\": 9,\n  \"hdop\": 0.9\n}",
+        "form": []
+      }
+    },
+    {
+      "_id": "5562bb8a-ba05-4f5f-a975-a8371835caef",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "e9afb4f3-821c-420f-be52-2a5884f12c7a",
+      "name": "2.3 Leitura em outra posição -> 202",
+      "url": "http://localhost:3000/api/v1/iot/telemetries",
+      "method": "POST",
+      "sortNum": 50000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [
+        {
+          "name": "X-API-Key",
+          "value": "auto-DSP-000001"
+        }
+      ],
+      "params": [],
+      "tests": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"message_id\": \"MSG-{{#guid}}\",\n  \"device_id\": \"DSP-000001\",\n  \"latitude\": -7.2155,\n  \"longitude\": -39.3121,\n  \"gps_ok\": true,\n  \"battery_percent\": 86,\n  \"seal_status\": \"LOCKED\",\n  \"speed_kmh\": 42,\n  \"gsm_signal\": -72\n}",
+        "form": []
+      }
+    },
+    {
+      "_id": "b6d4c0ea-3a1d-4511-a69e-cc85936c821a",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "e9afb4f3-821c-420f-be52-2a5884f12c7a",
+      "name": "2.4 Leitura sem sinal de GPS (gps_ok false) -> 202",
+      "url": "http://localhost:3000/api/v1/iot/telemetries",
+      "method": "POST",
+      "sortNum": 60000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [
+        {
+          "name": "X-API-Key",
+          "value": "auto-DSP-000001"
+        }
+      ],
+      "params": [],
+      "tests": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"message_id\": \"MSG-{{#guid}}\",\n  \"device_id\": \"DSP-000001\",\n  \"latitude\": -7.2155,\n  \"longitude\": -39.3121,\n  \"gps_ok\": false,\n  \"battery_percent\": 85,\n  \"seal_status\": \"LOCKED\"\n}",
+        "form": []
+      }
+    },
+    {
+      "_id": "c15e55b3-a52d-48c4-b328-2d1eb654b7b1",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "e9afb4f3-821c-420f-be52-2a5884f12c7a",
+      "name": "2.5 Evento: lacre rompido -> 202 (a API abre o alerta LACRE_VIOLADO)",
+      "url": "http://localhost:3000/api/v1/iot/events",
+      "method": "POST",
+      "sortNum": 70000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [
+        {
+          "name": "X-API-Key",
+          "value": "auto-DSP-000001"
+        }
+      ],
+      "params": [],
+      "tests": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"message_id\": \"EVT-{{#guid}}\",\n  \"device_id\": \"DSP-000001\",\n  \"event_type\": \"seal_changed\",\n  \"seal_status\": \"BROKEN\",\n  \"latitude\": -7.2155,\n  \"longitude\": -39.3121,\n  \"battery_percent\": 85\n}",
+        "form": []
+      }
+    },
+    {
+      "_id": "ab3a5610-7df3-4f72-95f1-b3aa29e49699",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "e9afb4f3-821c-420f-be52-2a5884f12c7a",
+      "name": "2.6 Alerta do lacre -> 201",
+      "url": "http://localhost:3000/api/v1/iot/alerts",
+      "method": "POST",
+      "sortNum": 80000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [
+        {
+          "name": "X-API-Key",
+          "value": "auto-DSP-000001"
+        }
+      ],
+      "params": [],
+      "tests": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"alert_id\": \"ALT-{{#guid}}\",\n  \"device_id\": \"DSP-000001\",\n  \"alert_type\": \"GPS_INATIVO\",\n  \"title\": \"GPS não responde\",\n  \"description\": \"Teste pelo Thunder Client\",\n  \"latitude\": -7.2155,\n  \"longitude\": -39.3121,\n  \"gps_ok\": false,\n  \"battery_percent\": 85\n}",
+        "form": []
+      }
+    },
+    {
+      "_id": "84edc23b-efac-483a-807c-f384a4feb90c",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "e9afb4f3-821c-420f-be52-2a5884f12c7a",
+      "name": "2.7 Desativar o lacre -> 202",
+      "url": "http://localhost:3000/api/v1/iot/activations",
+      "method": "POST",
+      "sortNum": 90000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [
+        {
+          "name": "X-API-Key",
+          "value": "auto-DSP-000001"
+        }
+      ],
+      "params": [],
+      "tests": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"message_id\": \"ATV-{{#guid}}\",\n  \"device_id\": \"DSP-000001\",\n  \"status\": \"INATIVO\",\n  \"latitude\": -7.2155,\n  \"longitude\": -39.3121,\n  \"battery_percent\": 84\n}",
+        "form": []
+      }
+    },
+    {
+      "_id": "cee849d2-5813-4e77-9698-e0cd94f6b567",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "11b42694-a7f8-4882-a3c4-eb1cf5634a04",
+      "name": "3.1 Buscar os comandos pendentes -> lista",
+      "url": "http://localhost:3000/api/v1/iot/commands/DSP-000001",
+      "method": "GET",
+      "sortNum": 100000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [
+        {
+          "name": "X-API-Key",
+          "value": "auto-DSP-000001"
+        }
+      ],
+      "params": [],
+      "tests": []
+    },
+    {
+      "_id": "6a2462fd-e07c-4e8f-87e5-a473f1c4ee49",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "11b42694-a7f8-4882-a3c4-eb1cf5634a04",
+      "name": "3.2 Confirmar CMD-EXEMPLO-001 -> 200 (de novo -> 409)",
+      "url": "http://localhost:3000/api/v1/iot/commands/confirm",
+      "method": "POST",
+      "sortNum": 110000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [
+        {
+          "name": "X-API-Key",
+          "value": "auto-DSP-000001"
+        }
+      ],
+      "params": [],
+      "tests": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"command_id\": \"CMD-EXEMPLO-001\",\n  \"device_id\": \"DSP-000001\",\n  \"status\": \"EXECUTADO\"\n}",
+        "form": []
+      }
+    },
+    {
+      "_id": "9e2249e4-0175-4da5-bd7c-8fd6dd08ad84",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "11b42694-a7f8-4882-a3c4-eb1cf5634a04",
+      "name": "3.3 Confirmar CMD-EXEMPLO-002 com erro -> 200",
+      "url": "http://localhost:3000/api/v1/iot/commands/confirm",
+      "method": "POST",
+      "sortNum": 120000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [
+        {
+          "name": "X-API-Key",
+          "value": "auto-DSP-000001"
+        }
+      ],
+      "params": [],
+      "tests": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"command_id\": \"CMD-EXEMPLO-002\",\n  \"device_id\": \"DSP-000001\",\n  \"status\": \"ERRO\",\n  \"error_message\": \"motor não respondeu\"\n}",
+        "form": []
+      }
+    },
+    {
+      "_id": "15837191-acef-434e-959b-44756de1907b",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "20879f61-8c1e-4d70-aaab-297d194dab34",
+      "name": "4.1 Últimas mensagens (tabela mensagens)",
+      "url": "http://localhost:3000/api/v1/iot/messages",
+      "method": "GET",
+      "sortNum": 130000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [],
+      "params": [],
+      "tests": []
+    },
+    {
+      "_id": "82eaa48c-81af-4530-a24a-425ecc564125",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "20879f61-8c1e-4d70-aaab-297d194dab34",
+      "name": "4.2 Só os alertas do DSP-000001",
+      "url": "http://localhost:3000/api/v1/iot/messages?type=ALERTA&device_id=DSP-000001&limit=20",
+      "method": "GET",
+      "sortNum": 140000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [],
+      "params": [],
+      "tests": []
+    },
+    {
+      "_id": "20d860e2-dcc6-45e5-a798-170d566227b7",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "20879f61-8c1e-4d70-aaab-297d194dab34",
+      "name": "4.3 Todos os dispositivos (tabela devices)",
+      "url": "http://localhost:3000/api/v1/devices",
+      "method": "GET",
+      "sortNum": 150000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [],
+      "params": [],
+      "tests": []
+    },
+    {
+      "_id": "96c099db-9077-4118-b8af-4ba46ba3685d",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "20879f61-8c1e-4d70-aaab-297d194dab34",
+      "name": "4.4 Um dispositivo: estado, identificador e vínculo",
+      "url": "http://localhost:3000/api/v1/devices/DSP-000001",
+      "method": "GET",
+      "sortNum": 160000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [],
+      "params": [],
+      "tests": []
+    },
+    {
+      "_id": "9617aa49-c09b-4e8f-b0b1-94428a93ee6d",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "20879f61-8c1e-4d70-aaab-297d194dab34",
+      "name": "4.5 A fila em números",
+      "url": "http://localhost:3000/api/v1/sync/status",
+      "method": "GET",
+      "sortNum": 170000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [],
+      "params": [],
+      "tests": []
+    },
+    {
+      "_id": "ced30d2b-4a18-4e05-82c8-9b3547d0b76b",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "20879f61-8c1e-4d70-aaab-297d194dab34",
+      "name": "4.6 Mensagens com problema",
+      "url": "http://localhost:3000/api/v1/sync/problems",
+      "method": "GET",
+      "sortNum": 180000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [],
+      "params": [],
+      "tests": []
+    },
+    {
+      "_id": "d15e5270-d445-4fd0-aca4-08b19999667f",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "9db25948-b567-48e7-ab97-53eaf3415c0a",
+      "name": "5.1 Leitura sem bateria -> 400",
+      "url": "http://localhost:3000/api/v1/iot/telemetries",
+      "method": "POST",
+      "sortNum": 190000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [
+        {
+          "name": "X-API-Key",
+          "value": "auto-DSP-000001"
+        }
+      ],
+      "params": [],
+      "tests": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"message_id\": \"MSG-{{#guid}}\",\n  \"device_id\": \"DSP-000001\",\n  \"latitude\": -7.2091939,\n  \"longitude\": -39.3063666\n}",
+        "form": []
+      }
+    },
+    {
+      "_id": "28a2e77b-66f8-481b-aa0c-911b9795d8ba",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "9db25948-b567-48e7-ab97-53eaf3415c0a",
+      "name": "5.2 Leitura sem posição -> 400",
+      "url": "http://localhost:3000/api/v1/iot/telemetries",
+      "method": "POST",
+      "sortNum": 200000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [
+        {
+          "name": "X-API-Key",
+          "value": "auto-DSP-000001"
+        }
+      ],
+      "params": [],
+      "tests": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"message_id\": \"MSG-{{#guid}}\",\n  \"device_id\": \"DSP-000001\",\n  \"battery_percent\": 80\n}",
+        "form": []
+      }
+    },
+    {
+      "_id": "0b8163ba-dfc2-49a0-a5d8-7cc79074cf33",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "9db25948-b567-48e7-ab97-53eaf3415c0a",
+      "name": "5.3 Sem a chave -> 401",
+      "url": "http://localhost:3000/api/v1/iot/telemetries",
+      "method": "POST",
+      "sortNum": 210000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [],
+      "params": [],
+      "tests": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"message_id\": \"MSG-{{#guid}}\",\n  \"device_id\": \"DSP-000001\",\n  \"latitude\": -7.2091939,\n  \"longitude\": -39.3063666,\n  \"battery_percent\": 80\n}",
+        "form": []
+      }
+    },
+    {
+      "_id": "ab3c233f-c41a-4e9d-b0e8-e6dcc93a8586",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "9db25948-b567-48e7-ab97-53eaf3415c0a",
+      "name": "5.4 Chave errada -> 401",
+      "url": "http://localhost:3000/api/v1/iot/telemetries",
+      "method": "POST",
+      "sortNum": 220000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [
+        {
+          "name": "X-API-Key",
+          "value": "chave-errada"
+        }
+      ],
+      "params": [],
+      "tests": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"message_id\": \"MSG-{{#guid}}\",\n  \"device_id\": \"DSP-000001\",\n  \"latitude\": -7.2091939,\n  \"longitude\": -39.3063666,\n  \"battery_percent\": 80\n}",
+        "form": []
+      }
+    },
+    {
+      "_id": "2198c86c-451b-4391-84c5-25fb0e65af0e",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "9db25948-b567-48e7-ab97-53eaf3415c0a",
+      "name": "5.5 Chave de outro dispositivo -> 403",
+      "url": "http://localhost:3000/api/v1/iot/telemetries",
+      "method": "POST",
+      "sortNum": 230000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [
+        {
+          "name": "X-API-Key",
+          "value": "auto-DSP-000001"
+        }
+      ],
+      "params": [],
+      "tests": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"message_id\": \"MSG-{{#guid}}\",\n  \"device_id\": \"DSP-000002\",\n  \"latitude\": -7.2091939,\n  \"longitude\": -39.3063666,\n  \"battery_percent\": 80\n}",
+        "form": []
+      }
+    },
+    {
+      "_id": "49632a29-2afb-4dcb-b7a5-213ca75edf27",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "9db25948-b567-48e7-ab97-53eaf3415c0a",
+      "name": "5.6 Mesmo message_id duas vezes -> 202 e depois 409",
+      "url": "http://localhost:3000/api/v1/iot/events",
+      "method": "POST",
+      "sortNum": 240000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [
+        {
+          "name": "X-API-Key",
+          "value": "auto-DSP-000001"
+        }
+      ],
+      "params": [],
+      "tests": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"message_id\": \"EVT-REPETIDO-001\",\n  \"device_id\": \"DSP-000001\",\n  \"event_type\": \"startup\",\n  \"latitude\": -7.2091939,\n  \"longitude\": -39.3063666,\n  \"battery_percent\": 80\n}",
+        "form": []
+      }
+    },
+    {
+      "_id": "2cdecdef-f29f-448d-b3da-64a6ad41c672",
+      "colId": "a61b438e-61cd-490e-8daa-5a0d3e4020ba",
+      "containerId": "9db25948-b567-48e7-ab97-53eaf3415c0a",
+      "name": "5.7 Status de ativação inválido -> 400",
+      "url": "http://localhost:3000/api/v1/iot/activations",
+      "method": "POST",
+      "sortNum": 250000,
+      "created": "2026-10-11T00:45:13.216Z",
+      "modified": "2026-10-11T00:45:13.216Z",
+      "headers": [
+        {
+          "name": "X-API-Key",
+          "value": "auto-DSP-000001"
+        }
+      ],
+      "params": [],
+      "tests": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"message_id\": \"ATV-{{#guid}}\",\n  \"device_id\": \"DSP-000001\",\n  \"status\": \"LIGADO\",\n  \"latitude\": -7.2091939,\n  \"longitude\": -39.3063666,\n  \"battery_percent\": 80\n}",
+        "form": []
+      }
+    }
+  ],
+  "ref": "97874616-2295-4fec-b254-4732e256c8d0"
+}
