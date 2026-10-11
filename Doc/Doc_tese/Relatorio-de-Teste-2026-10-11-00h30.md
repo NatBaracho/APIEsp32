@@ -2,9 +2,9 @@
 
 **Data:** 11/10/2026, 00:30
 **Executado por:** IA (Claude Code, modelo Claude Opus 5.5), a pedido de Natã da Silva Baracho
-**Branch:** `feat/seguranca-e-operacao`, local, a partir da `main` `8e176c3` (merge do PR #24). **Ainda não enviada ao GitHub**
+**Branch:** `feat/seguranca-e-operacao` (PR #25), enviada ao GitHub depois da aprovação
 **Base:** pedido de Natã em 10/10/2026: levar cada área do projeto à nota máxima e reavaliar se o banco local precisa de três tabelas
-**Situação:** ⏳ aguardando a validação de Natã da Silva Baracho (seção 9)
+**Situação:** ✅ **aprovado por Natã da Silva Baracho em 11/10/2026** (seção 10)
 
 ---
 
@@ -185,3 +185,14 @@ Os lacres ficaram sem resposta 11.757 vezes e insistiram com a mesma mensagem.
 7. Concorda em manter as três tabelas?
 8. Posso criar a chave de administrador no seu `.env`? Ela fica só no arquivo; eu não a mostro na conversa.
 9. Posso converter o `oxide.db` do projeto, atualizar a coleção do Thunder Client e enviar tudo ao GitHub, num PR novo?
+
+## 10. Validação (11/10/2026)
+
+Natã da Silva Baracho respondeu **sim** às nove perguntas: **aprovado por Natã da Silva Baracho em 11/10/2026**. Pediu também um registro desta entrega na documentação final.
+
+Depois da aprovação:
+
+- a chave de administrador foi criada no `.env` do computador de Natã (o arquivo fica fora do Git, e a chave não foi mostrada nem registrada);
+- o `oxide.db` do projeto foi convertido: os 3 dispositivos ficaram só com o hash da chave, e o `DSP-000001` continua entrando com a chave de teste. Antes, foi feita a cópia `backups/oxide-20261011T031550.db`;
+- a coleção do Thunder Client passou a ter 27 requisições; nas consultas da equipe, o cabeçalho `X-Admin-Key` vem com um texto para ser trocado pela chave do próprio `.env`;
+- foi criado o registro 24 em `DocumentacaoFinal/` (segurança, operação e avaliação do projeto).

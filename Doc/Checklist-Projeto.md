@@ -60,7 +60,7 @@ Os itens com ✅ foram feitos e testados pela IA e **aprovados por Natã da Silv
 - [ ] Conferir a velocidade do Worker no primeiro teste com o Supabase de verdade (o limite passa a ser o que a função de lá aguenta).
 - [ ] Teste de corte de energia com o equipamento de verdade.
 - ✅ Correções achadas pelos testes: banco migrado igual ao banco novo; cópia de segurança antes de qualquer mudança; API espera o Worker em vez de responder `500`; modo WAL (de 40 para 588 pedidos por segundo).
-- ✅ Documentação final para o evento INTEGRA 2026 (`DocumentacaoFinal/`): 19 registros no PR #19, o registro 20 no PR #20 e os registros 21 (teste do banco e teste em massa) e 22 (ativação do lacre e vínculo) no PR #21, e o registro 23 (queda do banco principal e tabela de comandos) no PR #24.
+- ✅ Documentação final para o evento INTEGRA 2026 (`DocumentacaoFinal/`): 19 registros no PR #19, o registro 20 no PR #20 e os registros 21 (teste do banco e teste em massa) e 22 (ativação do lacre e vínculo) no PR #21, o registro 23 (queda do banco principal e tabela de comandos) no PR #24, e o registro 24 (segurança, operação e avaliação do projeto) no PR #25.
 - ✅ Documentos atualizados para o modelo enxuto; documentos do FluxID marcados como referência histórica.
 - ✅ Novo documento `Como-o-Sistema-se-Comporta.md`: o comportamento do sistema em linguagem simples.
 - ✅ `oxide.db` do projeto convertido para o modelo atual (3 tabelas) em 10/10/2026 e enviado ao GitHub.

@@ -150,7 +150,7 @@ Ajustes:
 
 ### Testar na mão, pelo Thunder Client
 
-A pasta `thunder-client/` tem uma coleção com 25 requisições prontas (ativar, leituras, evento, alerta, comandos, consultas e os erros que a API recusa). No Thunder Client: **Collections → menu → Import** e escolha `thunder-client/thunder-collection_API-do-lacre.json`. Ligue a API antes (`npm start`).
+A pasta `thunder-client/` tem uma coleção com 27 requisições prontas (ativar, leituras, evento, alerta, comandos, consultas e os erros que a API recusa). No Thunder Client: **Collections → menu → Import** e escolha `thunder-client/thunder-collection_API-do-lacre.json`. Ligue a API antes (`npm start`).
 
 - As requisições gravam no `oxide.db` do projeto.
 - Nas requisições da pasta 4 (consultas da equipe), troque o valor do cabeçalho `X-Admin-Key` pela chave de administrador do seu `.env`.
