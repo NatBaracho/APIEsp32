@@ -43,14 +43,27 @@ API do lacre ──► fila local ──► Supabase (banco principal, telas, ma
    | `device_id` | `DSP-000001` (o código cadastrado) |
    | Chave | a recebida no cadastro (guardar em área protegida, ex.: NVS) |
 
-3. **Para testar na bancada**, a equipe pode cadastrar um dispositivo provisório:
+3. **Para testar na bancada**, a equipe cadastra um dispositivo de teste direto na API, com uma chave conhecida. O cadastro exige a chave de administrador (`X-Admin-Key`), que fica com quem cuida do servidor:
 
    ```http
    POST http://<IP_DA_API>:3000/api/v1/devices
+   X-Admin-Key: <chave de administrador>
    Content-Type: application/json
 
-   { "device_id": "DSP-TESTE-01", "api_key": "chave-de-teste-01", "firmware_version": "1.0.0" }
+   { "device_id": "DSP-TESTE-01", "api_key": "<chave gerada para o teste>", "firmware_version": "1.0.0" }
    ```
+
+   O passo a passo, com o comando que gera a chave, está em [ESP32-envio-de-dados.md](ESP32-envio-de-dados.md), seção 1.2.
+
+4. **Chave perdida não se recupera.** O banco guarda só o hash, e não há rota para trocar a chave de um dispositivo que já existe. O caminho é cadastrar um dispositivo novo, com outra chave.
+
+5. **Antes do primeiro envio, confira a rede:**
+
+   - **API ligada:** `npm start` (ou `npm run servico`) no computador da API.
+   - **Mesma rede:** o lacre precisa estar na mesma rede do computador da API.
+   - **IP certo:** `<IP_DA_API>` é o "Endereço IPv4" que aparece no comando `ipconfig`. Ele pode mudar quando o roteador reinicia.
+   - **Firewall do Windows:** a porta 3000 precisa estar liberada para entrada. Num terminal aberto como administrador: `netsh advfirewall firewall add rule name="API do lacre 3000" dir=in action=allow protocol=TCP localport=3000`.
+   - **Teste rápido:** abrir `http://<IP_DA_API>:3000` no navegador de um celular na mesma rede deve mostrar "API ESP32 Online". Se não abrir, o problema é a rede ou o firewall, não o firmware.
 
 ## 3. Regras para todas as mensagens
 
@@ -416,3 +429,4 @@ void VerificarComandos() {
 | 2.0 | 10/10/2026 | Posição e bateria obrigatórias; `gps_ok`; `satelites`, `hdop` e `device_state`; exemplo no estilo do firmware `fluxid-firmware`; banco principal passa a ser o Supabase |
 | 2.1 | 10/10/2026 | Nova seção 4.6: aviso de ativação e de desativação (`POST /iot/activations`); o servidor gera o identificador do lacre. **Aprovado por Natã da Silva Baracho em 10/10/2026** |
 | 2.2 | 11/10/2026 | Resposta `429` (limite de 120 mensagens por minuto por lacre) e limite de 32 KB por mensagem |
+| 2.3 | 12/10/2026 | Seção 2: cadastro de teste com a chave de administrador, chave perdida não se recupera e conferência da rede antes do primeiro envio |

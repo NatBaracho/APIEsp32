@@ -2,7 +2,7 @@
 
 Como a API se protege e como mantê-la funcionando no dia a dia. Serve para quem instala, configura e acompanha a API.
 
-**Versão:** 1.0, de 11/10/2026.
+**Versão:** 1.1, de 12/10/2026.
 
 Documentos relacionados: [Como-o-Sistema-se-Comporta.md](Como-o-Sistema-se-Comporta.md) (comportamento em linguagem simples), [Oxidedb.md](Oxidedb.md) (banco local) e [README](../README.md) (como ligar e configurar).
 
@@ -54,6 +54,26 @@ O `/health` mostra a situação em `rotas_da_equipe`: `PROTEGIDAS`, `FECHADAS_SE
 - A Oxide guarda só o **hash** da chave. Quem abrir o `oxide.db` não descobre a chave de nenhum lacre.
 - No cadastro de bancada (`POST /api/v1/devices`), a chave enviada é transformada em hash na hora.
 - Banco de versão anterior, que guardava a chave em texto: ao ligar, a API troca o texto pelo hash. O lacre continua entrando com a mesma chave.
+
+| Pergunta | Resposta |
+| --- | --- |
+| A API gera a chave do dispositivo? | Não. Quem cadastra escolhe a chave e a envia no campo `api_key` |
+| Dá para ver a chave no banco? | Não. A Oxide guarda só o hash. O texto `sem-chave-em-texto:...` da coluna `api_key` é um marcador: não é a chave e não autentica |
+| Perdi a chave. Dá para recuperar? | Não. Cadastre um dispositivo novo, com outra chave, e grave no lacre |
+| Dá para trocar a chave de um dispositivo que já existe? | Pela API, não: `POST /devices` com um `device_id` repetido responde `409`. A troca é feita no cadastro do sistema principal, e o Worker a traz |
+| A chave de administrador serve para o lacre? | Não. `X-Admin-Key` é da equipe; o lacre usa `X-API-Key`, a chave do próprio dispositivo |
+
+Para cadastrar um dispositivo de teste com uma chave conhecida, siga [ESP32-envio-de-dados.md](ESP32-envio-de-dados.md), seção 1.2.
+
+### 2.3 Rede e firewall
+
+Para um lacre (ou outro computador) alcançar a API:
+
+- **API ligada:** `npm start` (ou `npm run servico`) no computador da API.
+- **Mesma rede:** o lacre precisa estar na mesma rede do computador da API.
+- **IP certo:** `<IP_DA_API>` é o "Endereço IPv4" que aparece no comando `ipconfig`. Ele pode mudar quando o roteador reinicia.
+- **Firewall do Windows:** a porta 3000 precisa estar liberada para entrada. Num terminal aberto como administrador: `netsh advfirewall firewall add rule name="API do lacre 3000" dir=in action=allow protocol=TCP localport=3000`.
+- **Teste rápido:** abrir `http://<IP_DA_API>:3000` no navegador de um celular na mesma rede deve mostrar "API ESP32 Online". Se não abrir, o problema é a rede ou o firewall, não o firmware.
 
 ## 3. Quem pode chamar o quê
 
@@ -187,7 +207,8 @@ No Linux, o equivalente é um serviço do systemd que roda `npm run servico` na 
 - [ ] `VIGIA_WEBHOOK_URL` apontando para onde alguém vê o aviso.
 - [ ] Banco fora de pasta sincronizada (OneDrive e parecidos).
 - [ ] Comandos de exemplo apagados do banco: `DELETE FROM commands WHERE command_id LIKE 'CMD-EXEMPLO-%';`
-- [ ] Dispositivos de teste desativados ou com chave nova.
+- [ ] Dispositivos de teste desativados ou com chave nova (`DSP-000001` a `DSP-000003` têm chaves de teste antigas e fracas; `DSP-ESP32-01` é o de teste do firmware).
+- [ ] Porta da API liberada no firewall só para a rede que precisa.
 
 ## 11. O que ainda não está coberto
 
@@ -202,3 +223,4 @@ No Linux, o equivalente é um serviço do systemd que roda `npm run servico` na 
 | Versão | Data | Mudança |
 | --- | --- | --- |
 | 1.0 | 11/10/2026 | Primeira versão: chave de administrador, chave do lacre só em hash, limites, HTTPS, gravação garantida, métricas, vigia e serviço |
+| 1.1 | 12/10/2026 | Perguntas sobre a chave do dispositivo (não é gerada pela API, não se recupera, não se troca pela API) e seção 2.3, rede e firewall |

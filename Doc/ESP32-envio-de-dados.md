@@ -1,6 +1,6 @@
 # ESP32 — Como enviar dados para a API
 
-**Versão:** 2.0, de 10/10/2026.
+**Versão:** 2.3, de 12/10/2026.
 
 > **Para quem programa o lacre:** o guia principal é o [Guia-Firmware-Lacre-IoT.md](Guia-Firmware-Lacre-IoT.md) (quando enviar cada coisa, fila sem rede e como ligar o envio no firmware). Este documento é o complemento: traz o exemplo de cada mensagem, campo por campo, e de cada resposta.
 
@@ -46,10 +46,54 @@ Deixaram de existir: `GET /iot/telemetries` (a consulta agora é `GET /iot/messa
 X-API-Key: <chave do dispositivo>
 ```
 
-- O dispositivo é cadastrado no sistema principal. Quem cadastra gera a chave e a passa para o firmware; o sistema guarda só o hash dela.
-- O Worker traz o cadastro para a API a cada 5 minutos. Um dispositivo recém-cadastrado pode levar esse tempo para ser aceito.
-- O firmware sempre envia a chave em texto, no cabeçalho.
-- Para testes de bancada sem o sistema principal, existe o cadastro provisório: `POST /devices` com `device_id` e `api_key`.
+O firmware sempre envia a chave em texto, no cabeçalho. A chave e o `device_id` têm de ser do **mesmo** dispositivo.
+
+### 1.1 De onde vem a chave
+
+- **Lacre em uso:** o dispositivo é cadastrado no sistema principal. Quem cadastra gera a chave e a entrega uma única vez, para gravar no firmware; o sistema guarda só o hash. O Worker traz o cadastro para a API a cada 5 minutos.
+- **Teste de bancada:** a equipe cadastra o dispositivo direto na API e escolhe a chave (seção 1.2).
+
+| Pergunta | Resposta |
+| --- | --- |
+| A API gera a chave do dispositivo? | Não. Quem cadastra escolhe a chave e a envia no campo `api_key` |
+| Dá para ver a chave no banco? | Não. A Oxide guarda só o hash. O texto `sem-chave-em-texto:...` da coluna `api_key` é um marcador: não é a chave e não autentica |
+| Perdi a chave. Dá para recuperar? | Não. Cadastre um dispositivo novo, com outra chave, e grave no lacre |
+| Dá para trocar a chave de um dispositivo que já existe? | Pela API, não: `POST /devices` com um `device_id` repetido responde `409`. A troca é feita no cadastro do sistema principal, e o Worker a traz |
+| A chave de administrador serve para o lacre? | Não. `X-Admin-Key` é da equipe; o lacre usa `X-API-Key`, a chave do próprio dispositivo |
+
+### 1.2 Cadastrar um dispositivo de teste com uma chave conhecida
+
+1. Gere uma chave forte, no terminal do computador da API:
+
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
+   ```
+
+2. Com a API ligada, cadastre o dispositivo. É preciso a chave de administrador (`X-Admin-Key`), que está no `.env` do servidor:
+
+   ```http
+   POST http://<IP_DA_API>:3000/api/v1/devices
+   X-Admin-Key: <chave de administrador>
+   Content-Type: application/json
+
+   { "device_id": "DSP-TESTE-01", "api_key": "<a chave gerada no passo 1>", "firmware_version": "1.0.0" }
+   ```
+
+   Resposta esperada: `201`.
+
+3. Grave no firmware o `device_id` e a chave do passo 1. **Anote a chave nessa hora:** depois do cadastro ela não aparece mais em lugar nenhum.
+
+No banco do projeto já existe o dispositivo de teste `DSP-ESP32-01`, cadastrado em 12/10/2026. A chave dele foi entregue a quem programa o firmware e não está em nenhum documento.
+
+### 1.3 Antes do primeiro envio
+
+- **API ligada:** `npm start` (ou `npm run servico`) no computador da API.
+- **Mesma rede:** o lacre precisa estar na mesma rede do computador da API.
+- **IP certo:** `<IP_DA_API>` é o "Endereço IPv4" que aparece no comando `ipconfig`. Ele pode mudar quando o roteador reinicia.
+- **Firewall do Windows:** a porta 3000 precisa estar liberada para entrada. Num terminal aberto como administrador: `netsh advfirewall firewall add rule name="API do lacre 3000" dir=in action=allow protocol=TCP localport=3000`.
+- **Teste rápido:** abrir `http://<IP_DA_API>:3000` no navegador de um celular na mesma rede deve mostrar "API ESP32 Online". Se não abrir, o problema é a rede ou o firewall, não o firmware.
+
+### 1.4 Respostas da conferência da chave
 
 | Situação | Resposta |
 | --- | --- |
@@ -429,3 +473,4 @@ A API guarda as mensagens até o Worker entregá-las ao banco principal. O cadas
 | 2.0 | 10/10/2026 | Reescrito para o contrato atual: posição e bateria obrigatórias, `gps_ok`, aviso de ativação com o identificador do lacre, fila única, alertas automáticos e Supabase como banco principal |
 | 2.1 | 10/10/2026 | Porta (3000) e endereço da API explícitos na seção de rotas |
 | 2.2 | 11/10/2026 | Respostas `429` e `413`; rotas da equipe com chave de administrador |
+| 2.3 | 12/10/2026 | Seção 1 ampliada: de onde vem a chave do dispositivo, como cadastrar um dispositivo de teste com chave conhecida, o que conferir na rede antes do primeiro envio |
