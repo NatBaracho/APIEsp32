@@ -67,6 +67,8 @@ Os itens com ✅ foram feitos e testados pela IA e **aprovados por Natã da Silv
 - ✅ Ativação do lacre e vínculo: o lacre avisa que está ativo, a API gera o identificador (`LCR-…`), o sistema vincula o cilindro e o cliente e o vínculo fica salvo na Oxide; toda mensagem sai com o cilindro e o cliente. Suíte 110/110, simulador 26/26 e teste em massa 32/32.
 - [ ] Sistema principal tratar a mensagem `ATIVACAO` e devolver o vínculo (`binding`) na lista de dispositivos (professor Alisson).
 - [ ] Firmware enviar o aviso de ativação ao ligar (Simão).
+- ✅ Dispositivo de teste `DSP-ESP32-01` cadastrado para o firmware (12/10/2026), com chave nova entregue a quem programa o lacre; documentos explicam de onde vem a chave e o que conferir na rede.
+- [ ] Primeiro envio do ESP32 de verdade para a API (depende de liberar a porta 3000 no firewall e de o firmware usar o `DSP-ESP32-01`).
 
 ### Ainda a fazer, fora desta entrega
 

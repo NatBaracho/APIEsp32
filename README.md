@@ -49,6 +49,7 @@ A API sobe na **porta 3000** e cria as tabelas sozinha.
 | Rotas do lacre | `http://localhost:3000/api/v1/iot/...` |
 
 - **De outro aparelho** (o lacre ou outro computador na mesma rede): troque `localhost` pelo IP do computador onde a API está ligada, por exemplo `http://192.168.0.10:3000`. No Windows, o IP aparece com o comando `ipconfig`, na linha "Endereço IPv4".
+- **Se o outro aparelho não conectar:** libere a porta 3000 no firewall do Windows (terminal como administrador): `netsh advfirewall firewall add rule name="API do lacre 3000" dir=in action=allow protocol=TCP localport=3000`.
 - **Para mudar a porta:** defina `PORT` no arquivo `.env` (por exemplo `PORT=8080`) e ligue a API de novo.
 - **No Swagger:** use **Try it out** para executar. Clique em **Authorize** e informe a chave do dispositivo (`X-API-Key`), para as rotas do lacre, e a chave de administrador (`X-Admin-Key`), para as rotas da equipe.
 - **Rotas da equipe respondendo `503`:** falta a chave de administrador no `.env` (`ADMIN_API_KEY`, com pelo menos 16 caracteres). Veja a seção Configuração.
@@ -213,7 +214,7 @@ Para olhar as tabelas, o `oxide.db` abre em qualquer programa de SQLite (por exe
 
 ## Regras principais
 
-- **Chave do lacre:** as rotas do lacre exigem `X-API-Key` do próprio `device_id` enviado (`403` se for de outro). O dispositivo precisa estar cadastrado: não há criação automática (`404`). A chave nunca aparece nas respostas, e a Oxide guarda só o hash dela.
+- **Chave do lacre:** quem cadastra o dispositivo escolhe a chave; a API não a gera nem consegue mostrá-la depois (passo a passo em [ESP32-envio-de-dados.md](Doc/ESP32-envio-de-dados.md), seção 1). As rotas do lacre exigem `X-API-Key` do próprio `device_id` enviado (`403` se for de outro). O dispositivo precisa estar cadastrado: não há criação automática (`404`). A chave nunca aparece nas respostas, e a Oxide guarda só o hash dela.
 - **Chave de administrador:** as rotas da equipe (dispositivos, mensagens, fila e métricas) exigem `X-Admin-Key`. Sem a chave configurada no `.env`, ficam fechadas (`503`).
 - **Limites:** 120 mensagens por minuto por lacre e 60 chaves erradas por minuto por endereço; acima disso, `429` com o tempo de espera em `Retry-After`. Corpo acima de 32 KB: `413`.
 - **Posição e bateria obrigatórias:** toda mensagem do lacre leva `latitude`, `longitude` e `battery_percent` (`400` sem eles). Sem sinal de GPS, o lacre manda a última posição conhecida com `gps_ok: false`.
